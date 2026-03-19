@@ -58,6 +58,10 @@ const ResultSchema = new Schema(
     config: Object,        // { days, hours, fixedSlots, ... }
     version: Number,
     score: Number,
+    objective_value: Number,
+    generation_batch_id: String,
+    selected_option_id: String,
+    generation_options: Object,
 
     combos: Object,
     allocations_report: Object,

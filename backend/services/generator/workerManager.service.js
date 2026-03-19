@@ -61,21 +61,31 @@ export function startGenerationWorker({ payload }) {
 
     if (message.type === "RESULT") {
       const resultData = message.data || {};
+      const selectedTimetable = resultData.class_timetables || resultData.bestClassTimetables || null;
       const hasTimetable =
-        resultData.class_timetables &&
-        typeof resultData.class_timetables === "object" &&
-        Object.keys(resultData.class_timetables).length > 0;
+        resultData.ok === true &&
+        selectedTimetable &&
+        typeof selectedTimetable === "object" &&
+        Object.keys(selectedTimetable).length > 0;
 
       if (hasTimetable) {
-        const generatedName = `Generated Timetable - ${new Date().toLocaleString()}`;
+        const optionCount = Array.isArray(resultData.generation_options)
+          ? resultData.generation_options.length
+          : 1;
+        const generatedName = `Generated Timetable Batch (${optionCount} options) - ${new Date().toLocaleString()}`;
         try {
           const rec = new TimetableResult({
             name: generatedName,
             source: "generator",
-            class_timetables: resultData.class_timetables,
+            status: "generated",
+            class_timetables: selectedTimetable,
             faculty_timetables: resultData.faculty_timetables,
             faculty_daily_hours: resultData.faculty_daily_hours,
             score: resultData.score,
+            objective_value: resultData.objectiveValue ?? null,
+            generation_batch_id: resultData.generation_batch_id || null,
+            selected_option_id: resultData.selected_option_id || null,
+            generation_options: resultData.generation_options || [],
             combos: resultData.combos,
             allocations_report: resultData.allocations_report,
             config: resultData.config,

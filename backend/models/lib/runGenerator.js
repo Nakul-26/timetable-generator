@@ -4,6 +4,18 @@ const DEFAULT_SOLVER_TIME_LIMIT_SEC = Number(process.env.SOLVER_TIME_LIMIT_SEC |
 const DEFAULT_TIMEOUT_MS = Number(
   process.env.SOLVER_TIMEOUT_MS || (DEFAULT_SOLVER_TIME_LIMIT_SEC * 1000 + 30000)
 );
+const DEFAULT_SOLUTION_COUNT = Math.max(
+  1,
+  Math.min(5, Number(process.env.GENERATOR_SOLUTION_COUNT || 5))
+);
+const MIN_SOLVER_TIME_PER_ATTEMPT_SEC = Math.max(
+  5,
+  Number(process.env.MIN_SOLVER_TIME_PER_ATTEMPT_SEC || 15)
+);
+const MIN_CANDIDATE_DIFFERENCE_RATIO = Math.min(
+  0.25,
+  Math.max(0, Number(process.env.MIN_CANDIDATE_DIFFERENCE_RATIO || 0.02))
+);
 
 function analyzeClassInternalGaps(classTimetables) {
   let gapCount = 0;
@@ -59,6 +71,7 @@ async function callCpSatSolver({
   progressStart = 0,
   progressEnd = 95,
   stopFlag,
+  solverTimeLimitSecOverride,
 }) {
   if (stopFlag?.is_set) {
     return {
@@ -74,7 +87,9 @@ async function callCpSatSolver({
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const solverTimeLimitSec =
-    Number(constraintConfig?.solver?.timeLimitSec) || DEFAULT_SOLVER_TIME_LIMIT_SEC;
+    Number(solverTimeLimitSecOverride) ||
+    Number(constraintConfig?.solver?.timeLimitSec) ||
+    DEFAULT_SOLVER_TIME_LIMIT_SEC;
   const expectedMs = Math.max(15_000, Math.round(solverTimeLimitSec * 1000));
   const progressSpan = Math.max(1, progressEnd - progressStart);
   const capBeforeDone = Math.min(99, Math.max(progressStart, progressEnd - 1));
@@ -153,6 +168,8 @@ async function callCpSatSolver({
       warnings: data.warnings || [],
       config: data.config || constraintConfig || {},
       allocations_report: data.allocations_report || null,
+      objective_value:
+        Number.isFinite(Number(data.objective_value)) ? Number(data.objective_value) : null,
     };
   } catch (err) {
     const msg =
@@ -182,25 +199,25 @@ async function runGenerate({
   constraintConfig = {},
   onProgress,
   attempts = 3,
+  solutionCount = DEFAULT_SOLUTION_COUNT,
 }) {
   const enforceHardNoGaps =
     constraintConfig?.noGaps?.hard !== undefined
       ? Boolean(constraintConfig.noGaps.hard)
       : String(process.env.ENFORCE_HARD_NO_GAPS || "true").toLowerCase() !== "false";
 
-  let best_class_timetables = null;
-  let best_faculty_timetables = null;
-  let best_faculty_daily_hours = null;
-  let best_classes = null;
-  let bestScore = Infinity;
-  let result_combos = null;
-  let result_allocations = null;
-  let result_config = null;
-  let result_unmet_requirements = null;
-  let result_warnings = null;
   let lastError = null;
   let bestPartial = null;
   let bestPartialFilled = -1;
+  const generationBatchId = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const desiredSolutions = Math.max(1, Math.min(5, Number(solutionCount) || DEFAULT_SOLUTION_COUNT));
+  const maxAttempts = Math.max(attempts, desiredSolutions * 2);
+  const configuredSolverTimeLimitSec =
+    Number(constraintConfig?.solver?.timeLimitSec) || DEFAULT_SOLVER_TIME_LIMIT_SEC;
+  const candidates = [];
+  const seenTimetableHashes = new Set();
+  const generationStartedAt = Date.now();
+  let attemptsRun = 0;
 
   const countFilledSlots = (classTimetables) => {
     if (!classTimetables || typeof classTimetables !== "object") return 0;
@@ -219,13 +236,144 @@ async function runGenerate({
     return filled;
   };
 
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const progressStart = Math.floor((attempt * 95) / Math.max(1, attempts));
-    const progressEnd = Math.floor(((attempt + 1) * 95) / Math.max(1, attempts));
+  const stableSerialize = (value) => {
+    if (Array.isArray(value)) {
+      return value.map(stableSerialize);
+    }
+    if (value && typeof value === "object") {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = stableSerialize(value[key]);
+          return acc;
+        }, {});
+    }
+    return value;
+  };
+
+  const hashTimetable = (classTimetables) => {
+    if (!classTimetables || typeof classTimetables !== "object") return "";
+    return JSON.stringify(stableSerialize(classTimetables));
+  };
+
+  const compareTimetableDifference = (left, right) => {
+    const classIds = Array.from(
+      new Set([
+        ...Object.keys(left || {}),
+        ...Object.keys(right || {}),
+      ])
+    );
+    let totalSlots = 0;
+    let differentSlots = 0;
+
+    for (const classId of classIds) {
+      const leftDays = Array.isArray(left?.[classId]) ? left[classId] : [];
+      const rightDays = Array.isArray(right?.[classId]) ? right[classId] : [];
+      const dayCount = Math.max(leftDays.length, rightDays.length);
+      for (let day = 0; day < dayCount; day++) {
+        const leftRow = Array.isArray(leftDays[day]) ? leftDays[day] : [];
+        const rightRow = Array.isArray(rightDays[day]) ? rightDays[day] : [];
+        const hourCount = Math.max(leftRow.length, rightRow.length);
+        for (let hour = 0; hour < hourCount; hour++) {
+          const leftValue = leftRow[hour] ?? null;
+          const rightValue = rightRow[hour] ?? null;
+          totalSlots += 1;
+          if (leftValue !== rightValue) {
+            differentSlots += 1;
+          }
+        }
+      }
+    }
+
+    return { totalSlots, differentSlots };
+  };
+
+  const rankCandidates = () =>
+    [...candidates].sort((a, b) => {
+      const objectiveA = Number.isFinite(a.objectiveValue)
+        ? a.objectiveValue
+        : (Number.isFinite(a.score) ? a.score : Number.POSITIVE_INFINITY);
+      const objectiveB = Number.isFinite(b.objectiveValue)
+        ? b.objectiveValue
+        : (Number.isFinite(b.score) ? b.score : Number.POSITIVE_INFINITY);
+      if (objectiveA !== objectiveB) return objectiveA - objectiveB;
+      return a.seed - b.seed;
+    });
+
+  const buildOptionLabel = (candidate, index) => {
+    if (index === 0) return "Option 1 (Best balanced)";
+    if ((candidate.unmet_requirements || []).length === 0 && (candidate.warnings || []).length === 0) {
+      return `Option ${index + 1} (Cleanest fit)`;
+    }
+    if ((candidate.score ?? 0) <= 0) {
+      return `Option ${index + 1} (Compact schedule)`;
+    }
+    if ((candidate.warnings || []).length <= 1) {
+      return `Option ${index + 1} (Lower friction)`;
+    }
+    return `Option ${index + 1} (Alternative)`;
+  };
+
+  const buildSelectedResult = (option) => {
+    const rankedOptions = rankCandidates().slice(0, desiredSolutions).map((candidate, index) => ({
+      ...candidate,
+      rank: index + 1,
+      label: buildOptionLabel(candidate, index),
+    }));
+    const selectedOption = option || rankedOptions[0] || null;
+
+    return {
+      ok: Boolean(selectedOption),
+      error: selectedOption ? null : (lastError || "Failed to generate timetable"),
+      generation_batch_id: generationBatchId,
+      optionsGenerated: rankedOptions.length,
+      selected_option_id: selectedOption?.optionId || null,
+      score: selectedOption?.score ?? null,
+      objectiveValue: selectedOption?.objectiveValue ?? null,
+      class_timetables: selectedOption?.class_timetables || null,
+      faculty_timetables: selectedOption?.faculty_timetables || null,
+      faculty_daily_hours: selectedOption?.faculty_daily_hours || null,
+      classes: selectedOption?.classes || null,
+      combos: selectedOption?.combos || null,
+      config: selectedOption?.config || constraintConfig || {},
+      allocations_report: selectedOption?.allocations_report || null,
+      unmet_requirements: selectedOption?.unmet_requirements || [],
+      warnings: selectedOption?.warnings || [],
+      attemptsTried: attemptsRun,
+      generation_options: rankedOptions,
+      bestClassTimetables: selectedOption?.class_timetables || null,
+      bestFacultyTimetables: selectedOption?.faculty_timetables || null,
+      bestFacultyDailyHours: selectedOption?.faculty_daily_hours || null,
+      bestScore: selectedOption?.score ?? null,
+    };
+  };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const elapsedSec = (Date.now() - generationStartedAt) / 1000;
+    const remainingBudgetSec = configuredSolverTimeLimitSec - elapsedSec;
+    if (remainingBudgetSec <= 0) {
+      lastError = "Solver time budget exhausted";
+      break;
+    }
+    const remainingAttempts = maxAttempts - attempt;
+    const perAttemptTimeLimitSec = Math.max(
+      MIN_SOLVER_TIME_PER_ATTEMPT_SEC,
+      Math.min(
+        configuredSolverTimeLimitSec / Math.max(1, desiredSolutions),
+        remainingBudgetSec / Math.max(1, remainingAttempts)
+      )
+    );
+    if (perAttemptTimeLimitSec > remainingBudgetSec) {
+      break;
+    }
+    const progressStart = Math.floor((attempt * 95) / Math.max(1, maxAttempts));
+    const progressEnd = Math.floor(((attempt + 1) * 95) / Math.max(1, maxAttempts));
     const shuffledClasses = [...classes];
     const shuffledCombos = [...combos];
     const shuffledFaculties = [...faculties];
     const shuffledSubjects = [...subjects];
+    const seed = attempt + 1;
+    attemptsRun += 1;
 
     const result = await callCpSatSolver({
       faculties: shuffledFaculties,
@@ -236,10 +384,11 @@ async function runGenerate({
       DAYS_PER_WEEK,
       HOURS_PER_DAY,
       constraintConfig,
-      random_seed: attempt + 1,
+      random_seed: seed,
       onProgress,
       progressStart,
       progressEnd,
+      solverTimeLimitSecOverride: perAttemptTimeLimitSec,
     });
 
     if (!result.ok) {
@@ -273,59 +422,82 @@ async function runGenerate({
     }
 
     const score = gapCount;
+    const objectiveValue =
+      Number.isFinite(Number(result.objective_value)) ? Number(result.objective_value) : score;
 
     if (process.env.NODE_ENV !== "production") {
-      console.log(`Attempt ${attempt + 1}: Score = ${score}`);
+      console.log(
+        `Attempt ${attempt + 1}: Score = ${score}, Objective = ${objectiveValue}`
+      );
     }
 
-    if (score < bestScore) {
-      bestScore = score;
-      best_class_timetables = result.class_timetables;
-      best_faculty_timetables = result.faculty_timetables;
-      best_faculty_daily_hours = result.faculty_daily_hours;
-      best_classes = result.classes;
-      result_combos = shuffledCombos;
-      result_allocations = result.allocations_report;
-      result_config = result.config || constraintConfig || {};
-      result_unmet_requirements = result.unmet_requirements || [];
-      result_warnings = result.warnings || [];
+    const timetableHash = hashTimetable(result.class_timetables);
+    if (!timetableHash || seenTimetableHashes.has(timetableHash)) {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`Attempt ${attempt + 1}: Duplicate timetable skipped`);
+      }
+      continue;
+    }
+
+    const isTooSimilar = candidates.some((candidate) => {
+      const { totalSlots, differentSlots } = compareTimetableDifference(
+        candidate.class_timetables,
+        result.class_timetables
+      );
+      if (totalSlots <= 0) return false;
+      return differentSlots < Math.max(3, Math.floor(totalSlots * MIN_CANDIDATE_DIFFERENCE_RATIO));
+    });
+    if (isTooSimilar) {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`Attempt ${attempt + 1}: Near-duplicate timetable skipped`);
+      }
+      continue;
+    }
+
+    seenTimetableHashes.add(timetableHash);
+    candidates.push({
+      optionId: `${generationBatchId}_opt_${candidates.length + 1}`,
+      seed,
+      score,
+      objectiveValue,
+      class_timetables: result.class_timetables,
+      faculty_timetables: result.faculty_timetables,
+      faculty_daily_hours: result.faculty_daily_hours,
+      classes: result.classes,
+      combos: shuffledCombos,
+      config: result.config || constraintConfig || {},
+      allocations_report: result.allocations_report,
+      unmet_requirements: result.unmet_requirements || [],
+      warnings: result.warnings || [],
+    });
+
+    onProgress?.({
+      progress: Math.max(progressStart, Math.min(99, Math.round(progressEnd))),
+      phase: "candidate_ready",
+      partialData: buildSelectedResult(rankCandidates()[0] || null),
+    });
+
+    if (candidates.length >= desiredSolutions) {
+      break;
     }
   }
 
   if (process.env.NODE_ENV !== "production") {
-    if (best_class_timetables) {
-    console.log("Best timetable found. Score:", bestScore);
-  } else {
+    const bestCandidate = rankCandidates()[0] || null;
+    if (bestCandidate) {
+      console.log("Best timetable found. Score:", bestCandidate.score);
+    } else {
       console.error("Could not generate a valid timetable.", lastError ? `Last error: ${lastError}` : "");
-  }
+    }
   }
 
-  if (!best_class_timetables && (!bestPartial || bestPartialFilled <= 0)) {
+  if (!candidates.length && (!bestPartial || bestPartialFilled <= 0)) {
     bestPartial = null;
   }
 
   onProgress?.({ progress: 100, phase: "done" });
 
-  return {
-    ok: Boolean(best_class_timetables),
-    error: best_class_timetables ? null : (lastError || "Failed to generate timetable"),
-    score: best_class_timetables ? bestScore : null,
-    class_timetables: best_class_timetables || bestPartial?.class_timetables || null,
-    faculty_timetables: best_faculty_timetables || bestPartial?.faculty_timetables || null,
-    faculty_daily_hours: best_faculty_daily_hours,
-    classes: best_classes || bestPartial?.classes || null,
-    combos: result_combos || bestPartial?.combos || null,
-    config: result_config || bestPartial?.config || constraintConfig || {},
-    allocations_report: result_allocations,
-    unmet_requirements: result_unmet_requirements || bestPartial?.unmet_requirements || [],
-    warnings: result_warnings || bestPartial?.warnings || [],
-    attemptsTried: attempts,
-    // Legacy aliases used in some routes
-    bestClassTimetables: best_class_timetables,
-    bestFacultyTimetables: best_faculty_timetables,
-    bestFacultyDailyHours: best_faculty_daily_hours,
-    bestScore: bestScore,
-  };
+  return buildSelectedResult(rankCandidates()[0] || null);
 }
 
 export default runGenerate;

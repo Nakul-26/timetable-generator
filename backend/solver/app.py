@@ -1167,6 +1167,7 @@ async def solve(request: Request) -> Dict[str, Any]:
     solver.parameters.max_time_in_seconds = solver_time_limit_sec
     solver.parameters.num_search_workers = max(1, int(os.getenv("SOLVER_WORKERS", "8")))
     solver.parameters.random_seed = random_seed
+    solver.parameters.randomize_search = True
 
     status = solver.Solve(model)
 
@@ -1266,4 +1267,5 @@ async def solve(request: Request) -> Dict[str, Any]:
         "unmet_requirements": unmet_requirements,
         "warnings": fixed_slot_warnings,
         "config": applied_config,
+        "objective_value": float(solver.ObjectiveValue()) if objective_terms else 0.0,
     }

@@ -10,8 +10,11 @@ const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 function Timetable() {
   const [loading, setLoading] = useState(false);
   const [timetable, setTimetable] = useState(null);
+  const [timetableOptions, setTimetableOptions] = useState([]);
+  const [selectedOptionId, setSelectedOptionId] = useState("");
   const [error, setError] = useState("");
   const [bestScore, setBestScore] = useState(null);
+  const [objectiveValue, setObjectiveValue] = useState(null);
   const [facultyDailyHours, setFacultyDailyHours] = useState(null);
 
   // Async generation
@@ -107,7 +110,7 @@ function Timetable() {
     return out;
   }, [classes, combos, subjectById, facultyById]);
 
-  const normalizeTableShape = (table) => {
+  const normalizeTableShape = useCallback((table) => {
     if (!table || typeof table !== "object") return null;
     const out = {};
     for (const [classId, days] of Object.entries(table)) {
@@ -132,33 +135,115 @@ function Timetable() {
       }
     }
     return out;
-  };
+  }, []);
 
-  const normalizeGenerationResult = (raw) => {
+  const normalizeGenerationResult = useCallback((raw) => {
     if (!raw) return null;
     const payload = raw.result && typeof raw.result === "object" ? raw.result : raw;
-    const classTimetables =
-      payload.class_timetables ??
-      payload.bestClassTimetables ??
-      payload.partialData?.class_timetables ??
+    const normalizeOption = (option, index) => {
+      if (!option || typeof option !== "object") return null;
+      const optionClassTimetables =
+        option.class_timetables ??
+        option.bestClassTimetables ??
+        option.partialData?.class_timetables ??
+        null;
+      const optionFacultyTimetables =
+        option.faculty_timetables ??
+        option.bestFacultyTimetables ??
+        option.partialData?.faculty_timetables ??
+        null;
+
+      return {
+        ...option,
+        optionId: String(option.optionId || option.option_id || `option-${index + 1}`),
+        label: option.label || `Option ${index + 1}`,
+        rank: Number(option.rank || index + 1),
+        class_timetables: normalizeTableShape(optionClassTimetables),
+        faculty_timetables: optionFacultyTimetables,
+      };
+    };
+
+    const normalizedOptions = Array.isArray(payload.generation_options)
+      ? payload.generation_options.map(normalizeOption).filter(Boolean)
+      : [];
+    const selectedOption =
+      normalizedOptions.find(
+        (option) => String(option.optionId) === String(payload.selected_option_id || "")
+      ) ||
+      normalizedOptions[0] ||
       null;
+    const classTimetables = payload.class_timetables ?? payload.bestClassTimetables ?? selectedOption?.class_timetables ?? null;
     const facultyTimetables =
       payload.faculty_timetables ??
       payload.bestFacultyTimetables ??
-      payload.partialData?.faculty_timetables ??
+      selectedOption?.faculty_timetables ??
       null;
 
     return {
       ...payload,
+      selected_option_id: payload.selected_option_id || selectedOption?.optionId || "",
+      generation_options: normalizedOptions,
       class_timetables: normalizeTableShape(classTimetables),
       faculty_timetables: facultyTimetables,
     };
-  };
+  }, [normalizeTableShape]);
 
-  const hasRenderableTimetable = (data) => {
+  const hasRenderableTimetable = useCallback((data) => {
     const table = data?.class_timetables;
     return !!table && typeof table === "object" && Object.keys(table).length > 0;
-  };
+  }, []);
+
+  const applyTimetableState = useCallback((raw, preferredOptionId = null) => {
+    const normalized = normalizeGenerationResult(raw);
+    if (!normalized) return null;
+    if (normalized.ok === false) {
+      setTimetable(null);
+      setTimetableOptions([]);
+      setSelectedOptionId("");
+      setBestScore(null);
+      setObjectiveValue(null);
+      setFacultyDailyHours(null);
+      return normalized;
+    }
+
+    const options = Array.isArray(normalized.generation_options)
+      ? normalized.generation_options.filter(hasRenderableTimetable)
+      : [];
+    const selectedOption =
+      options.find(
+        (option) =>
+          String(option.optionId) ===
+          String(preferredOptionId || normalized.selected_option_id || "")
+      ) ||
+      options[0] ||
+      null;
+    const active = selectedOption
+      ? {
+          ...normalized,
+          ...selectedOption,
+          selected_option_id: selectedOption.optionId,
+          class_timetables: selectedOption.class_timetables,
+          faculty_timetables: selectedOption.faculty_timetables,
+          faculty_daily_hours:
+            selectedOption.faculty_daily_hours ?? normalized.faculty_daily_hours ?? null,
+          score: selectedOption.score ?? normalized.score ?? null,
+          objectiveValue: selectedOption.objectiveValue ?? normalized.objectiveValue ?? null,
+        }
+      : normalized;
+    setTimetable(hasRenderableTimetable(active) ? active : normalized);
+    setTimetableOptions(options);
+    setSelectedOptionId(selectedOption?.optionId || normalized.selected_option_id || "");
+    setBestScore(active?.score ?? null);
+    setObjectiveValue(active?.objectiveValue ?? active?.objective_value ?? null);
+    setFacultyDailyHours(active?.faculty_daily_hours ?? null);
+    if (active?.classes) {
+      setClasses(active.classes);
+    }
+    if (active?.combos) {
+      setCombos(active.combos);
+    }
+    return active;
+  }, [hasRenderableTimetable, normalizeGenerationResult]);
 
   /* ===================== DATA FETCH ===================== */
 
@@ -186,17 +271,18 @@ function Timetable() {
     setError("");
     try {
       const res = await api.get("/result/latest");
-      setTimetable(res.data);
-      if (res.data && res.data.combos) {
-        setCombos(res.data.combos);
+      if (res.data) {
+        applyTimetableState(res.data);
+      } else {
+        setTimetable(null);
+        setTimetableOptions([]);
+        setSelectedOptionId("");
       }
-      setBestScore(res.data?.score ?? null);
-      setFacultyDailyHours(res.data?.faculty_daily_hours ?? null);
     } catch {
       setError("Failed to fetch latest timetable.");
     }
     setLoading(false);
-  }, []);
+  }, [applyTimetableState]);
 
   useEffect(() => {
     fetchAll();
@@ -276,35 +362,18 @@ function Timetable() {
         if (status === "running") {
           setProgress(progress ?? 0);
           if (partialData) {
-            const normalized = normalizeGenerationResult(partialData);
-            if (hasRenderableTimetable(normalized)) {
-              setTimetable(normalized);
-            }
+            applyTimetableState(partialData, selectedOptionId);
           }
         } else {
           if (status === "error") setError(error || "Generation failed");
 
           if (result || partialData) {
-            const normalized = normalizeGenerationResult(result || partialData);
-            setTimetable((prev) =>
-              hasRenderableTimetable(normalized) ? normalized : prev
-            );
+            const normalized = applyTimetableState(result || partialData, selectedOptionId);
             if (normalized?.ok === false && normalized?.error) {
               setError(normalized.error);
             }
-            if (normalized?.classes) {
-              setClasses(normalized.classes);
-            }
-            if (normalized?.combos) {
-              setCombos(normalized.combos);
-            }
-            setBestScore(normalized?.score ?? null);
-            setFacultyDailyHours(normalized?.faculty_daily_hours ?? null);
           } else if (partialData) {
-            const normalized = normalizeGenerationResult(partialData);
-            setTimetable(normalized);
-            setBestScore(null);
-            setFacultyDailyHours(null);
+            applyTimetableState(partialData, selectedOptionId);
           }
 
           setLoading(false);
@@ -320,7 +389,7 @@ function Timetable() {
     }, 2000);
 
     return () => clearInterval(poll);
-  }, [taskId]);
+  }, [applyTimetableState, selectedOptionId, taskId]);
 
   /* ===================== FIXED SLOTS ===================== */
 
@@ -367,13 +436,13 @@ function Timetable() {
     setLoading(true);
     setError("");
     setTimetable(null);
+    setTimetableOptions([]);
+    setSelectedOptionId("");
     setProgress(0);
 
     try {
       const latestConstraintConfig = loadConstraintConfig();
       setConstraintConfig(latestConstraintConfig);
-
-      await api.delete("/timetables");
 
       const payload = transformFixedSlots(fixedSlots);
       const classElectiveGroups =
@@ -423,31 +492,64 @@ function Timetable() {
     try {
       await api.delete("/timetables");
       setTimetable(null);
+      setTimetableOptions([]);
+      setSelectedOptionId("");
     } catch {
       setError("Failed to delete timetables.");
     }
     setLoading(false);
   };
 
-      const handleSave = async () => {
-        if (!timetable) {
-          alert("No timetable to save.");
-          return;
-        }
-    
-        const name = prompt("Please enter a name for this timetable:");
-        if (!name) {
-          return; // User cancelled
-        }
-    
-        try {
-          await api.post("/timetables", { name, timetable });
-          alert("Timetable saved successfully!");
-        } catch (err) {
-          console.error("Error saving timetable:", err);
-          alert(`Failed to save timetable: ${err.response?.data?.error || 'Server error'}`);
-        }
-      };
+  const handleSelectOption = (optionId) => {
+    const option = timetableOptions.find((item) => String(item.optionId) === String(optionId));
+    if (!option) return;
+
+    setSelectedOptionId(option.optionId);
+    setTimetable((prev) => ({
+      ...(prev || {}),
+      ...option,
+      selected_option_id: option.optionId,
+      class_timetables: option.class_timetables,
+      faculty_timetables: option.faculty_timetables,
+      faculty_daily_hours: option.faculty_daily_hours ?? prev?.faculty_daily_hours ?? null,
+    }));
+    setBestScore(option.score ?? null);
+    setObjectiveValue(option.objectiveValue ?? null);
+    setFacultyDailyHours(option.faculty_daily_hours ?? null);
+    if (option.classes) {
+      setClasses(option.classes);
+    }
+    if (option.combos) {
+      setCombos(option.combos);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!timetable) {
+      alert("No timetable to save.");
+      return;
+    }
+
+    const name = prompt("Please enter a name for this timetable:");
+    if (!name) {
+      return;
+    }
+
+    try {
+      await api.post("/timetables", {
+        name,
+        timetableData: {
+          ...timetable,
+          generation_options: timetableOptions,
+          selected_option_id: selectedOptionId || timetable?.selected_option_id || null,
+        },
+      });
+      alert("Timetable saved successfully!");
+    } catch (err) {
+      console.error("Error saving timetable:", err);
+      alert(`Failed to save timetable: ${err.response?.data?.error || "Server error"}`);
+    }
+  };
     
           const regenerateTimetable = async () => {
             try {
@@ -814,7 +916,7 @@ function Timetable() {
               : "Generate timetable"
           }
         >
-          Generate
+          Generate Top 5
         </button>
         {/* <button className="danger-btn" onClick={stopGeneration} disabled={!loading}>
           Stop
@@ -834,9 +936,9 @@ function Timetable() {
         {/* <button className="secondary-btn" onClick={deleteAllTimetables} disabled={loading}>
           Delete All
         </button> */}
-        {/* <button className="primary-btn" onClick={handleSave} disabled={loading || !timetable}>
-          Save Timetable
-        </button> */}
+        <button className="primary-btn" onClick={handleSave} disabled={loading || !timetable}>
+          Save Selected Timetable
+        </button>
         <button className="secondary-btn" onClick={downloadGeneratedPdf} disabled={loading || !timetable}>
           Download Generated PDF
         </button>
@@ -854,6 +956,43 @@ function Timetable() {
           <span>Block generate on health errors</span>
         </label>
       </div>
+
+      {timetableOptions.length > 0 ? (
+        <div className="tt-section-card">
+          <h3>Generated Options</h3>
+          <p className="tt-subtext">
+            Generated {timetableOptions.length} unique timetable option{timetableOptions.length === 1 ? "" : "s"}.
+            Preview and select the one you want to keep.
+          </p>
+          <div className="tt-option-grid">
+            {timetableOptions.map((option, index) => {
+              const isActive = String(option.optionId) === String(selectedOptionId);
+              return (
+                <button
+                  key={option.optionId}
+                  type="button"
+                  className={`tt-option-card ${isActive ? "is-active" : ""}`}
+                  onClick={() => handleSelectOption(option.optionId)}
+                >
+                  <span className="tt-option-title">
+                    {option.label || `Option ${index + 1}`}
+                  </span>
+                  <span className="tt-option-meta">
+                    Objective: {option.objectiveValue ?? "N/A"}
+                  </span>
+                  <span className="tt-option-meta">
+                    Gap Score: {option.score ?? "N/A"}
+                  </span>
+                  <span className="tt-option-meta">Seed: {option.seed ?? "N/A"}</span>
+                  <span className="tt-option-action">
+                    {isActive ? "Previewing" : "Preview"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {showFilters && (
         <div className="filters-container">
@@ -998,6 +1137,12 @@ function Timetable() {
 
       {timetable && timetable.class_timetables && (
         <div className="tt-section-card">
+          <div className="filters-container">
+            <span>Active Option: {selectedOptionId ? (timetableOptions.find((item) => String(item.optionId) === String(selectedOptionId))?.label || "Selected") : "Best available"}</span>
+            <span>Gap Score: {bestScore ?? "N/A"}</span>
+            <span>Objective: {objectiveValue ?? "N/A"}</span>
+            <span>Teacher Daily Hours: {facultyDailyHours ? "Available" : "Not reported"}</span>
+          </div>
           {filteredTimetable().map(([classId, slots]) => {
             const assignedHours = calculateAssignedHours(slots);
             const currentClass = classById.get(classId);

@@ -336,7 +336,17 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
     
     const { faculties, subjects, classes, combos } = generatorData;
 
-    const { bestClassTimetables, bestFacultyTimetables, bestFacultyDailyHours, bestScore, config } = await runGenerate({
+    const {
+      bestClassTimetables,
+      bestFacultyTimetables,
+      bestFacultyDailyHours,
+      bestScore,
+      objectiveValue,
+      config,
+      generation_batch_id,
+      selected_option_id,
+      generation_options,
+    } = await runGenerate({
       faculties,
       subjects,
       classes,
@@ -360,6 +370,10 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
       faculty_timetables: bestFacultyTimetables,
       faculty_daily_hours: bestFacultyDailyHours,
       score: bestScore,
+      objective_value: objectiveValue ?? null,
+      generation_batch_id: generation_batch_id ?? null,
+      selected_option_id: selected_option_id ?? null,
+      generation_options: generation_options ?? [],
       combos,
       config,
     });
@@ -411,6 +425,10 @@ protectedRouter.post("/timetables", async (req, res) => {
       faculty_timetables: timetableData.faculty_timetables,
       faculty_daily_hours: timetableData.faculty_daily_hours,
       score: timetableData.score,
+      objective_value: timetableData.objectiveValue ?? timetableData.objective_value ?? null,
+      generation_batch_id: timetableData.generation_batch_id ?? null,
+      selected_option_id: timetableData.selected_option_id ?? null,
+      generation_options: timetableData.generation_options ?? [],
       combos: timetableData.combos,
       allocations_report: timetableData.allocations_report,
       config: timetableData.config,
