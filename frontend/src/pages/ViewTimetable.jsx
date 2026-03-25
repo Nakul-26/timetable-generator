@@ -20,6 +20,7 @@ const ViewTimetable = () => {
     const [selectedClass, setSelectedClass] = useState('');
     const [selectedFaculty, setSelectedFaculty] = useState('');
     const [selectedSubject, setSelectedSubject] = useState('');
+    const [activeExport, setActiveExport] = useState('');
 
     const [classMap, setClassMap] = useState({});
     const [comboMap, setComboMap] = useState({});
@@ -247,6 +248,28 @@ const ViewTimetable = () => {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
 
+    const readFilenameFromDisposition = (headerValue, fallbackName) => {
+        const raw = String(headerValue || '');
+        const utf8Match = raw.match(/filename\*=UTF-8''([^;]+)/i);
+        if (utf8Match?.[1]) {
+            return decodeURIComponent(utf8Match[1]);
+        }
+
+        const simpleMatch = raw.match(/filename="?([^"]+)"?/i);
+        return simpleMatch?.[1] || fallbackName;
+    };
+
+    const triggerBlobDownload = (blob, filename) => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    };
+
     if (isLoading) {
         return <div>Loading timetable...</div>;
     }
@@ -264,34 +287,105 @@ const ViewTimetable = () => {
         ? classIds.filter((classId) => String(classId) === String(selectedClass))
         : classIds;
 
-    const buildPdfHtml = (filtered) => {
-        const sourceClassIds = filtered ? filteredClassIds : classIds;
-        const filtersText = [
-            selectedClass ? `Class: ${classMap[String(selectedClass)] || selectedClass}` : null,
-            selectedFaculty ? `Faculty: ${facultyMap[String(selectedFaculty)] || selectedFaculty}` : null,
-            selectedSubject ? `Subject: ${subjectMap[String(selectedSubject)] || selectedSubject}` : null,
-        ].filter(Boolean).join(" | ");
-
-        const classSections = sourceClassIds.map((classId) => {
-            const rows = days.map((day, dayIndex) => {
-                const cells = hours.map((_, hourIndex) => {
+    const buildClassPdfHtml = () => {
+        const classSections = classIds.map((classId) => {
+            const rows = hours.map((hour, hourIndex) => {
+                const cells = days.map((_, dayIndex) => {
                     const cellData = getCellData(classId, dayIndex, hourIndex);
-                    const matches = filtered ? isCellMatching(cellData) : true;
 
                     if (!cellData) {
-                        return `<td class="${matches ? "" : "dim"}">--</td>`;
+                        const rawSlot = timetable.class_timetables[classId]?.[dayIndex]?.[hourIndex];
+                        return `<td>${rawSlot === "BREAK" ? '<div class="break">BREAK</div>' : '--'}</td>`;
                     }
 
-                    return `<td class="${matches ? "" : "dim"}"><div class="subject">${escapeHtml(cellData.subject)}</div><div class="faculty">${escapeHtml(cellData.faculty)}</div></td>`;
+                    return `<td><div class="subject">${escapeHtml(cellData.subject)}</div><div class="faculty">${escapeHtml(cellData.faculty)}</div></td>`;
                 }).join("");
 
-                return `<tr><td class="day">${day}</td>${cells}</tr>`;
+                return `<tr><td class="day">P${hourIndex + 1}</td>${cells}</tr>`;
             }).join("");
 
-            return `<div class="class-block"><h3>${escapeHtml(classMap[String(classId)] || "Unknown Class")}</h3><table><thead><tr><th>Day</th>${hours.map((h) => `<th>Hour ${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
+            return `<div class="class-block"><h3>${escapeHtml(classMap[String(classId)] || "Unknown Class")}</h3><table><thead><tr><th>Period</th>${days.map((day) => `<th>${escapeHtml(day)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
         }).join("");
 
-        return `<div class="pdf-root"><h1>${filtered ? "Filtered Timetable" : "Timetable"}</h1><div class="meta">Generated on: ${escapeHtml(new Date().toLocaleString())}</div>${filtered && filtersText ? `<div class="meta">Filters: ${escapeHtml(filtersText)}</div>` : ""}${classSections}</div>`;
+        return `<div class="pdf-root"><h1>Class Timetable Export</h1><div class="meta">Generated on: ${escapeHtml(new Date().toLocaleString())}</div>${classSections}</div>`;
+    };
+
+    const buildTeacherPdfHtml = () => {
+        const teacherMap = {};
+
+        classIds.forEach((classId) => {
+            days.forEach((_, dayIndex) => {
+                hours.forEach((_, hourIndex) => {
+                    const cellData = getCellData(classId, dayIndex, hourIndex);
+                    if (!cellData?.facultyIds?.length) return;
+
+                    cellData.facultyIds.forEach((facultyId) => {
+                        if (!teacherMap[facultyId]) {
+                            teacherMap[facultyId] = Array.from({ length: days.length }, () =>
+                                Array.from({ length: hours.length }, () => [])
+                            );
+                        }
+
+                        const cellEntries = teacherMap[facultyId][dayIndex][hourIndex];
+                        const alreadyExists = cellEntries.some(
+                            (entry) =>
+                                entry.subject === cellData.subject &&
+                                entry.className === (classMap[String(classId)] || classId)
+                        );
+
+                        if (!alreadyExists) {
+                            cellEntries.push({
+                                subject: cellData.subject,
+                                className: classMap[String(classId)] || classId,
+                            });
+                        }
+                    });
+                });
+            });
+        });
+
+        const teacherSections = Object.keys(teacherMap)
+            .sort((left, right) => (facultyMap[left] || left).localeCompare(facultyMap[right] || right))
+            .map((teacherId) => {
+                const rows = hours.map((hour, hourIndex) => {
+                    const cells = days.map((_, dayIndex) => {
+                        const entries = teacherMap[teacherId][dayIndex][hourIndex];
+                        if (!entries.length) return '<td>--</td>';
+
+                        return `<td>${entries
+                            .map(
+                                (entry) =>
+                                    `<div class="entry"><div class="subject">${escapeHtml(entry.subject)}</div><div class="faculty">${escapeHtml(entry.className)}</div></div>`
+                            )
+                            .join('')}</td>`;
+                    }).join("");
+
+                    return `<tr><td class="day">P${hourIndex + 1}</td>${cells}</tr>`;
+                }).join("");
+
+                return `<div class="class-block"><h3>${escapeHtml(facultyMap[teacherId] || teacherId)}</h3><table><thead><tr><th>Period</th>${days.map((day) => `<th>${escapeHtml(day)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
+            }).join("");
+
+        return `<div class="pdf-root"><h1>Teacher Timetable Export</h1><div class="meta">Generated on: ${escapeHtml(new Date().toLocaleString())}</div>${teacherSections || '<p>No teacher timetable data available.</p>'}</div>`;
+    };
+
+    const buildFullCollegePdfHtml = () => {
+        const rows = classIds.map((classId) =>
+            hours.map((hour, hourIndex) => {
+                const cells = days.map((_, dayIndex) => {
+                    const cellData = getCellData(classId, dayIndex, hourIndex);
+                    if (!cellData) {
+                        const rawSlot = timetable.class_timetables[classId]?.[dayIndex]?.[hourIndex];
+                        return `<td>${rawSlot === "BREAK" ? '<div class="break">BREAK</div>' : '--'}</td>`;
+                    }
+                    return `<td><div class="subject">${escapeHtml(cellData.subject)}</div><div class="faculty">${escapeHtml(cellData.faculty)}</div></td>`;
+                }).join("");
+
+                return `<tr><td>${escapeHtml(classMap[String(classId)] || classId)}</td><td>P${hourIndex + 1}</td>${cells}</tr>`;
+            }).join("")
+        ).join("");
+
+        return `<div class="pdf-root"><h1>Full College Timetable Export</h1><div class="meta">Generated on: ${escapeHtml(new Date().toLocaleString())}</div><table><thead><tr><th>Class</th><th>Period</th>${days.map((day) => `<th>${escapeHtml(day)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
     };
 
     const downloadPdfFromHtml = (html, title) => {
@@ -309,7 +403,7 @@ const ViewTimetable = () => {
               <meta charset="UTF-8" />
               <title>${escapeHtml(title)}</title>
               <style>
-                @page { size: A4 portrait; margin: 10mm; }
+                @page { size: A4 landscape; margin: 10mm; }
                 body { margin: 0; padding: 0; font-family: Arial, sans-serif; color: #111; }
                 .pdf-root h1 { margin: 0 0 10px 0; }
                 .pdf-root .meta { margin: 0 0 8px 0; font-size: 13px; color: #444; }
@@ -321,7 +415,8 @@ const ViewTimetable = () => {
                 .pdf-root .day { font-weight: 700; width: 95px; }
                 .pdf-root .subject { font-weight: 700; }
                 .pdf-root .faculty { margin-top: 3px; color: #333; }
-                .pdf-root .dim { opacity: 0.35; }
+                .pdf-root .entry + .entry { margin-top: 8px; padding-top: 6px; border-top: 1px dashed #d0d0d0; }
+                .pdf-root .break { font-weight: 700; color: #8a4b00; }
               </style>
             </head>
             <body>${html}</body>
@@ -332,14 +427,41 @@ const ViewTimetable = () => {
         popup.print();
     };
 
-    const handleDownloadFull = () => {
+    const handlePdfExport = (mode) => {
         if (!classIds.length) return;
-        downloadPdfFromHtml(buildPdfHtml(false), "Timetable PDF");
+
+        if (mode === 'class') {
+            downloadPdfFromHtml(buildClassPdfHtml(), "Class Timetable PDF");
+            return;
+        }
+        if (mode === 'teacher') {
+            downloadPdfFromHtml(buildTeacherPdfHtml(), "Teacher Timetable PDF");
+            return;
+        }
+
+        downloadPdfFromHtml(buildFullCollegePdfHtml(), "Full College Timetable PDF");
     };
 
-    const handleDownloadFiltered = () => {
-        if (!filteredClassIds.length) return;
-        downloadPdfFromHtml(buildPdfHtml(true), "Filtered Timetable PDF");
+    const handleExcelExport = async (mode) => {
+        try {
+            setActiveExport(mode);
+            const response = await api.get(`/timetable/${id}/export/excel`, {
+                params: { mode },
+                responseType: 'blob',
+            });
+
+            const filename = readFilenameFromDisposition(
+                response.headers?.['content-disposition'],
+                `timetable_${mode}.xlsx`
+            );
+
+            triggerBlobDownload(response.data, filename);
+        } catch (err) {
+            console.error('Excel export failed:', err);
+            alert('Failed to export Excel file.');
+        } finally {
+            setActiveExport('');
+        }
     };
 
     const canEditTimetable =
@@ -363,11 +485,23 @@ const ViewTimetable = () => {
                         Edit Timetable
                     </button>
                 )}
-                <button className="secondary-btn" onClick={handleDownloadFull}>
-                    Download Full PDF
+                <button className="secondary-btn" onClick={() => handleExcelExport('class')} disabled={activeExport === 'class'}>
+                    {activeExport === 'class' ? 'Exporting Class Excel...' : 'Excel: Class'}
                 </button>
-                <button className="secondary-btn" onClick={handleDownloadFiltered}>
-                    Download Filtered PDF
+                <button className="secondary-btn" onClick={() => handleExcelExport('teacher')} disabled={activeExport === 'teacher'}>
+                    {activeExport === 'teacher' ? 'Exporting Teacher Excel...' : 'Excel: Teacher'}
+                </button>
+                <button className="secondary-btn" onClick={() => handleExcelExport('full')} disabled={activeExport === 'full'}>
+                    {activeExport === 'full' ? 'Exporting Full Excel...' : 'Excel: Full College'}
+                </button>
+                <button className="secondary-btn" onClick={() => handlePdfExport('class')}>
+                    PDF: Class
+                </button>
+                <button className="secondary-btn" onClick={() => handlePdfExport('teacher')}>
+                    PDF: Teacher
+                </button>
+                <button className="secondary-btn" onClick={() => handlePdfExport('full')}>
+                    PDF: Full College
                 </button>
             </div>
 

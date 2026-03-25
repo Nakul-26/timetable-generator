@@ -21,6 +21,7 @@ import {
 import auth from '../../middleware/auth.js';
 import { mergeTeacherAvailabilityConstraintConfig } from '../../utils/teacherAvailability.js';
 import { mergeTeacherPreferenceConstraintConfig } from '../../utils/teacherPreferences.js';
+import { exportTimetableExcel } from "../../services/export/timetableExport.service.js";
 
 
 const protectedRouter = Router();
@@ -307,6 +308,41 @@ protectedRouter.get('/timetable/:id', async (req, res) => {
         console.log("[GET /timetable/:id] Found timetable:", timetable.name);
         res.json(timetable);
     } catch (e) {
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+protectedRouter.get('/timetable/:id/export/excel', async (req, res) => {
+    try {
+        const mode = String(req.query.mode || 'class').toLowerCase();
+        if (!['class', 'teacher', 'full'].includes(mode)) {
+            return res.status(400).json({ error: 'Invalid export mode.' });
+        }
+
+        const timetable = await TimetableResult.findById(req.params.id).lean();
+        if (!timetable) {
+            return res.status(404).json({ error: 'Timetable not found.' });
+        }
+
+        const workbook = await exportTimetableExcel({ timetable, mode });
+        const safeName = String(timetable.name || 'timetable')
+          .replace(/[<>:"/\\|?*]+/g, '_')
+          .replace(/\s+/g, '_')
+          .toLowerCase();
+
+        res.setHeader(
+          'Content-Type',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${safeName}_${mode}.xlsx"`
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (e) {
+        console.error('[GET /timetable/:id/export/excel] Error:', e);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
