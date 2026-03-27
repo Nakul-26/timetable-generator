@@ -78,6 +78,7 @@ export async function withTempClearedState(
 }
 
 export async function placeCombo({
+  stateOverride = null,
   timetableId,
   classId,
   day,
@@ -88,8 +89,8 @@ export async function placeCombo({
     throw new Error("comboId is required for placeCombo.");
   }
 
-  const state = getState(timetableId);
-  let newState = JSON.parse(JSON.stringify(state));
+  const state = stateOverride || getState(timetableId);
+  let newState = stateOverride || JSON.parse(JSON.stringify(state));
 
   const {
     classTimetable,
@@ -100,7 +101,7 @@ export async function placeCombo({
     lockedSlots,
   } = newState;
 
-  const classObj = await ClassModel.findById(classId).lean();
+  const classObj = newState.classMap?.get?.(String(classId)) || await ClassModel.findById(classId).lean();
   if (!classObj) throw new Error("Class not found");
 
   if (lockedSlots?.[classId]?.[day]?.[hour]) {
@@ -170,7 +171,7 @@ export async function placeCombo({
   for (const targetClassId of targetClassIds) {
     const targetClassObj = targetClassId === String(classObj._id)
       ? classObj
-      : await ClassModel.findById(targetClassId).lean();
+      : newState.classMap?.get?.(String(targetClassId)) || await ClassModel.findById(targetClassId).lean();
     if (!targetClassObj) {
       throw new Error("Combined class not found");
     }

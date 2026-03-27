@@ -22,6 +22,7 @@ import {
 } from "../services/manual-timetable/comboResolver.service.js";
 
 import { runAutoFill } from "../services/manual-timetable/autofill.service.js";
+import { validateAndSimulateMove } from "../services/manual-timetable/manualValidator.service.js";
 
 import {
   computeAvailableCombos,
@@ -66,6 +67,7 @@ router.post("/initialize", async (req, res) => {
       subjects = [],
       electiveGroups = [],
       config = {},
+      constraintConfig = {},
       sourceTimetableId = null,
     } = req.body;
 
@@ -80,6 +82,7 @@ router.post("/initialize", async (req, res) => {
       ...buildSessionMeta(getState(timetableId), {
         sourceTimetableId,
       }),
+      constraintConfig,
     };
     loadState(timetableId, nextState);
 
@@ -307,6 +310,47 @@ router.post("/clear-all", async (req, res) => {
   return res.json({ ok: true, ...getState(timetableId) });
 });
 
+router.post("/validate-move", async (req, res) => {
+  try {
+    const { timetableId, from, to } = req.body;
+    assertState(timetableId);
+
+    const state = getState(timetableId);
+    const result = await validateAndSimulateMove({ state, from, to });
+    return res.json({ ok: true, ...result });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post("/move", async (req, res) => {
+  try {
+    const { timetableId, from, to } = req.body;
+    assertState(timetableId);
+
+    const lockKey = `${timetableId}|move|${String(from?.classId || "")}|${from?.day}|${from?.hour}|${String(to?.classId || "")}|${to?.day}|${to?.hour}`;
+    if (!lockSlot(lockKey, 5000)) {
+      return res.status(409).json({ ok: false, error: "Move busy" });
+    }
+
+    try {
+      const state = getState(timetableId);
+      const result = await validateAndSimulateMove({ state, from, to });
+
+      if (!result.allowed || !result.newState) {
+        return res.status(400).json({ ok: false, ...result });
+      }
+
+      setState(timetableId, result.newState);
+      return res.json({ ok: true, ...result, ...getState(timetableId) });
+    } finally {
+      unlockSlot(lockKey);
+    }
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Load a saved timetable
 router.post("/load", async (req, res) => {
   try {
@@ -324,6 +368,7 @@ router.post("/load", async (req, res) => {
       electiveGroups: currentState.electiveGroups || [],
       teacherAvailability: currentState.teacherAvailability || {},
       teacherPreferences: currentState.teacherPreferences || {},
+      constraintConfig: currentState.constraintConfig || {},
     });
     res.json({ ok: true, ...getState(timetableId) });
   } catch (e) {
