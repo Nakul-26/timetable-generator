@@ -16,7 +16,7 @@ parentPort.on("message", async (message) => {
   try {
     const result = await runGeneration({
       ...payload,
-      onProgress: ({ progress, partialData }) => {
+      onProgress: ({ progress, partialData, phase }) => {
         if (stopped) {
           throw new Error("Generation stopped by user");
         }
@@ -24,6 +24,7 @@ parentPort.on("message", async (message) => {
         parentPort.postMessage({
           type: "PROGRESS",
           progress,
+          phase,
           partialData
         });
       }

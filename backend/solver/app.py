@@ -567,6 +567,12 @@ async def solve(request: Request) -> Dict[str, Any]:
     valid_hours = [h for h in range(HOURS_PER_DAY) if h not in break_hours_set]
     hour_rank = {h: i for i, h in enumerate(valid_hours)}
     valid_hour_count = len(valid_hours)
+    fixed_slot_keys = {
+        (str(fs.get("combo")), int(fs.get("day")), int(fs.get("hour")))
+        for fs in valid_fixed_slots
+    }
+    combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {}
+    combo_search_rank: Dict[str, int] = {}
 
     for combo in combos:
         combo_id = combo["_id"]
@@ -582,6 +588,7 @@ async def solve(request: Request) -> Dict[str, Any]:
         max_days_for_combo = min(
             [int(class_by_id[cid].get("days_per_week") or DAYS_PER_WEEK) for cid in class_ids] or [DAYS_PER_WEEK]
         )
+        candidate_starts: List[Tuple[int, int]] = []
         for day in range(max_days_for_combo):
             for hour in range(HOURS_PER_DAY):
                 if hour in break_hours_set:
@@ -599,32 +606,97 @@ async def solve(request: Request) -> Dict[str, Any]:
                             break
                     if teacher_avail_hard and violates_availability:
                         continue
+                candidate_starts.append((day, hour))
 
-                var = model.NewBoolVar(f"x_{combo_id}_{day}_{hour}")
-                x[(combo_id, day, hour)] = var
-                if (
-                    teacher_avail_enabled
-                    and not teacher_avail_hard
-                    and teacher_avail_weight > 0
-                    and violates_availability
-                ):
-                    objective_terms.append(var * teacher_avail_weight)
-                if (
-                    no_teacher_early_slot_weight > 0
-                    and str(subj.get("type") or "").lower() == "no_teacher"
-                    and valid_hour_count > 0
-                ):
-                    slot_rank = hour_rank.get(hour, 0)
-                    early_penalty = max(0, valid_hour_count - slot_rank - 1)
-                    if early_penalty > 0:
-                        objective_terms.append(var * no_teacher_early_slot_weight * early_penalty)
+        if not candidate_starts:
+            continue
 
-                for h in range(hour, hour + block):
-                    for class_id in class_ids:
-                        covers.setdefault((class_id, day, h), []).append(var)
-                        subject_covers.setdefault((class_id, day, h, combo["subject_id"]), []).append(var)
-                    for fid in combo.get("faculty_ids", []):
-                        teacher_covers.setdefault((fid, day, h), []).append(var)
+        combo_candidate_starts[combo_id] = candidate_starts
+
+        required_hours = max(
+            [required_hours_by_class_subject[cid].get(combo["subject_id"], 0) for cid in class_ids] or [0]
+        )
+        availability_slots = sum(
+            1
+            for fid in combo.get("faculty_ids", [])
+            for day, hour in candidate_starts
+            if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, hour + block))
+        )
+        fixed_bonus = sum(
+            1 for day, hour in candidate_starts if (combo_id, day, hour) in fixed_slot_keys
+        )
+        combo_search_rank[combo_id] = (
+            (10000 if subj.get("type") == "lab" else 0)
+            + (9000 if fixed_bonus > 0 else 0)
+            + (7000 if len(class_ids) > 1 else 0)
+            + (6000 if len(combo.get("faculty_ids", [])) <= 1 else 0)
+            + (required_hours * 200)
+            + (availability_slots * 25)
+            - (len(candidate_starts) * 10)
+        )
+
+    sorted_combos = sorted(
+        combos,
+        key=lambda combo: (
+            -combo_search_rank.get(combo["_id"], -10**9),
+            len(combo_candidate_starts.get(combo["_id"], [])),
+            combo["_id"],
+        ),
+    )
+
+    search_ordered_vars: List[cp_model.IntVar] = []
+    for combo in sorted_combos:
+        combo_id = combo["_id"]
+        class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
+        candidate_starts = combo_candidate_starts.get(combo_id, [])
+        if not class_ids or not candidate_starts:
+            continue
+        subj = subject_by_id.get(combo["subject_id"])
+        if not subj:
+            continue
+        block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+        ordered_starts = sorted(
+            candidate_starts,
+            key=lambda slot: (
+                -int((combo_id, slot[0], slot[1]) in fixed_slot_keys),
+                slot[0],
+                hour_rank.get(slot[1], slot[1]),
+            ),
+        )
+        for day, hour in ordered_starts:
+            violates_availability = False
+            if teacher_avail_enabled:
+                for fid in combo.get("faculty_ids", []):
+                    if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, hour + block)):
+                        violates_availability = True
+                        break
+
+            var = model.NewBoolVar(f"x_{combo_id}_{day}_{hour}")
+            x[(combo_id, day, hour)] = var
+            search_ordered_vars.append(var)
+            if (
+                teacher_avail_enabled
+                and not teacher_avail_hard
+                and teacher_avail_weight > 0
+                and violates_availability
+            ):
+                objective_terms.append(var * teacher_avail_weight)
+            if (
+                no_teacher_early_slot_weight > 0
+                and str(subj.get("type") or "").lower() == "no_teacher"
+                and valid_hour_count > 0
+            ):
+                slot_rank = hour_rank.get(hour, 0)
+                early_penalty = max(0, valid_hour_count - slot_rank - 1)
+                if early_penalty > 0:
+                    objective_terms.append(var * no_teacher_early_slot_weight * early_penalty)
+
+            for h in range(hour, hour + block):
+                for class_id in class_ids:
+                    covers.setdefault((class_id, day, h), []).append(var)
+                    subject_covers.setdefault((class_id, day, h, combo["subject_id"]), []).append(var)
+                for fid in combo.get("faculty_ids", []):
+                    teacher_covers.setdefault((fid, day, h), []).append(var)
 
     # Constraint: at most one lesson per class per hour
     for cls in classes:
@@ -776,30 +848,36 @@ async def solve(request: Request) -> Dict[str, Any]:
     for cls in classes:
         class_id = cls["_id"]
         days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
-        valid_hours = [h for h in range(HOURS_PER_DAY) if h not in break_hours_set]
         for day in range(days):
-            for hour in valid_hours:
-                prev_hours = [h for h in valid_hours if h < hour]
-                next_hours = [h for h in valid_hours if h > hour]
-                if not prev_hours or not next_hours:
-                    continue
+            day_hours = [h for h in range(HOURS_PER_DAY) if h not in break_hours_set]
+            if len(day_hours) <= 2:
+                continue
 
-                has_before = model.NewBoolVar(
-                    f"class_has_before_{class_id}_{day}_{hour}"
-                )
-                before_terms = [class_occ[(class_id, day, h)] for h in prev_hours]
-                model.Add(has_before <= sum(before_terms))
-                for term in before_terms:
-                    model.Add(has_before >= term)
+            prefix_occ: List[cp_model.IntVar] = []
+            for i, hour in enumerate(day_hours):
+                occ = class_occ[(class_id, day, hour)]
+                seen = model.NewBoolVar(f"class_prefix_occ_{class_id}_{day}_{hour}")
+                if i == 0:
+                    model.Add(seen == occ)
+                else:
+                    model.AddMaxEquality(seen, [prefix_occ[i - 1], occ])
+                prefix_occ.append(seen)
 
-                has_after = model.NewBoolVar(
-                    f"class_has_after_{class_id}_{day}_{hour}"
-                )
-                after_terms = [class_occ[(class_id, day, h)] for h in next_hours]
-                model.Add(has_after <= sum(after_terms))
-                for term in after_terms:
-                    model.Add(has_after >= term)
+            suffix_occ: List[cp_model.IntVar] = [None] * len(day_hours)  # type: ignore
+            for i in range(len(day_hours) - 1, -1, -1):
+                hour = day_hours[i]
+                occ = class_occ[(class_id, day, hour)]
+                seen = model.NewBoolVar(f"class_suffix_occ_{class_id}_{day}_{hour}")
+                if i == len(day_hours) - 1:
+                    model.Add(seen == occ)
+                else:
+                    model.AddMaxEquality(seen, [suffix_occ[i + 1], occ])
+                suffix_occ[i] = seen
 
+            for i in range(1, len(day_hours) - 1):
+                hour = day_hours[i]
+                has_before = prefix_occ[i - 1]
+                has_after = suffix_occ[i + 1]
                 gap = model.NewBoolVar(f"class_gap_{class_id}_{day}_{hour}")
                 occ = class_occ[(class_id, day, hour)]
                 model.Add(gap <= has_before)
@@ -1041,9 +1119,7 @@ async def solve(request: Request) -> Dict[str, Any]:
                     if not day_terms:
                         continue
                     has_subject = model.NewBoolVar(f"subj_day_has_{class_id}_{subj_id}_{day}")
-                    model.Add(has_subject <= sum(day_terms))
-                    for term in day_terms:
-                        model.Add(has_subject >= term)
+                    model.AddMaxEquality(has_subject, day_terms)
                     day_presence_vars.append(has_subject)
 
                 if not day_presence_vars:
@@ -1162,12 +1238,19 @@ async def solve(request: Request) -> Dict[str, Any]:
 
     if objective_terms:
         model.Minimize(sum(objective_terms))
+    if search_ordered_vars:
+        model.AddDecisionStrategy(
+            search_ordered_vars,
+            cp_model.CHOOSE_FIRST,
+            cp_model.SELECT_MAX_VALUE,
+        )
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = solver_time_limit_sec
     solver.parameters.num_search_workers = max(1, int(os.getenv("SOLVER_WORKERS", "8")))
     solver.parameters.random_seed = random_seed
     solver.parameters.randomize_search = True
+    solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH
 
     status = solver.Solve(model)
 
@@ -1268,4 +1351,12 @@ async def solve(request: Request) -> Dict[str, Any]:
         "warnings": fixed_slot_warnings,
         "config": applied_config,
         "objective_value": float(solver.ObjectiveValue()) if objective_terms else 0.0,
+        "solver_stats": {
+            "candidate_start_count": len(x),
+            "combo_count": len(combos),
+            "active_combo_count": len(combo_candidate_starts),
+            "constraint_count": len(model.Proto().constraints),
+            "wall_time_seconds": float(solver.WallTime()),
+            "status": solver.StatusName(status),
+        },
     }

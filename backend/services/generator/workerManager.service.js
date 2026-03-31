@@ -41,7 +41,8 @@ export function startGenerationWorker({ payload }) {
   workers.set(taskId, worker);
   taskResults.set(taskId, {
     status: "running",
-    progress: 0
+    progress: 0,
+    phase: "queued"
   });
 
   // Use postMessage to send data to the worker, as it's set up to listen for messages
@@ -55,6 +56,7 @@ export function startGenerationWorker({ payload }) {
       taskResults.set(taskId, {
         status: "running",
         progress: message.progress,
+        phase: message.phase || "running",
         partialData: message.partialData
       });
     }
@@ -98,6 +100,8 @@ export function startGenerationWorker({ payload }) {
 
       taskResults.set(taskId, {
         status: "completed",
+        progress: 100,
+        phase: "done",
         result: resultData
       });
       cleanup(taskId);
@@ -106,6 +110,7 @@ export function startGenerationWorker({ payload }) {
     if (message.type === "ERROR") {
       taskResults.set(taskId, {
         status: "error",
+        phase: "error",
         error: message.error
       });
       cleanup(taskId);
@@ -115,6 +120,7 @@ export function startGenerationWorker({ payload }) {
   worker.on("error", (err) => {
     taskResults.set(taskId, {
       status: "error",
+      phase: "error",
       error: err.message
     });
     cleanup(taskId);
@@ -126,6 +132,7 @@ export function startGenerationWorker({ payload }) {
       if (!current || current.status === "running") {
         taskResults.set(taskId, {
           status: "error",
+          phase: "error",
           error: `Worker exited with code ${code}`
         });
       }

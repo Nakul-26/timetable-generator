@@ -168,6 +168,7 @@ async function callCpSatSolver({
       warnings: data.warnings || [],
       config: data.config || constraintConfig || {},
       allocations_report: data.allocations_report || null,
+      solver_stats: data.solver_stats || null,
       objective_value:
         Number.isFinite(Number(data.objective_value)) ? Number(data.objective_value) : null,
     };
@@ -339,6 +340,7 @@ async function runGenerate({
       allocations_report: selectedOption?.allocations_report || null,
       unmet_requirements: selectedOption?.unmet_requirements || [],
       warnings: selectedOption?.warnings || [],
+      solver_stats: selectedOption?.solver_stats || null,
       attemptsTried: attemptsRun,
       generation_options: rankedOptions,
       bestClassTimetables: selectedOption?.class_timetables || null,
@@ -469,6 +471,7 @@ async function runGenerate({
       allocations_report: result.allocations_report,
       unmet_requirements: result.unmet_requirements || [],
       warnings: result.warnings || [],
+      solver_stats: result.solver_stats || null,
     });
 
     onProgress?.({

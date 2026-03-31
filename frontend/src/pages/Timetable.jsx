@@ -20,6 +20,7 @@ function Timetable() {
   // Async generation
   const [taskId, setTaskId] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [progressPhase, setProgressPhase] = useState("idle");
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthReport, setHealthReport] = useState(null);
   const [healthSeverityFilter, setHealthSeverityFilter] = useState("all");
@@ -357,14 +358,22 @@ function Timetable() {
     const poll = setInterval(async () => {
       try {
         const res = await api.get(`/generation-status/${taskId}`);
-        const { status, progress, result, error, partialData } = res.data;
+        const { status, progress, phase, result, error, partialData } = res.data;
 
         if (status === "running") {
-          setProgress(progress ?? 0);
+          const nextPhase = phase || "running";
+          setProgressPhase(nextPhase);
+          setProgress(
+            nextPhase === "candidate_ready"
+              ? Math.max(85, progress ?? 0)
+              : progress ?? 0
+          );
           if (partialData) {
             applyTimetableState(partialData, selectedOptionId);
           }
         } else {
+          setProgress(status === "completed" ? 100 : progress ?? 0);
+          setProgressPhase(phase || status || "done");
           if (status === "error") setError(error || "Generation failed");
 
           if (result || partialData) {
@@ -384,6 +393,7 @@ function Timetable() {
         setError("Failed to poll generation status.");
         setLoading(false);
         setTaskId(null);
+        setProgressPhase("error");
         clearInterval(poll);
       }
     }, 2000);
@@ -439,6 +449,7 @@ function Timetable() {
     setTimetableOptions([]);
     setSelectedOptionId("");
     setProgress(0);
+    setProgressPhase("queued");
 
     try {
       const latestConstraintConfig = loadConstraintConfig();
@@ -456,6 +467,7 @@ function Timetable() {
     } catch {
       setError("Failed to start generation.");
       setLoading(false);
+      setProgressPhase("error");
     }
   };
 
@@ -879,6 +891,37 @@ function Timetable() {
     return assignedHours;
   };
 
+  const buildDisplayRequiredHours = (currentClass, assignmentRequiredHours) => {
+    const classRequiredHours =
+      currentClass?.subject_hours && typeof currentClass.subject_hours === "object"
+        ? currentClass.subject_hours
+        : {};
+
+    const hasVirtualElectives = Object.keys(classRequiredHours).some((subjectId) => {
+      const subject = subjectById.get(String(subjectId));
+      return Boolean(subject?.isVirtual);
+    });
+
+    const filteredAssignmentHours = Object.entries(assignmentRequiredHours || {}).reduce(
+      (acc, [subjectId, hours]) => {
+        const subject = subjectById.get(String(subjectId));
+        if (hasVirtualElectives && subject?.isElective) {
+          return acc;
+        }
+        acc[subjectId] = hours;
+        return acc;
+      },
+      {}
+    );
+
+    // Class-level subject_hours from generator data is authoritative because
+    // electives are rewritten into virtual subjects there.
+    return {
+      ...filteredAssignmentHours,
+      ...classRequiredHours,
+    };
+  };
+
   const resetFilters = () => {
     setSelectedClass("");
     setSelectedFaculty("");
@@ -887,6 +930,26 @@ function Timetable() {
 
   const clearFixedSlots = () => {
     setFixedSlots({});
+  };
+
+  const getProgressMessage = () => {
+    switch (progressPhase) {
+      case "queued":
+        return "Preparing generation...";
+      case "start":
+      case "running":
+        return "Generating timetable options...";
+      case "solver_done":
+        return "Solver finished this pass. Preparing options...";
+      case "candidate_ready":
+        return "A valid timetable is ready. Searching for more options...";
+      case "done":
+        return "Generation complete.";
+      case "error":
+        return "Generation failed.";
+      default:
+        return loading ? "Generating..." : "";
+    }
   };
 
   /* ===================== RENDER ===================== */
@@ -899,6 +962,7 @@ function Timetable() {
         <div className="tt-progress-wrap">
           <progress value={progress} max="100" className="tt-progress-bar" />
           <span>{progress}%</span>
+          <span>{getProgressMessage()}</span>
         </div>
       )}
 
@@ -1226,11 +1290,10 @@ function Timetable() {
                         if (!currentClass) return null;
                         const classIdKey = String(classId);
                         const requiredFromAssignments = requiredHoursByClassSubject.get(classIdKey) || {};
-                        const requiredFromClass = currentClass?.subject_hours || {};
-                        const requiredHours = {
-                          ...requiredFromAssignments,
-                          ...requiredFromClass,
-                        };
+                        const requiredHours = buildDisplayRequiredHours(
+                          currentClass,
+                          requiredFromAssignments
+                        );
 
                         const allSubjectIds = new Set([
                           ...Object.keys(requiredHours),
