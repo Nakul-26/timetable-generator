@@ -594,6 +594,36 @@ function Timetable() {
         
           const getFacultyName = id => facultyById.get(String(id))?.name || id;
 
+  const resolveVirtualElectiveName = (subjectId) => {
+    const value = String(subjectId || "");
+    if (!value.startsWith("VIRTUAL_ELECTIVE_")) return null;
+
+    const parts = value.split("_").slice(2).filter(Boolean);
+    if (parts.length < 2) return "Elective";
+
+    const [, ...rest] = parts;
+    const markerIndex = rest.indexOf("PLACEHOLDER");
+    const placeholderName =
+      markerIndex !== -1 ? subjectById.get(String(rest[markerIndex + 1]))?.name : null;
+    const requiredSubjectIds =
+      markerIndex !== -1 ? rest.slice(markerIndex + 2) : rest;
+    const categoryNames = requiredSubjectIds
+      .map((id) => subjectById.get(String(id))?.name)
+      .filter(Boolean);
+
+    if (placeholderName && categoryNames.length) {
+      return `${placeholderName} (${categoryNames.join(" + ")})`;
+    }
+    if (placeholderName) return placeholderName;
+    if (categoryNames.length) return `Elective (${categoryNames.join(" + ")})`;
+    return "Elective";
+  };
+
+  const getSubjectDisplayName = (subjectId) => {
+    const subject = subjectById.get(String(subjectId));
+    return subject?.name || resolveVirtualElectiveName(subjectId) || `Elective ${String(subjectId).slice(-4)}`;
+  };
+
   const getSlotDisplay = (slot) => {
     if (!slot || slot === -1 || slot === "BREAK") {
       return { subjectName: "-", facultyNames: [], combinedWith: [] };
@@ -605,7 +635,7 @@ function Timetable() {
     }
 
     const subject = subjectById.get(String(combo.subject_id));
-    const subjectName = subject ? subject.name : `Elective ${String(combo.subject_id).slice(-4)}`;
+    const subjectName = getSubjectDisplayName(combo.subject_id);
 
     let facultyNames = [];
     if (combo.faculty_ids && Array.isArray(combo.faculty_ids)) {
@@ -1242,7 +1272,7 @@ function Timetable() {
                             }
 
                             const subject = subjectById.get(String(combo.subject_id));
-                            const subjectName = subject ? subject.name : `Elective ${combo.subject_id.slice(-4)}`;
+                            const subjectName = getSubjectDisplayName(combo.subject_id);
 
                             let facultyNames = [];
                             if (combo.faculty_ids) {
@@ -1300,7 +1330,8 @@ function Timetable() {
                           ...Object.keys(assignedHours),
                         ]);
 
-                        const rows = Array.from(allSubjectIds).map((subjectId) => {
+                        const mergedRows = new Map();
+                        Array.from(allSubjectIds).forEach((subjectId) => {
                           const assigned = Number(assignedHours[subjectId] || 0);
                           const requiredValue = requiredHours[subjectId];
                           const required =
@@ -1308,18 +1339,32 @@ function Timetable() {
                               ? "N/A"
                               : Number(requiredValue);
 
-                          if (assigned === 0 && required === 0) return null;
-                          if (assigned === 0 && required === "N/A") return null;
+                          if (assigned === 0 && required === 0) return;
+                          if (assigned === 0 && required === "N/A") return;
 
-                          const subject = subjectById.get(String(subjectId));
-                          const name = subject ? subject.name : `Elective ${String(subjectId).slice(-4)}`;
+                          const name = getSubjectDisplayName(subjectId);
+                          const existing = mergedRows.get(name);
+                          if (!existing) {
+                            mergedRows.set(name, { assigned, required });
+                            return;
+                          }
 
+                          existing.assigned += assigned;
+                          if (required !== "N/A") {
+                            existing.required =
+                              existing.required === "N/A"
+                                ? required
+                                : Number(existing.required) + required;
+                          }
+                        });
+
+                        const rows = Array.from(mergedRows.entries()).map(([name, values]) => {
                           return (
-                            <div key={subjectId} className="tt-hours-row">
-                              <span>{name}: {assigned} / {required}</span>
+                            <div key={name} className="tt-hours-row">
+                              <span>{name}: {values.assigned} / {values.required}</span>
                             </div>
                           );
-                        }).filter(Boolean);
+                        });
 
                         if (!rows.length) {
                           return <div className="tt-hours-row">No subject hours data available.</div>;

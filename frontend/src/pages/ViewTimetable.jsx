@@ -160,12 +160,28 @@ const ViewTimetable = () => {
     const resolveVirtualElectiveName = (subjectId) => {
         const value = String(subjectId || '');
         if (!value.startsWith('VIRTUAL_ELECTIVE_')) return null;
-        const ids = value.split('_').slice(3).filter(Boolean);
-        if (!ids.length) return 'Elective';
+        const parts = value.split('_').slice(2).filter(Boolean);
+        if (parts.length < 2) return 'Elective';
 
-        const names = ids.map((id) => subjectMap[String(id)]).filter(Boolean);
-        if (!names.length) return 'Elective';
-        return `Elective (${names.join(' + ')})`;
+        const [, ...rest] = parts;
+        const markerIndex = rest.indexOf('PLACEHOLDER');
+        let placeholderName = null;
+        let requiredSubjectIds = rest;
+
+        if (markerIndex !== -1) {
+            const placeholderSubjectId = rest[markerIndex + 1];
+            placeholderName = subjectMap[String(placeholderSubjectId)] || null;
+            requiredSubjectIds = rest.slice(markerIndex + 2);
+        }
+
+        const names = requiredSubjectIds.map((id) => subjectMap[String(id)]).filter(Boolean);
+
+        if (placeholderName && names.length) {
+            return `${placeholderName} (${names.join(' + ')})`;
+        }
+        if (placeholderName) return placeholderName;
+        if (names.length) return `Elective (${names.join(' + ')})`;
+        return 'Elective';
     };
 
     const getCellData = (classId, dayIndex, hourIndex) => {

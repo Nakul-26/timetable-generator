@@ -125,11 +125,18 @@ export function convertNewCollegeInput({
         const placeholderElectiveId = String(setting.subjectId);
         realSubjectsInElectives.add(`${classId}|${placeholderElectiveId}`);
 
-        const subjectNames = requiredSubjectIds.map(id => subjects.find(s => s._id === id)?.name).join('+');
-        const virtualSubjectId = `VIRTUAL_ELECTIVE_${classId}_${requiredSubjectIds.sort().join('_')}`;
+        const placeholderElective = subjectById.get(placeholderElectiveId);
+        const placeholderElectiveName = placeholderElective?.name || `Elective ${placeholderElectiveId.slice(-4)}`;
+        const subjectNames = requiredSubjectIds
+            .map(id => subjectById.get(String(id))?.name)
+            .filter(Boolean)
+            .join(" + ");
+        const virtualSubjectId = `VIRTUAL_ELECTIVE_${classId}_PLACEHOLDER_${placeholderElectiveId}_${requiredSubjectIds.sort().join('_')}`;
         const virtualSub = {
             _id: virtualSubjectId,
-            name: `Elective (${subjectNames})`,
+            name: subjectNames
+                ? `${placeholderElectiveName} (${subjectNames})`
+                : placeholderElectiveName,
             no_of_hours_per_week: hoursPerClassSubject[`${classId}|${placeholderElectiveId}`] || 0,
             isVirtual: true,
         };

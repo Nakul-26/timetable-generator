@@ -512,11 +512,34 @@ function resolveVirtualElectiveName(subjectId, subjectMap) {
   const rawValue = String(subjectId || "");
   if (!rawValue.startsWith("VIRTUAL_ELECTIVE_")) return null;
 
-  const subjectIds = rawValue.split("_").slice(3).filter(Boolean);
-  if (!subjectIds.length) return "Elective";
+  const parts = rawValue.split("_").slice(2).filter(Boolean);
+  if (parts.length < 2) return "Elective";
 
-  const subjectNames = subjectIds.map((id) => subjectMap.get(String(id))).filter(Boolean);
-  return subjectNames.length ? `Elective (${subjectNames.join(" + ")})` : "Elective";
+  const [, ...rest] = parts;
+  const markerIndex = rest.indexOf("PLACEHOLDER");
+  let placeholderName = null;
+  let requiredSubjectIds = rest;
+
+  if (markerIndex !== -1) {
+    const placeholderSubjectId = rest[markerIndex + 1];
+    placeholderName = subjectMap.get(String(placeholderSubjectId)) || null;
+    requiredSubjectIds = rest.slice(markerIndex + 2);
+  }
+
+  const subjectNames = requiredSubjectIds
+    .map((id) => subjectMap.get(String(id)))
+    .filter(Boolean);
+
+  if (placeholderName && subjectNames.length) {
+    return `${placeholderName} (${subjectNames.join(" + ")})`;
+  }
+  if (placeholderName) {
+    return placeholderName;
+  }
+  if (subjectNames.length) {
+    return `Elective (${subjectNames.join(" + ")})`;
+  }
+  return "Elective";
 }
 
 function buildDayLabels(days) {
