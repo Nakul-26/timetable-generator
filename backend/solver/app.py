@@ -8,6 +8,7 @@
 
 # FastAPI CP-SAT timetable solver service
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -15,8 +16,6 @@ from pathlib import Path
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from typing import Dict, List, Any, Tuple
 from fastapi import FastAPI, Request
 from ortools.sat.python import cp_model
@@ -153,31 +152,6 @@ def _persist_completed_timetable(job_id: str, result: Dict[str, Any]) -> None:
         client.close()
 
 
-def _solver_base_url() -> str:
-    port = os.getenv("PORT", "8001")
-    return f"http://127.0.0.1:{port}"
-
-
-def _call_local_solve(payload: Dict[str, Any]) -> Dict[str, Any]:
-    req = urllib.request.Request(
-        f"{_solver_base_url()}/solve",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=max(30, int((payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC) + 30))) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="ignore")
-        try:
-            return json.loads(body)
-        except Exception:
-            return {"ok": False, "error": body or f"Solver HTTP {exc.code}"}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc) or "Solver request failed"}
-
-
 def _analyze_class_internal_gaps(class_timetables: Dict[str, Any]) -> Dict[str, int]:
     gap_count = 0
     if not isinstance(class_timetables, dict):
@@ -255,6 +229,46 @@ def _build_option_label(candidate: Dict[str, Any], index: int) -> str:
     return f"Option {index + 1} (Alternative)"
 
 
+def _build_attempt_constraint_config(
+    base_config: Dict[str, Any],
+    strategy: Dict[str, Any],
+    per_attempt_time_limit_sec: float,
+) -> Dict[str, Any]:
+    config = copy.deepcopy(base_config) if isinstance(base_config, dict) else {}
+    solver_cfg = config.setdefault("solver", {})
+    solver_cfg["timeLimitSec"] = per_attempt_time_limit_sec
+    solver_cfg["maxCandidatesPerCombo"] = int(strategy.get("maxCandidatesPerCombo") or 15)
+    solver_cfg["earlyAbortNoSolution"] = bool(strategy.get("earlyAbortNoSolution", True))
+    solver_cfg["noSolutionAbortRatio"] = float(strategy.get("noSolutionAbortRatio", 0.4))
+    solver_cfg["noSolutionAbortMinSec"] = float(strategy.get("noSolutionAbortMinSec", 10))
+
+    if strategy.get("relaxSoftConstraints"):
+        for section_name, weight_scale in (
+            ("teacherContinuity", 0.5),
+            ("classContinuity", 0.5),
+            ("teacherDailyOverload", 0.5),
+            ("teacherRecoveryBreak", 0.4),
+            ("subjectClustering", 0.4),
+            ("subjectDistribution", 0.4),
+            ("highLoadSubjectTiming", 0.3),
+            ("frontLoading", 0.35),
+            ("teacherWeeklyLoadBalance", 0.4),
+            ("classDailyMinimumLoad", 0.5),
+            ("teacherBoundaryPreference", 0.4),
+            ("teacherAvailability", 1.0),
+            ("noGaps", 1.0),
+        ):
+            section = config.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            for key, value in list(section.items()):
+                if "weight" not in key.lower() or not isinstance(value, (int, float)):
+                    continue
+                section[key] = max(0, int(round(value * weight_scale)))
+
+    return config
+
+
 def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cancel_check=None) -> Dict[str, Any]:
     classes = payload.get("classes") or []
     faculties = payload.get("faculties") or []
@@ -282,6 +296,61 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
     )
     max_attempts = max(attempts, solution_count * 2)
+    strategy_templates = [
+        {
+            "name": "strict",
+            "maxCandidatesPerCombo": 15,
+            "timeShare": 0.4,
+            "earlyAbortNoSolution": True,
+            "noSolutionAbortRatio": 0.45,
+            "noSolutionAbortMinSec": 12,
+            "relaxSoftConstraints": False,
+        },
+        {
+            "name": "reduced_search",
+            "maxCandidatesPerCombo": 10,
+            "timeShare": 0.25,
+            "earlyAbortNoSolution": True,
+            "noSolutionAbortRatio": 0.35,
+            "noSolutionAbortMinSec": 10,
+            "relaxSoftConstraints": False,
+        },
+        {
+            "name": "relaxed_constraints",
+            "maxCandidatesPerCombo": 15,
+            "timeShare": 0.2,
+            "earlyAbortNoSolution": True,
+            "noSolutionAbortRatio": 0.3,
+            "noSolutionAbortMinSec": 8,
+            "relaxSoftConstraints": True,
+        },
+        {
+            "name": "aggressive_fast",
+            "maxCandidatesPerCombo": 8,
+            "timeShare": 0.15,
+            "earlyAbortNoSolution": True,
+            "noSolutionAbortRatio": 0.25,
+            "noSolutionAbortMinSec": 6,
+            "relaxSoftConstraints": True,
+        },
+    ]
+    attempt_plans: List[Dict[str, Any]] = []
+    for attempt_index in range(max_attempts):
+        template = strategy_templates[attempt_index % len(strategy_templates)]
+        cycle = attempt_index // len(strategy_templates)
+        strategy = dict(template)
+        strategy["cycle"] = cycle
+        strategy["attemptIndex"] = attempt_index
+        strategy["seed"] = attempt_index + 1
+        if cycle > 0:
+            strategy["maxCandidatesPerCombo"] = max(
+                6,
+                int(strategy["maxCandidatesPerCombo"]) - cycle,
+            )
+            strategy["timeShare"] = max(0.08, float(strategy["timeShare"]) * max(0.5, 1 - (cycle * 0.15)))
+            strategy["name"] = f"{strategy['name']}_cycle_{cycle + 1}"
+        attempt_plans.append(strategy)
+    total_time_share = sum(float(plan.get("timeShare") or 0) for plan in attempt_plans) or 1.0
 
     def ranked_candidates() -> List[Dict[str, Any]]:
         return sorted(
@@ -320,6 +389,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             "unmet_requirements": selected.get("unmet_requirements") if selected else [],
             "warnings": selected.get("warnings") if selected else [],
             "solver_stats": selected.get("solver_stats") if selected else None,
+            "strategy": selected.get("strategy") if selected else None,
             "attemptsTried": attempts_run,
             "generation_options": ranked,
             "bestClassTimetables": selected.get("class_timetables") if selected else None,
@@ -328,7 +398,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             "bestScore": selected.get("score") if selected else None,
         }
 
-    for attempt in range(max_attempts):
+    for attempt, strategy in enumerate(attempt_plans):
         if cancel_check and cancel_check():
             return {
                 "ok": False,
@@ -343,11 +413,15 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             break
 
         remaining_attempts = max_attempts - attempt
+        remaining_share = sum(
+            float(plan.get("timeShare") or 0) for plan in attempt_plans[attempt:]
+        ) or 1.0
+        target_time_share = float(strategy.get("timeShare") or 0) / remaining_share
         per_attempt_time_limit_sec = max(
             MIN_SOLVER_TIME_PER_ATTEMPT_SEC,
             min(
-                configured_time_limit / max(1, solution_count),
-                remaining_budget_sec / max(1, remaining_attempts),
+                configured_time_limit * (float(strategy.get("timeShare") or 0) / total_time_share),
+                remaining_budget_sec * target_time_share,
             ),
         )
         if per_attempt_time_limit_sec > remaining_budget_sec:
@@ -358,6 +432,11 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         attempts_run += 1
         seed = attempt + 1
         progress_callback and progress_callback({"progress": progress_start, "phase": "start"})
+        attempt_constraint_config = _build_attempt_constraint_config(
+            constraint_config,
+            strategy,
+            per_attempt_time_limit_sec,
+        )
 
         expected_ms = max(15_000, int(per_attempt_time_limit_sec * 1000))
         progress_span = max(1, progress_end - progress_start)
@@ -383,7 +462,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         heartbeat_thread.start()
 
         try:
-            result = _call_local_solve(
+            result = solve_instance(
                 {
                     "faculties": faculties,
                     "subjects": subjects,
@@ -392,8 +471,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                     "DAYS_PER_WEEK": days_per_week,
                     "HOURS_PER_DAY": hours_per_day,
                     "fixedSlots": fixed_slots,
-                    "constraintConfig": constraint_config,
-                    "random_seed": seed,
+                    "constraintConfig": attempt_constraint_config,
+                    "random_seed": int(strategy.get("seed") or seed),
                     "solver_time_limit_sec": per_attempt_time_limit_sec,
                 }
             )
@@ -441,6 +520,10 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             continue
 
         seen_hashes.add(timetable_hash)
+        solver_stats = dict(result.get("solver_stats") or {})
+        solver_stats["attempt_strategy"] = strategy.get("name")
+        solver_stats["attempt_cycle"] = strategy.get("cycle", 0)
+        solver_stats["attempt_time_budget_seconds"] = float(per_attempt_time_limit_sec)
         candidates.append(
             {
                 "optionId": f"{generation_batch_id}_opt_{len(candidates) + 1}",
@@ -452,11 +535,12 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                 "faculty_daily_hours": result.get("faculty_daily_hours"),
                 "classes": result.get("classes") or classes,
                 "combos": combos,
-                "config": result.get("config") or constraint_config,
+                "config": result.get("config") or attempt_constraint_config,
                 "allocations_report": result.get("allocations_report"),
                 "unmet_requirements": result.get("unmet_requirements") or [],
                 "warnings": result.get("warnings") or [],
-                "solver_stats": result.get("solver_stats"),
+                "solver_stats": solver_stats,
+                "strategy": strategy.get("name"),
             }
         )
 
@@ -471,21 +555,29 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
 
         if len(candidates) >= solution_count:
             break
+        if best and (best.get("score") or 0) <= 0 and not (best.get("warnings") or []) and not (best.get("unmet_requirements") or []):
+            break
 
-    progress_callback and progress_callback({"progress": 100, "phase": "done"})
     best = ranked_candidates()[0] if ranked_candidates() else None
+    if best:
+        progress_callback and progress_callback({"progress": 100, "phase": "completed"})
     return build_selected_result(best)
 
 
 async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
+    last_progress = 0
+
     def cancel_check() -> bool:
         return _is_cancel_requested(job_id)
 
     def progress_callback(message: Dict[str, Any]) -> None:
+        nonlocal last_progress
+        next_progress = max(0, min(100, int(message.get("progress") or 0)))
+        last_progress = max(last_progress, next_progress)
         update = {
             "status": "running",
             "phase": message.get("phase") or "running",
-            "progress": max(0, min(100, int(message.get("progress") or 0))),
+            "progress": next_progress,
         }
         if message.get("partialData") is not None:
             update["partial_data"] = message.get("partialData")
@@ -505,14 +597,15 @@ async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
                 job_id,
                 status="cancelled",
                 phase="cancelled",
-                progress=100,
+                progress=min(last_progress, 95),
                 error=result.get("error") or "Generation cancelled",
                 result=result,
             )
             return
 
         final_status = "completed" if result.get("ok") else "failed"
-        final_phase = "done" if result.get("ok") else "error"
+        final_phase = "completed" if result.get("ok") else "error"
+        final_progress = 100 if result.get("ok") else min(last_progress, 95)
         persistence_error = None
         if result.get("ok"):
             try:
@@ -523,7 +616,7 @@ async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
             job_id,
             status=final_status,
             phase=final_phase,
-            progress=100,
+            progress=final_progress,
             result=result,
             partial_data=result if result.get("ok") else None,
             error=(
@@ -537,7 +630,7 @@ async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
             job_id,
             status="failed",
             phase="error",
-            progress=100,
+            progress=min(last_progress, 95),
             error=str(exc) or "Generation failed",
         )
 
@@ -664,6 +757,20 @@ def _normalize_teacher_preferences_map(raw: Any) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+class _SolveProgressCallback(cp_model.CpSolverSolutionCallback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.solution_found = False
+        self.solution_count = 0
+        self.first_solution_wall_time_seconds = 0.0
+
+    def on_solution_callback(self) -> None:
+        self.solution_found = True
+        self.solution_count += 1
+        if self.solution_count == 1:
+            self.first_solution_wall_time_seconds = float(self.WallTime())
+
+
 @app.on_event("startup")
 async def _install_loop_handler():
     loop = asyncio.get_running_loop()
@@ -688,9 +795,7 @@ async def start_job(request: Request) -> Dict[str, Any]:
     return {"ok": True, "jobId": job_id}
 
 
-@app.post("/solve")
-async def solve(request: Request) -> Dict[str, Any]:
-    payload = await request.json()
+def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     constraint_config = payload.get("constraintConfig") or {}
 
     faculties = [_normalize_id(f) for f in payload.get("faculties", [])]
@@ -735,8 +840,20 @@ async def solve(request: Request) -> Dict[str, Any]:
         _cfg_get(
             constraint_config,
             ["solver", "maxCandidatesPerCombo"],
-            os.getenv("SOLVER_MAX_CANDIDATES_PER_COMBO", "0"),
+            os.getenv("SOLVER_MAX_CANDIDATES_PER_COMBO", "15"),
         )
+    )
+    early_abort_no_solution_enabled = _to_bool(
+        _cfg_get(constraint_config, ["solver", "earlyAbortNoSolution"], True),
+        True,
+    )
+    no_solution_abort_ratio = min(
+        0.95,
+        max(0.0, float(_cfg_get(constraint_config, ["solver", "noSolutionAbortRatio"], 0.4))),
+    )
+    no_solution_abort_min_sec = max(
+        1.0,
+        float(_cfg_get(constraint_config, ["solver", "noSolutionAbortMinSec"], 10)),
     )
 
     lab_block_size = max(1, int(_cfg_get(constraint_config, ["structural", "labBlockSize"], 2)))
@@ -1012,6 +1129,9 @@ async def solve(request: Request) -> Dict[str, Any]:
         "solver": {
             "timeLimitSec": solver_time_limit_sec,
             "maxCandidatesPerCombo": max_candidates_per_combo,
+            "earlyAbortNoSolution": early_abort_no_solution_enabled,
+            "noSolutionAbortRatio": no_solution_abort_ratio,
+            "noSolutionAbortMinSec": no_solution_abort_min_sec,
         },
     }
 
@@ -1828,16 +1948,71 @@ async def solve(request: Request) -> Dict[str, Any]:
     solver.parameters.randomize_search = True
     solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH
 
-    status = solver.Solve(model)
+    progress_callback = _SolveProgressCallback()
+    early_abort_deadline_sec = min(
+        solver_time_limit_sec,
+        max(no_solution_abort_min_sec, solver_time_limit_sec * no_solution_abort_ratio),
+    )
+    early_abort_state = {"triggered": False}
+    early_abort_stop = threading.Event()
+    early_abort_thread = None
+
+    if early_abort_no_solution_enabled and early_abort_deadline_sec < solver_time_limit_sec:
+        def stop_if_stuck() -> None:
+            if early_abort_stop.wait(early_abort_deadline_sec):
+                return
+            if not progress_callback.solution_found:
+                early_abort_state["triggered"] = True
+                solver.StopSearch()
+
+        early_abort_thread = threading.Thread(target=stop_if_stuck, daemon=True)
+        early_abort_thread.start()
+
+    try:
+        status = solver.SolveWithSolutionCallback(model, progress_callback)
+    finally:
+        early_abort_stop.set()
+        if early_abort_thread is not None:
+            early_abort_thread.join(timeout=0.2)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        solver_stats = {
+            "candidate_start_count": len(x),
+            "combo_count": len(combos),
+            "active_combo_count": len(combo_candidate_starts),
+            "constraint_count": len(model.Proto().constraints),
+            "wall_time_seconds": float(solver.WallTime()),
+            "status": solver.StatusName(status),
+            "solutions_found": progress_callback.solution_count,
+            "first_solution_wall_time_seconds": progress_callback.first_solution_wall_time_seconds,
+            "early_abort_deadline_seconds": (
+                float(early_abort_deadline_sec)
+                if early_abort_no_solution_enabled and early_abort_deadline_sec < solver_time_limit_sec
+                else None
+            ),
+            "early_abort_triggered": bool(early_abort_state["triggered"]),
+        }
+        if early_abort_state["triggered"] and not progress_callback.solution_found:
+            return {
+                "ok": False,
+                "error": "No valid timetable found within the early-abort window",
+                "reason": "early_abort_no_solution",
+                "hint": "Try increasing solver time or reducing constraints.",
+                "classes": classes,
+                "unmet_requirements": unmet_requirements,
+                "warnings": fixed_slot_warnings,
+                "config": applied_config,
+                "solver_stats": solver_stats,
+            }
         return {
             "ok": False,
-            "error": f"Solver status: {solver.StatusName(status)}",
+            "error": f"No valid timetable found within time limit ({solver.StatusName(status)})",
+            "hint": "Try increasing solver time or reducing constraints.",
             "classes": classes,
             "unmet_requirements": unmet_requirements,
             "warnings": fixed_slot_warnings,
             "config": applied_config,
+            "solver_stats": solver_stats,
         }
 
     # Build outputs
@@ -1934,5 +2109,19 @@ async def solve(request: Request) -> Dict[str, Any]:
             "constraint_count": len(model.Proto().constraints),
             "wall_time_seconds": float(solver.WallTime()),
             "status": solver.StatusName(status),
+            "solutions_found": progress_callback.solution_count,
+            "first_solution_wall_time_seconds": progress_callback.first_solution_wall_time_seconds,
+            "early_abort_deadline_seconds": (
+                float(early_abort_deadline_sec)
+                if early_abort_no_solution_enabled and early_abort_deadline_sec < solver_time_limit_sec
+                else None
+            ),
+            "early_abort_triggered": bool(early_abort_state["triggered"]),
         },
     }
+
+
+@app.post("/solve")
+async def solve(request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    return solve_instance(payload)

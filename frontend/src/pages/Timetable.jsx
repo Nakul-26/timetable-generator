@@ -7,6 +7,10 @@ import { getComboSubjectDisplayName } from "./subjectDisplay";
 
 const HEALTH_BLOCK_STORAGE_KEY = "timetable.blockGenerateOnHealthErrors";
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
+const GENERATION_STATUS_POLL_MS = Math.max(
+  1000,
+  Number(import.meta.env.VITE_GENERATION_STATUS_POLL_MS) || 3000
+);
 
 function Timetable() {
   const [loading, setLoading] = useState(false);
@@ -50,6 +54,7 @@ function Timetable() {
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedFaculty, setSelectedFaculty] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
+  const [displayMode, setDisplayMode] = useState("class");
 
   // Fixed slots
   const [fixedSlots, setFixedSlots] = useState({});
@@ -167,7 +172,7 @@ function Timetable() {
         label: option.label || `Option ${index + 1}`,
         rank: Number(option.rank || index + 1),
         class_timetables: normalizeTableShape(optionClassTimetables),
-        faculty_timetables: optionFacultyTimetables,
+        faculty_timetables: normalizeTableShape(optionFacultyTimetables),
       };
     };
 
@@ -192,14 +197,17 @@ function Timetable() {
       selected_option_id: payload.selected_option_id || selectedOption?.optionId || "",
       generation_options: normalizedOptions,
       class_timetables: normalizeTableShape(classTimetables),
-      faculty_timetables: facultyTimetables,
+      faculty_timetables: normalizeTableShape(facultyTimetables),
     };
   }, [normalizeTableShape]);
 
-  const hasRenderableTimetable = useCallback((data) => {
-    const table = data?.class_timetables;
+  const hasRenderableTable = useCallback((table) => {
     return !!table && typeof table === "object" && Object.keys(table).length > 0;
   }, []);
+
+  const hasRenderableTimetable = useCallback((data) => {
+    return hasRenderableTable(data?.class_timetables);
+  }, [hasRenderableTable]);
 
   const applyTimetableState = useCallback((raw, preferredOptionId = null) => {
     const normalized = normalizeGenerationResult(raw);
@@ -331,6 +339,12 @@ function Timetable() {
   }, [classes, fixedClassId]);
 
   useEffect(() => {
+    if (displayMode === "faculty" && !hasRenderableTable(timetable?.faculty_timetables)) {
+      setDisplayMode("class");
+    }
+  }, [displayMode, hasRenderableTable, timetable]);
+
+  useEffect(() => {
     progressRef.current = progress;
   }, [progress]);
 
@@ -441,7 +455,7 @@ function Timetable() {
           }
         } else {
           setProgressTarget(status === "completed" ? 100 : progress ?? 0);
-          setProgressPhase(phase || status || "done");
+          setProgressPhase(phase || status || "completed");
           if (isFailure) {
             setError(error || result?.error || partialData?.error || "Generation failed");
           }
@@ -473,7 +487,7 @@ function Timetable() {
         setProgressPhase("error");
         clearInterval(poll);
       }
-    }, 1000);
+    }, GENERATION_STATUS_POLL_MS);
 
     return () => clearInterval(poll);
   }, [applyTimetableState, selectedOptionId, taskId]);
@@ -927,6 +941,22 @@ function Timetable() {
     return allClassTimetables;
   };
 
+  const filteredFacultyTimetable = () => {
+    if (!timetable || !timetable.faculty_timetables) {
+      return [];
+    }
+
+    let allFacultyTimetables = Object.entries(timetable.faculty_timetables);
+
+    if (selectedFaculty) {
+      allFacultyTimetables = allFacultyTimetables.filter(
+        ([facultyId]) => String(facultyId) === String(selectedFaculty)
+      );
+    }
+
+    return allFacultyTimetables;
+  };
+
   const isCellMatching = (slotComboId) => {
     const hasFilter = selectedFaculty || selectedSubject;
     if (!hasFilter) {
@@ -958,6 +988,41 @@ function Timetable() {
     }
 
     return facultyMatch() && subjectMatch();
+  };
+
+  const isFacultyCellMatching = (slotComboId) => {
+    if (!slotComboId || slotComboId === -1 || slotComboId === "BREAK") {
+      return false;
+    }
+
+    const combo = comboById.get(String(slotComboId));
+    if (!combo) {
+      return false;
+    }
+
+    const subjectMatches = !selectedSubject || String(combo.subject_id) === String(selectedSubject);
+    const classIds = Array.isArray(combo.class_ids) ? combo.class_ids.map(String) : [];
+    const classMatches = !selectedClass || classIds.length === 0 || classIds.includes(String(selectedClass));
+
+    return subjectMatches && classMatches;
+  };
+
+  const getFacultySlotDisplay = (slot) => {
+    if (!slot || slot === -1 || slot === "BREAK") {
+      return { subjectName: "-", classNames: [] };
+    }
+
+    const combo = comboById.get(String(slot));
+    if (!combo) {
+      return { subjectName: "?", classNames: [] };
+    }
+
+    const subjectName = getSubjectDisplayName(combo.subject_id);
+    const classNames = Array.isArray(combo.class_ids)
+      ? combo.class_ids.map((id) => getClassName(id))
+      : [];
+
+    return { subjectName, classNames };
   };
 
   const calculateAssignedHours = (slots) => {
@@ -1033,7 +1098,7 @@ function Timetable() {
         return "Solver finished this pass. Preparing options...";
       case "candidate_ready":
         return "A valid timetable is ready. Searching for more options...";
-      case "done":
+      case "completed":
         return "Generation complete.";
       case "error":
         return "Generation failed.";
@@ -1131,6 +1196,29 @@ function Timetable() {
           />
           <span>Block generate on health errors</span>
         </label>
+        <div className="filters-container">
+          <button
+            type="button"
+            className={displayMode === "class" ? "primary-btn" : "secondary-btn"}
+            onClick={() => setDisplayMode("class")}
+            disabled={!timetable?.class_timetables}
+          >
+            Show Class Timetables
+          </button>
+          <button
+            type="button"
+            className={displayMode === "faculty" ? "primary-btn" : "secondary-btn"}
+            onClick={() => setDisplayMode("faculty")}
+            disabled={!hasRenderableTable(timetable?.faculty_timetables)}
+            title={
+              hasRenderableTable(timetable?.faculty_timetables)
+                ? "Show faculty timetables"
+                : "No faculty timetable data returned yet"
+            }
+          >
+            Show Faculty Timetables
+          </button>
+        </div>
       </div>
 
       {timetableOptions.length > 0 ? (
@@ -1311,7 +1399,7 @@ function Timetable() {
       </div>
       ) : null}
 
-      {timetable && timetable.class_timetables && (
+      {timetable && displayMode === "class" && timetable.class_timetables && (
         <div className="tt-section-card">
           <div className="filters-container">
             <span>Active Option: {selectedOptionId ? (timetableOptions.find((item) => String(item.optionId) === String(selectedOptionId))?.label || "Selected") : "Best available"}</span>
@@ -1462,6 +1550,64 @@ function Timetable() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {timetable && displayMode === "faculty" && hasRenderableTable(timetable.faculty_timetables) && (
+        <div className="tt-section-card">
+          <div className="filters-container">
+            <span>Active Option: {selectedOptionId ? (timetableOptions.find((item) => String(item.optionId) === String(selectedOptionId))?.label || "Selected") : "Best available"}</span>
+            <span>Gap Score: {bestScore ?? "N/A"}</span>
+            <span>Objective: {objectiveValue ?? "N/A"}</span>
+            <span>Teacher Daily Hours: {facultyDailyHours ? "Available" : "Not reported"}</span>
+          </div>
+          {filteredFacultyTimetable().map(([facultyId, slots]) => (
+            <div key={facultyId} className="tt-class-block">
+              <h3>{getFacultyName(facultyId)}</h3>
+              <div className="table-responsive">
+                <table className="styled-table">
+                  <thead>
+                    <tr>
+                      <th>Day / Period</th>
+                      {Array.from({ length: HOURS_PER_DAY }).map((_, p) => (
+                        <th key={p}>P{p + 1}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slots.map((row, d) => (
+                      <tr key={d}>
+                        <td>Day {d + 1}</td>
+                        {row.map((slot, h) => {
+                          const cellMatches = isFacultyCellMatching(slot);
+                          const hasFilter = selectedClass || selectedSubject;
+                          const cellClassName = !hasFilter || cellMatches ? "" : "tt-cell-dim";
+
+                          if (!slot || slot === -1 || slot === "BREAK") {
+                            return <td key={h} className={cellClassName}>-</td>;
+                          }
+
+                          const { subjectName, classNames } = getFacultySlotDisplay(slot);
+
+                          return (
+                            <td key={h} className={cellClassName}>
+                              <div>
+                                <b>{subjectName}</b>
+                              </div>
+                              {classNames.map((name, i) => <div key={i}>{name}</div>)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+          {!filteredFacultyTimetable().length ? (
+            <p>No faculty timetables match the selected filters.</p>
+          ) : null}
         </div>
       )}
     </div>
