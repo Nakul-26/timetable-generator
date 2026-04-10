@@ -3,6 +3,13 @@ const { Schema } = mongoose;
 
 const ClassSubjectSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     class: { type: Schema.Types.ObjectId, ref: 'Class', required: true },
     subject: { type: Schema.Types.ObjectId, ref: 'Subject', required: true },
     hoursPerWeek: {
@@ -15,7 +22,7 @@ const ClassSubjectSchema = new Schema(
 );
 
 ClassSubjectSchema.index(
-  { class: 1, subject: 1 },
+  { collegeId: 1, class: 1, subject: 1 },
   { unique: true }
 );
 

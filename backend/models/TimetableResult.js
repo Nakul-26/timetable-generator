@@ -4,6 +4,13 @@ import TeacherSubjectCombination from './TeacherSubjectCombination.js'; // Impor
 
 const ResultSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     name: { type: String, required: true },
 
     source: {
@@ -81,10 +88,10 @@ const ResultSchema = new Schema(
 );
 
 // Indexes for fast queries
-ResultSchema.index({ createdAt: -1 });
-ResultSchema.index({ source: 1, createdAt: -1 });
+ResultSchema.index({ collegeId: 1, createdAt: -1 });
+ResultSchema.index({ collegeId: 1, source: 1, createdAt: -1 });
 ResultSchema.index(
-  { source_generation_job_id: 1 },
+  { collegeId: 1, source_generation_job_id: 1 },
   { unique: true, sparse: true }
 );
 

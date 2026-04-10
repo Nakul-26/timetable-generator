@@ -4,6 +4,13 @@ const { Schema } = mongoose;
 
 const TeacherSubjectCombinationSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     faculty: { type: Schema.Types.ObjectId, ref: 'Faculty', required: true },
     subject: { type: Schema.Types.ObjectId, ref: 'Subject', required: true },
   },
@@ -11,7 +18,7 @@ const TeacherSubjectCombinationSchema = new Schema(
 );
 
 TeacherSubjectCombinationSchema.index(
-  { faculty: 1, subject: 1 },
+  { collegeId: 1, faculty: 1, subject: 1 },
   { unique: true }
 );
 

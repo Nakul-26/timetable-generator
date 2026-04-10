@@ -3,10 +3,16 @@ const { Schema } = mongoose;
 
 const SubjectSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     id: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       index: true,
     },
@@ -36,5 +42,7 @@ const SubjectSchema = new Schema(
   },
   { timestamps: true }
 );
+
+SubjectSchema.index({ collegeId: 1, id: 1 }, { unique: true });
 
 export default mongoose.model('Subject', SubjectSchema);

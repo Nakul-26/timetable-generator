@@ -5,6 +5,13 @@ import jwt from 'jsonwebtoken';
 const { Schema } = mongoose;
 
 const AdminSchema = new Schema({
+  collegeId: {
+    type: String,
+    required: true,
+    trim: true,
+    default: "default",
+    index: true,
+  },
   email: {
     type: String,
     required: true,

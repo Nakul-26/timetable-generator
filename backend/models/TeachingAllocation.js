@@ -4,6 +4,13 @@ const { Schema } = mongoose;
 
 const TeachingAllocationSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     classIds: [
       {
         type: Schema.Types.ObjectId,
@@ -35,6 +42,6 @@ const TeachingAllocationSchema = new Schema(
   { timestamps: true }
 );
 
-TeachingAllocationSchema.index({ teacher: 1, subject: 1, combinedClassGroupId: 1 });
+TeachingAllocationSchema.index({ collegeId: 1, teacher: 1, subject: 1, combinedClassGroupId: 1 });
 
 export default mongoose.model("TeachingAllocation", TeachingAllocationSchema);

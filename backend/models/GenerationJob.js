@@ -4,6 +4,13 @@ const { Schema } = mongoose;
 
 const GenerationJobSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     status: {
       type: String,
       enum: ["pending", "running", "completed", "failed", "cancelled"],
@@ -63,7 +70,7 @@ const GenerationJobSchema = new Schema(
   }
 );
 
-GenerationJobSchema.index({ createdAt: -1 });
-GenerationJobSchema.index({ status: 1, createdAt: -1 });
+GenerationJobSchema.index({ collegeId: 1, createdAt: -1 });
+GenerationJobSchema.index({ collegeId: 1, status: 1, createdAt: -1 });
 
 export default mongoose.model("GenerationJob", GenerationJobSchema);

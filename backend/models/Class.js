@@ -4,10 +4,16 @@ const { Schema } = mongoose;
 
 const ClassSchema = new Schema(
   {
+    collegeId: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "default",
+      index: true,
+    },
     id: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       index: true,
     },
@@ -63,7 +69,8 @@ const ClassSchema = new Schema(
 );
 
 // Useful indexes
-ClassSchema.index({ sem: 1 });
-ClassSchema.index({ name: 1, section: 1 });
+ClassSchema.index({ collegeId: 1, id: 1 }, { unique: true });
+ClassSchema.index({ collegeId: 1, sem: 1 });
+ClassSchema.index({ collegeId: 1, name: 1, section: 1 });
 
 export default mongoose.model('Class', ClassSchema);
