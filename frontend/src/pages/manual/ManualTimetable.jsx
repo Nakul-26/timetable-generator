@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import api from '../../api/axios';
 import { loadConstraintConfig } from '../constraintConfig';
+import { getComboSubjectDisplayName } from '../subjectDisplay';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const hours = ['1', '2', '3', '4', '5', '6', '7', '8'];
@@ -102,7 +103,11 @@ const ManualTimetable = () => {
           ? [String(combo.faculty?._id || combo.faculty)]
           : [];
     return {
-      subject: combo?.subject?.name || combo?.subject_name || subjectIdToDetails[subjectId]?.name || (subjectId ? `Subject ${subjectId.slice(-4)}` : 'Unknown Subject'),
+      subject: getComboSubjectDisplayName(
+        combo,
+        new Map(Object.entries(subjectIdToDetails)),
+        subjectId ? `Subject ${subjectId.slice(-4)}` : 'Unknown Subject'
+      ),
       faculty: combo?.faculty?.name || combo?.faculty_name || facultyIds.map((facultyId) => facultyIdToName[facultyId] || `Faculty ${facultyId.slice(-4)}`).join(', ') || (String(combo?.subject?.type || combo?.subject_type || combo?.type || '').toLowerCase() === 'no_teacher' ? 'No Teacher' : 'Unknown Teacher'),
     };
   };

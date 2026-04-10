@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/axios';
+import { getComboSubjectDisplayName } from './subjectDisplay';
 
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const hours = ["1", "2", "3", "4", "5", "6", "7", "8"];
@@ -26,8 +27,6 @@ const ViewTimetable = () => {
     const [comboMap, setComboMap] = useState({});
     const [subjectMap, setSubjectMap] = useState({});
     const [facultyMap, setFacultyMap] = useState({});
-    const [classSubjectMap, setClassSubjectMap] = useState({});
-
     useEffect(() => {
         const fetchData = async () => {
             try {
@@ -43,9 +42,9 @@ const ViewTimetable = () => {
 
                 setTimetable(ttRes.data);
                 setClasses(classesRes.data);
-                setCombos(combosRes.data);
-                setSubjects(subjectsRes.data);
-                setFaculties(facultiesRes.data);
+                setCombos([...(combosRes.data || []), ...(ttRes.data?.combos || [])]);
+                setSubjects([...(ttRes.data?.subjects || []), ...(subjectsRes.data || [])]);
+                setFaculties([...(ttRes.data?.faculties || []), ...(facultiesRes.data || [])]);
                 setClassSubjects(classSubjectsRes.data);
                 
                 setError(null);
@@ -82,23 +81,6 @@ const ViewTimetable = () => {
     }, [subjects]);
 
     useEffect(() => {
-        if (classSubjects.length) {
-            const next = classSubjects.reduce((acc, item) => {
-                const classId = String(item?.class?._id || item?.class || '');
-                const subjectId = String(item?.subject?._id || item?.subject || '');
-                const subjectName = item?.subject?.name || '';
-                if (classId && subjectId && subjectName) {
-                    acc[`${classId}|${subjectId}`] = subjectName;
-                }
-                return acc;
-            }, {});
-            setClassSubjectMap(next);
-        } else {
-            setClassSubjectMap({});
-        }
-    }, [classSubjects]);
-
-    useEffect(() => {
         if (faculties.length) {
             const next = faculties.reduce((acc, f) => {
                 acc[String(f._id)] = f.name;
@@ -112,13 +94,10 @@ const ViewTimetable = () => {
 
     useEffect(() => {
         if (combos.length) {
+            const subjectLookup = new Map(Object.entries(subjectMap));
             const newComboMap = combos.reduce((acc, combo) => {
                 const subjectId = combo?.subject?._id || combo?.subject || combo?.subject_id;
-                const subjectName =
-                    combo?.subject?.name ||
-                    combo?.subject_name ||
-                    subjectMap[String(subjectId)] ||
-                    'N/A';
+                const subjectName = getComboSubjectDisplayName(combo, subjectLookup, 'N/A');
 
                 let facultyName = 'N/A';
                 if (combo?.faculty?.name) {
@@ -157,33 +136,6 @@ const ViewTimetable = () => {
         }
     }, [combos, subjectMap, facultyMap]);
 
-    const resolveVirtualElectiveName = (subjectId) => {
-        const value = String(subjectId || '');
-        if (!value.startsWith('VIRTUAL_ELECTIVE_')) return null;
-        const parts = value.split('_').slice(2).filter(Boolean);
-        if (parts.length < 2) return 'Elective';
-
-        const [, ...rest] = parts;
-        const markerIndex = rest.indexOf('PLACEHOLDER');
-        let placeholderName = null;
-        let requiredSubjectIds = rest;
-
-        if (markerIndex !== -1) {
-            const placeholderSubjectId = rest[markerIndex + 1];
-            placeholderName = subjectMap[String(placeholderSubjectId)] || null;
-            requiredSubjectIds = rest.slice(markerIndex + 2);
-        }
-
-        const names = requiredSubjectIds.map((id) => subjectMap[String(id)]).filter(Boolean);
-
-        if (placeholderName && names.length) {
-            return `${placeholderName} (${names.join(' + ')})`;
-        }
-        if (placeholderName) return placeholderName;
-        if (names.length) return `Elective (${names.join(' + ')})`;
-        return 'Elective';
-    };
-
     const getCellData = (classId, dayIndex, hourIndex) => {
         const rawSlot = timetable.class_timetables[classId]?.[dayIndex]?.[hourIndex];
         const comboId = Array.isArray(rawSlot) ? rawSlot[0] : rawSlot;
@@ -201,14 +153,11 @@ const ViewTimetable = () => {
 
         const subjectId = String(embeddedCombo?.subject_id || embeddedCombo?.subject || '');
 
-        const subjectName =
-            embeddedCombo?.subject?.name ||
-            embeddedCombo?.subject_name ||
-            embeddedCombo?.subjectName ||
-            classSubjectMap[`${String(classId)}|${subjectId}`] ||
-            resolveVirtualElectiveName(subjectId) ||
-            subjectMap[subjectId] ||
-            (embeddedCombo?.subject_id ? `Subject ${String(embeddedCombo.subject_id).slice(-4)}` : 'N/A');
+        const subjectName = getComboSubjectDisplayName(
+            embeddedCombo,
+            new Map(Object.entries(subjectMap)),
+            embeddedCombo?.subject_id ? `Subject ${String(embeddedCombo.subject_id).slice(-4)}` : 'N/A'
+        );
 
         let facultyName = 'N/A';
         let facultyIds = [];

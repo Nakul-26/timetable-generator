@@ -68,6 +68,8 @@ const ResultSchema = new Schema(
     selected_option_id: String,
     generation_options: Object,
 
+    subjects: Object,
+    faculties: Object,
     combos: Object,
     allocations_report: Object,
   },

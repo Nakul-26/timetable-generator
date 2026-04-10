@@ -16,6 +16,7 @@ import auth from '../../middleware/auth.js';
 import { mergeTeacherAvailabilityConstraintConfig } from '../../utils/teacherAvailability.js';
 import { mergeTeacherPreferenceConstraintConfig } from '../../utils/teacherPreferences.js';
 import { exportTimetableExcel } from "../../services/export/timetableExport.service.js";
+import { buildSubjectMap, collectSubjectIdsFromEncodedSubjectId, getComboSubjectDisplayName } from "../../utils/subjectDisplay.js";
 
 const SOLVER_BASE_URL = String(process.env.SOLVER_URL || 'http://localhost:8001').replace(/\/+$/, '');
 if (!SOLVER_BASE_URL) {
@@ -364,6 +365,44 @@ protectedRouter.get('/timetable/:id', async (req, res) => {
         if (!timetable) {
             return res.status(404).json({ error: 'Timetable not found.' });
         }
+        if (Array.isArray(timetable?.combos)) {
+          const storedSubjectMap = buildSubjectMap(timetable.subjects || []);
+          const missingSubjectIds = new Set();
+          timetable.combos.forEach((combo) => {
+            const subjectId = String(combo?.subject?._id || combo?.subject_id || combo?.subject || "");
+            if (/^[0-9a-fA-F]{24}$/.test(subjectId)) {
+              missingSubjectIds.add(subjectId);
+            }
+            collectSubjectIdsFromEncodedSubjectId(subjectId).forEach((id) => missingSubjectIds.add(id));
+          });
+          const subjectDocs = missingSubjectIds.size
+            ? await Subject.find({ _id: { $in: [...missingSubjectIds] } }).select("name type").lean()
+            : [];
+          const subjectMap = new Map([
+            ...storedSubjectMap.entries(),
+            ...subjectDocs.map((subject) => [String(subject._id), subject]),
+          ]);
+          timetable.combos = timetable.combos.map((combo) => {
+            const subjectId = String(combo?.subject?._id || combo?.subject_id || combo?.subject || "");
+            if (combo?.subject?.name) {
+              return combo;
+            }
+            return {
+              ...combo,
+              subject: {
+                _id: subjectId,
+                name: getComboSubjectDisplayName(combo, subjectMap),
+                type:
+                  combo?.subject?.type ||
+                  subjectMap.get(subjectId)?.type ||
+                  combo?.subject_type ||
+                  combo?.type ||
+                  "theory",
+                isVirtual: Boolean(combo?.subject?.isVirtual || subjectMap.get(subjectId)?.isVirtual),
+              },
+            };
+          });
+        }
         console.log("[GET /timetable/:id] Found timetable:", timetable.name);
         res.json(timetable);
     } catch (e) {
@@ -461,6 +500,8 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
       generation_batch_id: generation_batch_id ?? null,
       selected_option_id: selected_option_id ?? null,
       generation_options: generation_options ?? [],
+      subjects,
+      faculties,
       combos,
       config,
     });
@@ -516,6 +557,8 @@ protectedRouter.post("/timetables", async (req, res) => {
       generation_batch_id: timetableData.generation_batch_id ?? null,
       selected_option_id: timetableData.selected_option_id ?? null,
       generation_options: timetableData.generation_options ?? [],
+      subjects: timetableData.subjects,
+      faculties: timetableData.faculties,
       combos: timetableData.combos,
       allocations_report: timetableData.allocations_report,
       config: timetableData.config,

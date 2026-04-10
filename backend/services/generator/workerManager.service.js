@@ -88,6 +88,8 @@ export function startGenerationWorker({ payload }) {
             generation_batch_id: resultData.generation_batch_id || null,
             selected_option_id: resultData.selected_option_id || null,
             generation_options: resultData.generation_options || [],
+            subjects: resultData.subjects,
+            faculties: resultData.faculties,
             combos: resultData.combos,
             allocations_report: resultData.allocations_report,
             config: resultData.config,

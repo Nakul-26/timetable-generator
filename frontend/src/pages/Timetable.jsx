@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api from "../api/axios";
 import axios from "../api/axios";
 import { loadConstraintConfig } from "./constraintConfig";
+import { getComboSubjectDisplayName } from "./subjectDisplay";
 
 const HEALTH_BLOCK_STORAGE_KEY = "timetable.blockGenerateOnHealthErrors";
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
@@ -96,13 +97,15 @@ function Timetable() {
         const appliesToClass = classIds.length === 0 || classIds.includes(classId);
         if (!appliesToClass) continue;
 
-        const subject = subjectById.get(String(combo.subject_id));
-        const subjectName = subject ? subject.name : "N/A";
+        const subjectName = getComboSubjectDisplayName(combo, subjectById, "N/A");
+        const comboSubjectType = String(
+          combo?.subject?.type || subjectById.get(String(combo.subject_id))?.type || ""
+        ).toLowerCase();
         const facultyNames = (Array.isArray(combo.faculty_ids) ? combo.faculty_ids : [])
           .map((fid) => facultyById.get(String(fid))?.name || "N/A")
           .join(" & ");
         const facultyLabel =
-          facultyNames || (String(subject?.type || "").toLowerCase() === "no_teacher" ? "No Teacher" : "N/A");
+          facultyNames || (comboSubjectType === "no_teacher" ? "No Teacher" : "N/A");
 
         classOptions.push({
           id: String(combo._id),
@@ -243,6 +246,12 @@ function Timetable() {
     setFacultyDailyHours(active?.faculty_daily_hours ?? null);
     if (active?.classes) {
       setClasses(active.classes);
+    }
+    if (active?.subjects) {
+      setSubjects(active.subjects);
+    }
+    if (active?.faculties) {
+      setFaculties(active.faculties);
     }
     if (active?.combos) {
       setCombos(active.combos);
@@ -670,34 +679,9 @@ function Timetable() {
         
           const getFacultyName = id => facultyById.get(String(id))?.name || id;
 
-  const resolveVirtualElectiveName = (subjectId) => {
-    const value = String(subjectId || "");
-    if (!value.startsWith("VIRTUAL_ELECTIVE_")) return null;
-
-    const parts = value.split("_").slice(2).filter(Boolean);
-    if (parts.length < 2) return "Elective";
-
-    const [, ...rest] = parts;
-    const markerIndex = rest.indexOf("PLACEHOLDER");
-    const placeholderName =
-      markerIndex !== -1 ? subjectById.get(String(rest[markerIndex + 1]))?.name : null;
-    const requiredSubjectIds =
-      markerIndex !== -1 ? rest.slice(markerIndex + 2) : rest;
-    const categoryNames = requiredSubjectIds
-      .map((id) => subjectById.get(String(id))?.name)
-      .filter(Boolean);
-
-    if (placeholderName && categoryNames.length) {
-      return `${placeholderName} (${categoryNames.join(" + ")})`;
-    }
-    if (placeholderName) return placeholderName;
-    if (categoryNames.length) return `Elective (${categoryNames.join(" + ")})`;
-    return "Elective";
-  };
-
   const getSubjectDisplayName = (subjectId) => {
     const subject = subjectById.get(String(subjectId));
-    return subject?.name || resolveVirtualElectiveName(subjectId) || `Elective ${String(subjectId).slice(-4)}`;
+    return subject?.name || `Subject ${String(subjectId).slice(-4)}`;
   };
 
   const getSlotDisplay = (slot) => {

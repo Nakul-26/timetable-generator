@@ -4,6 +4,7 @@ import ClassModel from "../../models/Class.js";
 import Faculty from "../../models/Faculty.js";
 import Subject from "../../models/Subject.js";
 import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
+import { buildSubjectMap, getComboSubjectDisplayName } from "../../utils/subjectDisplay.js";
 
 const DEFAULT_DAY_LABELS = [
   "Monday",
@@ -78,12 +79,19 @@ async function buildExportContext(timetable) {
     );
   }
 
+  const persistedSubjectMap = buildSubjectMap(timetable?.subjects || []);
   const subjectMap = new Map(
     subjectDocs.map((subjectDoc) => [String(subjectDoc._id), subjectDoc.name || `Subject ${String(subjectDoc._id).slice(-4)}`])
   );
+  for (const [subjectId, subject] of persistedSubjectMap.entries()) {
+    subjectMap.set(subjectId, getComboSubjectDisplayName(subject, null, `Subject ${subjectId.slice(-4)}`));
+  }
   const subjectTypeMap = new Map(
     subjectDocs.map((subjectDoc) => [String(subjectDoc._id), String(subjectDoc.type || "").toLowerCase()])
   );
+  for (const [subjectId, subject] of persistedSubjectMap.entries()) {
+    subjectTypeMap.set(subjectId, String(subject?.type || "").toLowerCase());
+  }
 
   const comboMetaMap = new Map();
   for (const [comboId, combo] of comboMap.entries()) {
@@ -91,13 +99,14 @@ async function buildExportContext(timetable) {
     const facultyIdList = getFacultyIds(combo);
     const classIdList = getClassIds(combo);
     const subjectType = subjectTypeMap.get(subjectId) || String(combo?.subject?.type || "").toLowerCase();
-    const subjectName =
-      combo?.subject?.name ||
-      combo?.subject_name ||
-      combo?.subjectName ||
-      subjectMap.get(subjectId) ||
-      resolveVirtualElectiveName(subjectId, subjectMap) ||
-      (subjectId ? `Subject ${subjectId.slice(-4)}` : "Unknown Subject");
+    const subjectName = getComboSubjectDisplayName(
+      combo,
+      new Map([
+        ...subjectMap.entries(),
+        ...persistedSubjectMap.entries(),
+      ]),
+      subjectMap.get(subjectId) || "Unknown Subject"
+    );
 
     let teacherNames = facultyIdList
       .map((facultyId) => facultyMap.get(facultyId) || `Faculty ${facultyId.slice(-4)}`)
@@ -508,39 +517,6 @@ function getClassIds(combo) {
   return [];
 }
 
-function resolveVirtualElectiveName(subjectId, subjectMap) {
-  const rawValue = String(subjectId || "");
-  if (!rawValue.startsWith("VIRTUAL_ELECTIVE_")) return null;
-
-  const parts = rawValue.split("_").slice(2).filter(Boolean);
-  if (parts.length < 2) return "Elective";
-
-  const [, ...rest] = parts;
-  const markerIndex = rest.indexOf("PLACEHOLDER");
-  let placeholderName = null;
-  let requiredSubjectIds = rest;
-
-  if (markerIndex !== -1) {
-    const placeholderSubjectId = rest[markerIndex + 1];
-    placeholderName = subjectMap.get(String(placeholderSubjectId)) || null;
-    requiredSubjectIds = rest.slice(markerIndex + 2);
-  }
-
-  const subjectNames = requiredSubjectIds
-    .map((id) => subjectMap.get(String(id)))
-    .filter(Boolean);
-
-  if (placeholderName && subjectNames.length) {
-    return `${placeholderName} (${subjectNames.join(" + ")})`;
-  }
-  if (placeholderName) {
-    return placeholderName;
-  }
-  if (subjectNames.length) {
-    return `Elective (${subjectNames.join(" + ")})`;
-  }
-  return "Elective";
-}
 
 function buildDayLabels(days) {
   return Array.from({ length: days }, (_, index) => DEFAULT_DAY_LABELS[index] || `Day ${index + 1}`);

@@ -151,7 +151,17 @@ export function convertNewCollegeInput({
     }
 
     const subjectsOut = [...subjects, ...virtualSubjects], combos = [];
+    const subjectOutById = new Map(subjectsOut.map(subject => [String(subject._id), subject]));
     let comboIndex = 1;
+    const buildComboSubject = (subjectId) => {
+        const subject = subjectOutById.get(String(subjectId));
+        return {
+            _id: String(subjectId),
+            name: subject?.name || `Subject ${String(subjectId).slice(-4)}`,
+            type: subject?.type || "theory",
+            isVirtual: Boolean(subject?.isVirtual),
+        };
+    };
 
     //------------------------------------------------------------
     // 2. Generate ALL Combos
@@ -176,6 +186,7 @@ export function convertNewCollegeInput({
             _id: "C" + comboIndex++,
             faculty_ids: allocation.teacherId ? [String(allocation.teacherId)] : [],
             subject_id: subjectId,
+            subject: buildComboSubject(subjectId),
             class_ids: classIds,
             combined_class_group_id: allocation.combinedClassGroupId || null,
             hours_per_week: hoursRequired,
@@ -206,7 +217,7 @@ export function convertNewCollegeInput({
             : teachersForSubject;
         for (const teacherId of eligibleTeachers) {
             combos.push({
-                _id: "C" + comboIndex++, faculty_ids: [teacherId], subject_id: subjectId, class_ids: [classId],
+                _id: "C" + comboIndex++, faculty_ids: [teacherId], subject_id: subjectId, subject: buildComboSubject(subjectId), class_ids: [classId],
                 hours_per_week: hoursRequired, hours_per_class: { [classId]: hoursRequired },
                 combo_name: `T${teacherId}_S${subjectId}_C${classId}`
             });
@@ -254,7 +265,7 @@ export function convertNewCollegeInput({
             for (const facultyIds of allFacultyCombinations) {
                 if (facultyIds.length > 0) {
                     combos.push({
-                        _id: "C" + comboIndex++, faculty_ids: facultyIds.sort(), subject_id: electiveGroup.virtualSubjectId,
+                        _id: "C" + comboIndex++, faculty_ids: facultyIds.sort(), subject_id: electiveGroup.virtualSubjectId, subject: buildComboSubject(electiveGroup.virtualSubjectId),
                         class_ids: [classId], hours_per_week: electiveGroup.hours,
                         hours_per_class: { [classId]: electiveGroup.hours },
                         combo_name: `ELECTIVE_${classId}_${facultyIds.join("_")}`
