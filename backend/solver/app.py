@@ -658,6 +658,14 @@ def _solve_with_solution_callback(solver, model, callback):
     if callable(solve_method):
         return solve_method(model, callback)
 
+    solve_method = getattr(solver, "solve", None)
+    if callable(solve_method):
+        return solve_method(model, solution_callback=callback)
+
+    solve_method = getattr(solver, "Solve", None)
+    if callable(solve_method):
+        return solve_method(model, callback)
+
     raise AttributeError(
         "CpSolver does not support solution callback solving on this OR-Tools build"
     )
