@@ -214,12 +214,25 @@ function Timetable() {
     const normalized = normalizeGenerationResult(raw);
     if (!normalized) return null;
     if (normalized.ok === false) {
-      setTimetable(null);
+      const canRenderFailurePreview = hasRenderableTimetable(normalized);
+      setTimetable(canRenderFailurePreview ? normalized : null);
       setTimetableOptions([]);
       setSelectedOptionId("");
       setBestScore(null);
       setObjectiveValue(null);
-      setFacultyDailyHours(null);
+      setFacultyDailyHours(canRenderFailurePreview ? normalized?.faculty_daily_hours ?? null : null);
+      if (canRenderFailurePreview && normalized?.classes) {
+        setClasses(normalized.classes);
+      }
+      if (canRenderFailurePreview && normalized?.subjects) {
+        setSubjects(normalized.subjects);
+      }
+      if (canRenderFailurePreview && normalized?.faculties) {
+        setFaculties(normalized.faculties);
+      }
+      if (canRenderFailurePreview && normalized?.combos) {
+        setCombos(normalized.combos);
+      }
       return normalized;
     }
 
@@ -379,7 +392,13 @@ function Timetable() {
 
     let frameId = null;
     const delta = progressTarget - startValue;
-    const durationMs = 700;
+    const durationMs = Math.max(
+      900,
+      Math.min(
+        Math.max(1200, GENERATION_STATUS_POLL_MS - 200),
+        2600
+      )
+    );
     const startedAt = performance.now();
 
     const step = (now) => {
@@ -458,9 +477,7 @@ function Timetable() {
     if (!looksInfeasible) return baseMessage;
 
     const healthSummary = summarizeHealthIssues(report);
-    if (!healthSummary) {
-      return `${baseMessage}. This deployed site uses its own browser-saved timetable settings, so run Health Check and compare Timetable Settings with your local setup.`;
-    }
+    if (!healthSummary) return baseMessage;
 
     return `${baseMessage}. ${healthSummary}`;
   }, [summarizeHealthIssues]);
@@ -489,12 +506,14 @@ function Timetable() {
         if (isRunning) {
           const nextPhase = phase || "running";
           setProgressPhase(nextPhase);
-          setProgressTarget(progress ?? 0);
+          setProgressTarget((prev) => Math.max(prev, Number(progress ?? 0)));
           if (partialData) {
             applyTimetableState(partialData, selectedOptionId);
           }
         } else {
-          setProgressTarget(status === "completed" ? 100 : progress ?? 0);
+          setProgressTarget((prev) =>
+            Math.max(prev, Number(status === "completed" ? 100 : progress ?? 0))
+          );
           setProgressPhase(phase || status || "completed");
           if (isFailure) {
             const failureMessage = error || result?.error || partialData?.error || "Generation failed";

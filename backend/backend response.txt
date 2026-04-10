@@ -1,0 +1,877 @@
+{
+    "taskId": "69d8ec115ac4020d2553bf9e",
+    "status": "failed",
+    "progress": 63,
+    "phase": "error",
+    "partialData": null,
+    "result": {
+        "ok": false,
+        "error": "No valid timetable found within time limit (INFEASIBLE)",
+        "generation_batch_id": "gen_1775823890664_2a2de3",
+        "optionsGenerated": 0,
+        "selected_option_id": null,
+        "score": null,
+        "objectiveValue": null,
+        "class_timetables": null,
+        "faculty_timetables": null,
+        "faculty_daily_hours": null,
+        "classes": null,
+        "combos": null,
+        "config": {
+            "schedule": {
+                "daysPerWeek": 6,
+                "hoursPerDay": 8,
+                "breakHours": []
+            },
+            "structural": {
+                "labBlockSize": 2,
+                "theoryBlockSize": 1
+            },
+            "weeklySubjectHours": {
+                "hard": true,
+                "shortageWeight": 1000
+            },
+            "noGaps": {
+                "hard": false,
+                "weight": 500
+            },
+            "teacherContinuity": {
+                "enabled": true,
+                "maxConsecutive": 2,
+                "weight": 80
+            },
+            "classContinuity": {
+                "enabled": true,
+                "maxConsecutive": 3,
+                "weight": 64
+            },
+            "teacherDailyOverload": {
+                "enabled": true,
+                "max": 6,
+                "weight": 96
+            },
+            "teacherRecoveryBreak": {
+                "enabled": false,
+                "minHours": 1,
+                "hard": false,
+                "weight": 140
+            },
+            "subjectClustering": {
+                "enabled": true,
+                "maxPerDay": 3,
+                "weight": 50
+            },
+            "subjectDistribution": {
+                "enabled": false,
+                "mode": "spread",
+                "weight": 70
+            },
+            "highLoadSubjectTiming": {
+                "enabled": false,
+                "mode": "early",
+                "minHoursPerWeek": 4,
+                "weight": 60
+            },
+            "frontLoading": {
+                "enabled": true,
+                "weight": 600,
+                "transitionWeight": 600,
+                "emptyBeforeLaterOccupiedWeight": 600,
+                "lateSlotWeight": 600
+            },
+            "teacherAvailability": {
+                "enabled": false,
+                "hard": true,
+                "weight": 250,
+                "globallyUnavailableSlots": [],
+                "unavailableSlotsByTeacher": {}
+            },
+            "teacherWeeklyLoadBalance": {
+                "enabled": false,
+                "minWeeklyLoad": 0,
+                "targetWeeklyLoad": 0,
+                "maxWeeklyLoad": 48,
+                "hardMin": false,
+                "hardMax": false,
+                "underWeight": 40,
+                "overWeight": 40
+            },
+            "classDailyMinimumLoad": {
+                "enabled": false,
+                "hard": false,
+                "minPerDay": 1,
+                "weight": 100
+            },
+            "teacherBoundaryPreference": {
+                "enabled": false,
+                "avoidFirstPeriod": true,
+                "avoidLastPeriod": true,
+                "weight": 60,
+                "teacherOverrides": {}
+            },
+            "solver": {
+                "timeLimitSec": 1200,
+                "solutionCount": 5,
+                "maxCandidatesPerCombo": 30,
+                "earlyAbortNoSolution": false,
+                "noSolutionAbortRatio": 0.4,
+                "noSolutionAbortMinSec": 10,
+                "minTimePerAttemptSec": 999,
+                "minCandidateDifferenceRatio": 0.02
+            },
+            "teacherPreferences": {
+                "69341faa7ad3ed3887b8a833": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a836": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a839": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a83c": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a83f": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a842": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a845": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341faa7ad3ed3887b8a848": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a84b": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a84e": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a851": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a854": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a857": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a85a": {
+                    "avoidFirstPeriod": true,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a85d": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a860": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a863": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a866": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a869": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a86c": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a86f": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a872": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a875": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a878": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a87b": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a87e": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fab7ad3ed3887b8a881": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a884": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a887": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a88a": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a88d": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a890": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a893": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a896": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a899": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fac7ad3ed3887b8a89c": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                },
+                "69341fc0d4a29e95630df99d": {
+                    "avoidFirstPeriod": false,
+                    "avoidLastPeriod": false,
+                    "maxConsecutive": null,
+                    "preferredDays": []
+                }
+            }
+        },
+        "allocations_report": null,
+        "unmet_requirements": [],
+        "warnings": [],
+        "solver_stats": {
+            "candidate_start_count": 9660,
+            "combo_count": 322,
+            "active_combo_count": 322,
+            "constraint_count": 17848,
+            "wall_time_seconds": 6.028663300000001,
+            "status": "INFEASIBLE",
+            "solutions_found": 0,
+            "first_solution_wall_time_seconds": 0,
+            "early_abort_deadline_seconds": null,
+            "early_abort_triggered": false
+        },
+        "strategy": "relaxed_constraints",
+        "diagnostics": {
+            "summary": {
+                "requiredClassSubjectPairs": 96,
+                "zeroStartRequirementCount": 0,
+                "lowFlexRequirementCount": 0,
+                "teacherForcedPressureCount": 0,
+                "teacherDemandPressureCount": 30,
+                "pairTeacherContentionCount": 517
+            },
+            "zeroStartRequirements": [],
+            "lowFlexRequirements": [],
+            "teacherForcedPressure": [],
+            "teacherDemandPressure": [
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a878",
+                    "teacherName": "ANB",
+                    "demandHours": 119,
+                    "coveredPairs": 14,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2.4791666666666665
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a87b",
+                    "teacherName": "TNR",
+                    "demandHours": 119,
+                    "coveredPairs": 14,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2.4791666666666665
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a84e",
+                    "teacherName": "MS",
+                    "demandHours": 99,
+                    "coveredPairs": 10,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2.0625
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a84b",
+                    "teacherName": "SN",
+                    "demandHours": 99,
+                    "coveredPairs": 10,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2.0625
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a851",
+                    "teacherName": "USA",
+                    "demandHours": 99,
+                    "coveredPairs": 10,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2.0625
+                },
+                {
+                    "teacherId": "69341fac7ad3ed3887b8a896",
+                    "teacherName": "GCV",
+                    "demandHours": 96,
+                    "coveredPairs": 10,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2
+                },
+                {
+                    "teacherId": "69341fac7ad3ed3887b8a89c",
+                    "teacherName": "KLG",
+                    "demandHours": 96,
+                    "coveredPairs": 10,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2
+                },
+                {
+                    "teacherId": "69341fac7ad3ed3887b8a899",
+                    "teacherName": "RP",
+                    "demandHours": 96,
+                    "coveredPairs": 10,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 2
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a866",
+                    "teacherName": "RM",
+                    "demandHours": 87,
+                    "coveredPairs": 9,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.8125
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a863",
+                    "teacherName": "YPN",
+                    "demandHours": 87,
+                    "coveredPairs": 9,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.8125
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a87e",
+                    "teacherName": "ATP",
+                    "demandHours": 74,
+                    "coveredPairs": 9,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.5416666666666667
+                },
+                {
+                    "teacherId": "69341fab7ad3ed3887b8a881",
+                    "teacherName": "SJ",
+                    "demandHours": 74,
+                    "coveredPairs": 9,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.5416666666666667
+                },
+                {
+                    "teacherId": "69341faa7ad3ed3887b8a833",
+                    "teacherName": "ARD",
+                    "demandHours": 71,
+                    "coveredPairs": 16,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4791666666666667
+                },
+                {
+                    "teacherId": "69341faa7ad3ed3887b8a845",
+                    "teacherName": "ASK",
+                    "demandHours": 71,
+                    "coveredPairs": 16,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4791666666666667
+                },
+                {
+                    "teacherId": "69341faa7ad3ed3887b8a83f",
+                    "teacherName": "KSG",
+                    "demandHours": 71,
+                    "coveredPairs": 16,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4791666666666667
+                },
+                {
+                    "teacherId": "69341faa7ad3ed3887b8a836",
+                    "teacherName": "ML",
+                    "demandHours": 71,
+                    "coveredPairs": 16,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4791666666666667
+                },
+                {
+                    "teacherId": "69341faa7ad3ed3887b8a842",
+                    "teacherName": "MN",
+                    "demandHours": 71,
+                    "coveredPairs": 16,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4791666666666667
+                },
+                {
+                    "teacherId": "69341fac7ad3ed3887b8a887",
+                    "teacherName": "GCS",
+                    "demandHours": 69,
+                    "coveredPairs": 7,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4375
+                },
+                {
+                    "teacherId": "69341fac7ad3ed3887b8a893",
+                    "teacherName": "GS",
+                    "demandHours": 69,
+                    "coveredPairs": 7,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4375
+                },
+                {
+                    "teacherId": "69341fac7ad3ed3887b8a890",
+                    "teacherName": "NM",
+                    "demandHours": 69,
+                    "coveredPairs": 7,
+                    "effectiveCapacity": 48,
+                    "demandToCapacityRatio": 1.4375
+                }
+            ],
+            "pairTeacherContention": [
+                {
+                    "leftClassName": "II PU - Science (PCMB & Cs) - S1",
+                    "leftSubjectName": "BUS STD/ COMP (BUS STD + COMPUTER)",
+                    "leftRequiredHours": 9,
+                    "rightClassName": "II PU - Science (PCMB & Cs) - S2",
+                    "rightSubjectName": "BUS STD/ COMP (COMPUTER + BUS STD)",
+                    "rightRequiredHours": 9,
+                    "sharedTeacherCount": 5,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "GCV",
+                        "RP",
+                        "KLG"
+                    ],
+                    "combinedRequiredHours": 18
+                },
+                {
+                    "leftClassName": "II PU - Science (PCMB & Cs) - S1",
+                    "leftSubjectName": "BUS STD/ COMP (BUS STD + COMPUTER)",
+                    "leftRequiredHours": 9,
+                    "rightClassName": "II PU - Science (PCMB & Cs) - S4",
+                    "rightSubjectName": "BUS STD/ COMP (COMPUTER + BUS STD)",
+                    "rightRequiredHours": 9,
+                    "sharedTeacherCount": 5,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "GCV",
+                        "RP",
+                        "KLG"
+                    ],
+                    "combinedRequiredHours": 18
+                },
+                {
+                    "leftClassName": "II PU - Science (PCMB & Cs) - S2",
+                    "leftSubjectName": "BUS STD/ COMP (COMPUTER + BUS STD)",
+                    "leftRequiredHours": 9,
+                    "rightClassName": "II PU - Science (PCMB & Cs) - S4",
+                    "rightSubjectName": "BUS STD/ COMP (COMPUTER + BUS STD)",
+                    "rightRequiredHours": 9,
+                    "sharedTeacherCount": 5,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "GCV",
+                        "RP",
+                        "KLG"
+                    ],
+                    "combinedRequiredHours": 18
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMB) - J3",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J4",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMB) - J3",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J4",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMB) - J3",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J5",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMB) - J3",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J5",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMB) - J4",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J5",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMB) - J4",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J5",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J3",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J3",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J4",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J4",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J5",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMB) - J5",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "CHEMISTRY",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMCs) - J2",
+                    "rightSubjectName": "CHEMISTRY",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "VM",
+                        "VV",
+                        "SG",
+                        "JK"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "MATHS",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMCs) - J2",
+                    "rightSubjectName": "MATHS",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "YPN",
+                        "RM",
+                        "RSK",
+                        "SMS"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "COMPUTER",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "I PU - Science (PCMCs) - J2",
+                    "rightSubjectName": "COMPUTER",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "ANB",
+                        "TNR",
+                        "ATP",
+                        "SJ"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "CHEMISTRY",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "II PU - Science (PCMB & Cs) - S1",
+                    "rightSubjectName": "CHEMISTRY",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "VM",
+                        "VV",
+                        "SG",
+                        "JK"
+                    ],
+                    "combinedRequiredHours": 20
+                },
+                {
+                    "leftClassName": "I PU - Science (PCMCs) - J1",
+                    "leftSubjectName": "CHEMISTRY",
+                    "leftRequiredHours": 10,
+                    "rightClassName": "II PU - Science (PCMB & Cs) - S2",
+                    "rightSubjectName": "CHEMISTRY",
+                    "rightRequiredHours": 10,
+                    "sharedTeacherCount": 4,
+                    "sharedTeachers": [
+                        "VM",
+                        "VV",
+                        "SG",
+                        "JK"
+                    ],
+                    "combinedRequiredHours": 20
+                }
+            ],
+            "fixedSlotWarnings": []
+        },
+        "hint": "Try increasing solver time or reducing constraints.",
+        "reason": null,
+        "attemptsTried": 3,
+        "generation_options": [],
+        "bestClassTimetables": null,
+        "bestFacultyTimetables": null,
+        "bestFacultyDailyHours": null,
+        "bestScore": null
+    },
+    "error": "No valid timetable found within time limit (INFEASIBLE)",
+    "cancelRequested": false,
+    "createdAt": "2026-04-10T12:24:49.386Z",
+    "updatedAt": "2026-04-10T12:25:18.666Z"
+}

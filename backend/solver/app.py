@@ -231,11 +231,25 @@ def _build_attempt_constraint_config(
 ) -> Dict[str, Any]:
     config = copy.deepcopy(base_config) if isinstance(base_config, dict) else {}
     solver_cfg = config.setdefault("solver", {})
+    user_max_candidates = solver_cfg.get("maxCandidatesPerCombo")
+    user_early_abort = solver_cfg.get("earlyAbortNoSolution")
+    user_abort_ratio = solver_cfg.get("noSolutionAbortRatio")
+    user_abort_min_sec = solver_cfg.get("noSolutionAbortMinSec")
     solver_cfg["timeLimitSec"] = per_attempt_time_limit_sec
-    solver_cfg["maxCandidatesPerCombo"] = int(strategy.get("maxCandidatesPerCombo") or 15)
-    solver_cfg["earlyAbortNoSolution"] = bool(strategy.get("earlyAbortNoSolution", True))
-    solver_cfg["noSolutionAbortRatio"] = float(strategy.get("noSolutionAbortRatio", 0.4))
-    solver_cfg["noSolutionAbortMinSec"] = float(strategy.get("noSolutionAbortMinSec", 10))
+    solver_cfg["maxCandidatesPerCombo"] = int(
+        user_max_candidates if user_max_candidates is not None else (strategy.get("maxCandidatesPerCombo") or 15)
+    )
+    solver_cfg["earlyAbortNoSolution"] = (
+        bool(user_early_abort)
+        if user_early_abort is not None
+        else bool(strategy.get("earlyAbortNoSolution", True))
+    )
+    solver_cfg["noSolutionAbortRatio"] = float(
+        user_abort_ratio if user_abort_ratio is not None else strategy.get("noSolutionAbortRatio", 0.4)
+    )
+    solver_cfg["noSolutionAbortMinSec"] = float(
+        user_abort_min_sec if user_abort_min_sec is not None else strategy.get("noSolutionAbortMinSec", 10)
+    )
 
     if strategy.get("relaxSoftConstraints"):
         for section_name, weight_scale in (
@@ -283,7 +297,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             ),
         ),
     )
-    attempts = max(3, int(payload.get("attempts") or 3))
+    attempts = max(12, int(payload.get("attempts") or 12))
     enforce_hard_no_gaps = (
         bool(constraint_config.get("noGaps", {}).get("hard"))
         if isinstance(constraint_config.get("noGaps"), dict) and constraint_config.get("noGaps", {}).get("hard") is not None
@@ -295,6 +309,12 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     seen_hashes = set()
     attempts_run = 0
     last_error = None
+    last_failure_result: Dict[str, Any] | None = None
+    duplicate_hash_skips = 0
+    similar_skips = 0
+    infeasible_attempts = 0
+    gap_rejections = 0
+    stop_reason = "attempt_budget_exhausted"
     started = __import__("time").time()
     configured_time_limit = float(
         _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
@@ -307,7 +327,15 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         0.25,
         max(0.0, float(_cfg_get(constraint_config, ["solver", "minCandidateDifferenceRatio"], 0.02))),
     )
-    max_attempts = max(attempts, solution_count * 2)
+    budget_driven_attempt_cap = max(
+        1,
+        int(configured_time_limit // max(5.0, min_solver_time_per_attempt_sec)),
+    )
+    max_attempts = max(
+        attempts,
+        solution_count * 6,
+        min(80, budget_driven_attempt_cap),
+    )
     strategy_templates = [
         {
             "name": "strict",
@@ -355,11 +383,6 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         strategy["attemptIndex"] = attempt_index
         strategy["seed"] = attempt_index + 1
         if cycle > 0:
-            strategy["maxCandidatesPerCombo"] = max(
-                6,
-                int(strategy["maxCandidatesPerCombo"]) - cycle,
-            )
-            strategy["timeShare"] = max(0.08, float(strategy["timeShare"]) * max(0.5, 1 - (cycle * 0.15)))
             strategy["name"] = f"{strategy['name']}_cycle_{cycle + 1}"
         attempt_plans.append(strategy)
     total_time_share = sum(float(plan.get("timeShare") or 0) for plan in attempt_plans) or 1.0
@@ -385,33 +408,80 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         selected = option or (ranked[0] if ranked else None)
         return {
             "ok": bool(selected),
-            "error": None if selected else (last_error or "Failed to generate timetable"),
+            "error": None if selected else (
+                (last_failure_result.get("error") if isinstance(last_failure_result, dict) else None)
+                or last_error
+                or "Failed to generate timetable"
+            ),
             "generation_batch_id": generation_batch_id,
             "optionsGenerated": len(ranked),
             "selected_option_id": selected.get("optionId") if selected else None,
             "score": selected.get("score") if selected else None,
             "objectiveValue": selected.get("objectiveValue") if selected else None,
-            "class_timetables": selected.get("class_timetables") if selected else None,
-            "faculty_timetables": selected.get("faculty_timetables") if selected else None,
-            "faculty_daily_hours": selected.get("faculty_daily_hours") if selected else None,
-            "classes": selected.get("classes") if selected else None,
-            "combos": selected.get("combos") if selected else None,
-            "config": selected.get("config") if selected else constraint_config,
+            "class_timetables": selected.get("class_timetables") if selected else (
+                last_failure_result.get("class_timetables") if isinstance(last_failure_result, dict) else None
+            ),
+            "faculty_timetables": selected.get("faculty_timetables") if selected else (
+                last_failure_result.get("faculty_timetables") if isinstance(last_failure_result, dict) else None
+            ),
+            "faculty_daily_hours": selected.get("faculty_daily_hours") if selected else (
+                last_failure_result.get("faculty_daily_hours") if isinstance(last_failure_result, dict) else None
+            ),
+            "classes": selected.get("classes") if selected else (
+                last_failure_result.get("classes") if isinstance(last_failure_result, dict) else classes
+            ),
+            "combos": selected.get("combos") if selected else (
+                last_failure_result.get("combos") if isinstance(last_failure_result, dict) else combos
+            ),
+            "config": selected.get("config") if selected else (
+                last_failure_result.get("config") if isinstance(last_failure_result, dict) else constraint_config
+            ),
             "allocations_report": selected.get("allocations_report") if selected else None,
-            "unmet_requirements": selected.get("unmet_requirements") if selected else [],
-            "warnings": selected.get("warnings") if selected else [],
-            "solver_stats": selected.get("solver_stats") if selected else None,
-            "strategy": selected.get("strategy") if selected else None,
+            "unmet_requirements": selected.get("unmet_requirements") if selected else (
+                (last_failure_result.get("unmet_requirements") if isinstance(last_failure_result, dict) else None) or []
+            ),
+            "warnings": selected.get("warnings") if selected else (
+                (last_failure_result.get("warnings") if isinstance(last_failure_result, dict) else None) or []
+            ),
+            "solver_stats": selected.get("solver_stats") if selected else (
+                last_failure_result.get("solver_stats") if isinstance(last_failure_result, dict) else None
+            ),
+            "strategy": selected.get("strategy") if selected else (
+                last_failure_result.get("strategy") if isinstance(last_failure_result, dict) else None
+            ),
+            "diagnostics": selected.get("diagnostics") if selected else (
+                last_failure_result.get("diagnostics") if isinstance(last_failure_result, dict) else None
+            ),
+            "hint": selected.get("hint") if selected else (
+                last_failure_result.get("hint") if isinstance(last_failure_result, dict) else None
+            ),
+            "reason": selected.get("reason") if selected else (
+                last_failure_result.get("reason") if isinstance(last_failure_result, dict) else None
+            ),
+            "preview_stats": selected.get("preview_stats") if selected else (
+                last_failure_result.get("preview_stats") if isinstance(last_failure_result, dict) else None
+            ),
             "attemptsTried": attempts_run,
             "generation_options": ranked,
             "bestClassTimetables": selected.get("class_timetables") if selected else None,
             "bestFacultyTimetables": selected.get("faculty_timetables") if selected else None,
             "bestFacultyDailyHours": selected.get("faculty_daily_hours") if selected else None,
             "bestScore": selected.get("score") if selected else None,
+            "batch_stats": {
+                "attemptsPlanned": max_attempts,
+                "attemptsTried": attempts_run,
+                "uniqueCandidatesFound": len(candidates),
+                "duplicateHashSkips": duplicate_hash_skips,
+                "nearDuplicateSkips": similar_skips,
+                "infeasibleAttempts": infeasible_attempts,
+                "gapRejections": gap_rejections,
+                "stopReason": stop_reason,
+            },
         }
 
     for attempt, strategy in enumerate(attempt_plans):
         if cancel_check and cancel_check():
+            stop_reason = "cancel_requested"
             return {
                 "ok": False,
                 "error": "Generation cancelled",
@@ -422,6 +492,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         remaining_budget_sec = configured_time_limit - elapsed_sec
         if remaining_budget_sec <= 0:
             last_error = "Solver time budget exhausted"
+            stop_reason = "time_budget_exhausted"
             break
 
         remaining_attempts = max_attempts - attempt
@@ -437,6 +508,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             ),
         )
         if per_attempt_time_limit_sec > remaining_budget_sec:
+            stop_reason = "insufficient_remaining_budget_for_attempt"
             break
 
         progress_start = int((attempt * 95) / max(1, max_attempts))
@@ -494,6 +566,11 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
 
         if not result.get("ok"):
             last_error = result.get("error") or "Unknown generator failure"
+            infeasible_attempts += 1
+            last_failure_result = {
+                **result,
+                "strategy": strategy.get("name"),
+            }
             progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
             continue
 
@@ -504,6 +581,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         gap_count = _analyze_class_internal_gaps(result.get("class_timetables") or {}).get("gapCount", 0)
         if enforce_hard_no_gaps and gap_count > 0:
             last_error = f"Generated timetable has {gap_count} internal class gaps"
+            gap_rejections += 1
             progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
             continue
 
@@ -513,6 +591,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
 
         timetable_hash = _hash_timetable(result.get("class_timetables") or {})
         if not timetable_hash or timetable_hash in seen_hashes:
+            duplicate_hash_skips += 1
             progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
             continue
 
@@ -528,6 +607,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                 is_too_similar = True
                 break
         if is_too_similar:
+            similar_skips += 1
             progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
             continue
 
@@ -565,9 +645,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             }
         )
 
-        if len(candidates) >= solution_count:
-            break
-        if best and (best.get("score") or 0) <= 0 and not (best.get("warnings") or []) and not (best.get("unmet_requirements") or []):
+        if len(candidates) >= max(solution_count, solution_count * 3):
+            stop_reason = "target_unique_candidates_reached"
             break
 
     best = ranked_candidates()[0] if ranked_candidates() else None
@@ -630,7 +709,16 @@ async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
             phase=final_phase,
             progress=final_progress,
             result=result,
-            partial_data=result if result.get("ok") else None,
+            partial_data=(
+                result
+                if (
+                    result.get("ok")
+                    or result.get("partialData") is not None
+                    or result.get("preview_stats") is not None
+                    or isinstance(result.get("class_timetables"), dict)
+                )
+                else None
+            ),
             error=(
                 persistence_error
                 if result.get("ok") and persistence_error
@@ -1191,6 +1279,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     subject_by_id = {s["_id"]: s for s in subjects}
     class_by_id = {c["_id"]: c for c in classes}
     combo_by_id = {c["_id"]: c for c in combos}
+    faculty_by_id = {f["_id"]: f for f in faculties}
     faculty_ids = [f["_id"] for f in faculties]
 
     def _is_teacher_unavailable(fid: str, day: int, hour: int) -> bool:
@@ -1514,6 +1603,364 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             x_by_class_subject.setdefault((class_id, combo["subject_id"]), []).append(
                 (var, block)
             )
+
+    def _build_failure_diagnostics() -> Dict[str, Any]:
+        active_combo_ids_by_pair: Dict[Tuple[str, str], set] = {}
+        active_start_count_by_pair: Dict[Tuple[str, str], int] = {}
+        teacher_hours_demand: Dict[str, int] = {}
+        teacher_pair_coverage_count: Dict[str, int] = {}
+        pair_teacher_sets: Dict[Tuple[str, str], set] = {}
+        for combo_id, day, hour in x.keys():
+            combo = combo_by_id.get(combo_id)
+            if not combo:
+                continue
+            subject_id = combo.get("subject_id")
+            for class_id in combo.get("class_ids", []):
+                key = (class_id, subject_id)
+                active_combo_ids_by_pair.setdefault(key, set()).add(combo_id)
+                active_start_count_by_pair[key] = active_start_count_by_pair.get(key, 0) + 1
+
+        required_pair_count = 0
+        zero_start_requirements: List[Dict[str, Any]] = []
+        low_flex_requirements: List[Dict[str, Any]] = []
+        teacher_forced_hours: Dict[str, int] = {}
+
+        for cls in classes:
+            class_id = cls["_id"]
+            for subj in subjects:
+                subject_id = subj["_id"]
+                req = int(required_hours_by_class_subject[class_id].get(subject_id, 0) or 0)
+                if req <= 0:
+                    continue
+                required_pair_count += 1
+                pair_key = (class_id, subject_id)
+                combo_ids = sorted(active_combo_ids_by_pair.get(pair_key) or [])
+                start_count = int(active_start_count_by_pair.get(pair_key, 0) or 0)
+                item = {
+                    "classId": class_id,
+                    "className": class_by_id.get(class_id, {}).get("name") or class_id,
+                    "subjectId": subject_id,
+                    "subjectName": subject_by_id.get(subject_id, {}).get("name") or subject_id,
+                    "requiredHours": req,
+                    "eligibleComboCount": len(combo_ids),
+                    "eligibleStartCount": start_count,
+                }
+                if start_count == 0 or not combo_ids:
+                    zero_start_requirements.append(item)
+                    continue
+                if start_count <= max(req, 2) or len(combo_ids) <= 1:
+                    low_flex_requirements.append(item)
+
+                teacher_sets = []
+                for combo_id in combo_ids:
+                    combo = combo_by_id.get(combo_id) or {}
+                    teacher_sets.append(set(str(fid) for fid in (combo.get("faculty_ids") or [])))
+                union_teachers = set().union(*teacher_sets) if teacher_sets else set()
+                pair_teacher_sets[pair_key] = union_teachers
+                item["eligibleTeacherCount"] = len(union_teachers)
+                if teacher_sets:
+                    common_teachers = set.intersection(*teacher_sets)
+                    for fid in common_teachers:
+                        if fid:
+                            teacher_forced_hours[fid] = teacher_forced_hours.get(fid, 0) + req
+                    for fid in union_teachers:
+                        if fid:
+                            teacher_hours_demand[fid] = teacher_hours_demand.get(fid, 0) + req
+                            teacher_pair_coverage_count[fid] = teacher_pair_coverage_count.get(fid, 0) + 1
+
+        teacher_capacity_pressure: List[Dict[str, Any]] = []
+        teacher_demand_pressure: List[Dict[str, Any]] = []
+        for fid, forced_hours in teacher_forced_hours.items():
+            unavailable_count = 0
+            if teacher_avail_enabled and teacher_avail_hard:
+                seen_slots = set(teacher_avail_global)
+                teacher_slots = teacher_avail_by_teacher.get(fid) or set()
+                seen_slots |= set(teacher_slots)
+                unavailable_count = len(
+                    {
+                        (day, hour)
+                        for (day, hour) in seen_slots
+                        if 0 <= day < DAYS_PER_WEEK and 0 <= hour < HOURS_PER_DAY and hour not in break_hours_set
+                    }
+                )
+            capacity = max(0, DAYS_PER_WEEK * valid_hour_count - unavailable_count)
+            ratio = (forced_hours / capacity) if capacity > 0 else None
+            teacher_capacity_pressure.append(
+                {
+                    "teacherId": fid,
+                    "teacherName": faculty_by_id.get(fid, {}).get("name") or fid,
+                    "forcedHours": forced_hours,
+                    "effectiveCapacity": capacity,
+                    "utilizationRatio": ratio,
+                }
+            )
+
+        for fid, demand_hours in teacher_hours_demand.items():
+            unavailable_count = 0
+            if teacher_avail_enabled and teacher_avail_hard:
+                seen_slots = set(teacher_avail_global)
+                teacher_slots = teacher_avail_by_teacher.get(fid) or set()
+                seen_slots |= set(teacher_slots)
+                unavailable_count = len(
+                    {
+                        (day, hour)
+                        for (day, hour) in seen_slots
+                        if 0 <= day < DAYS_PER_WEEK and 0 <= hour < HOURS_PER_DAY and hour not in break_hours_set
+                    }
+                )
+            capacity = max(0, DAYS_PER_WEEK * valid_hour_count - unavailable_count)
+            teacher_demand_pressure.append(
+                {
+                    "teacherId": fid,
+                    "teacherName": faculty_by_id.get(fid, {}).get("name") or fid,
+                    "demandHours": demand_hours,
+                    "coveredPairs": teacher_pair_coverage_count.get(fid, 0),
+                    "effectiveCapacity": capacity,
+                    "demandToCapacityRatio": (demand_hours / capacity) if capacity > 0 else None,
+                }
+            )
+
+        teacher_capacity_pressure.sort(
+            key=lambda item: (
+                -999999 if item.get("effectiveCapacity") == 0 and item.get("forcedHours", 0) > 0
+                else -(item.get("utilizationRatio") or 0),
+                -(item.get("forcedHours") or 0),
+                item.get("teacherName") or "",
+            )
+        )
+        teacher_demand_pressure.sort(
+            key=lambda item: (
+                -999999 if item.get("effectiveCapacity") == 0 and item.get("demandHours", 0) > 0
+                else -(item.get("demandToCapacityRatio") or 0),
+                -(item.get("demandHours") or 0),
+                -(item.get("coveredPairs") or 0),
+                item.get("teacherName") or "",
+            )
+        )
+        low_flex_requirements.sort(
+            key=lambda item: (
+                item.get("eligibleStartCount", 0),
+                item.get("eligibleComboCount", 0),
+                item.get("eligibleTeacherCount", 0),
+                -item.get("requiredHours", 0),
+                item.get("className") or "",
+                item.get("subjectName") or "",
+            )
+        )
+
+        pair_teacher_contention: List[Dict[str, Any]] = []
+        pair_items = []
+        for cls in classes:
+            class_id = cls["_id"]
+            for subj in subjects:
+                subject_id = subj["_id"]
+                req = int(required_hours_by_class_subject[class_id].get(subject_id, 0) or 0)
+                if req <= 0:
+                    continue
+                pair_key = (class_id, subject_id)
+                teacher_ids = set(pair_teacher_sets.get(pair_key) or set())
+                if not teacher_ids:
+                    continue
+                pair_items.append(
+                    {
+                        "pairKey": pair_key,
+                        "classId": class_id,
+                        "className": class_by_id.get(class_id, {}).get("name") or class_id,
+                        "subjectId": subject_id,
+                        "subjectName": subject_by_id.get(subject_id, {}).get("name") or subject_id,
+                        "requiredHours": req,
+                        "teacherIds": teacher_ids,
+                    }
+                )
+
+        for index, left in enumerate(pair_items):
+            for right in pair_items[index + 1 :]:
+                shared_teachers = sorted(left["teacherIds"] & right["teacherIds"])
+                if not shared_teachers:
+                    continue
+                pair_teacher_contention.append(
+                    {
+                        "leftClassName": left["className"],
+                        "leftSubjectName": left["subjectName"],
+                        "leftRequiredHours": left["requiredHours"],
+                        "rightClassName": right["className"],
+                        "rightSubjectName": right["subjectName"],
+                        "rightRequiredHours": right["requiredHours"],
+                        "sharedTeacherCount": len(shared_teachers),
+                        "sharedTeachers": [
+                            faculty_by_id.get(fid, {}).get("name") or fid for fid in shared_teachers[:5]
+                        ],
+                        "combinedRequiredHours": left["requiredHours"] + right["requiredHours"],
+                    }
+                )
+
+        pair_teacher_contention.sort(
+            key=lambda item: (
+                -item.get("sharedTeacherCount", 0),
+                -item.get("combinedRequiredHours", 0),
+                item.get("leftClassName") or "",
+                item.get("rightClassName") or "",
+            )
+        )
+
+        return {
+            "summary": {
+                "requiredClassSubjectPairs": required_pair_count,
+                "zeroStartRequirementCount": len(zero_start_requirements),
+                "lowFlexRequirementCount": len(low_flex_requirements),
+                "teacherForcedPressureCount": len(
+                    [item for item in teacher_capacity_pressure if (item.get("utilizationRatio") or 0) >= 0.85]
+                ),
+                "teacherDemandPressureCount": len(
+                    [item for item in teacher_demand_pressure if (item.get("demandToCapacityRatio") or 0) >= 1.0]
+                ),
+                "pairTeacherContentionCount": len(pair_teacher_contention),
+            },
+            "zeroStartRequirements": zero_start_requirements[:20],
+            "lowFlexRequirements": low_flex_requirements[:20],
+            "teacherForcedPressure": teacher_capacity_pressure[:20],
+            "teacherDemandPressure": teacher_demand_pressure[:20],
+            "pairTeacherContention": pair_teacher_contention[:20],
+            "fixedSlotWarnings": fixed_slot_warnings[:20],
+        }
+
+    def _build_partial_preview() -> Dict[str, Any]:
+        max_days = max([int(c.get("days_per_week") or DAYS_PER_WEEK) for c in classes] or [DAYS_PER_WEEK])
+
+        class_timetables: Dict[str, List[List[Any]]] = {}
+        for cls in classes:
+            class_id = cls["_id"]
+            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            table = []
+            for _day in range(days):
+                row = []
+                for hour in range(HOURS_PER_DAY):
+                    row.append(BREAK if hour in break_hours_set else EMPTY)
+                table.append(row)
+            class_timetables[class_id] = table
+
+        faculty_timetables: Dict[str, List[List[Any]]] = {}
+        for faculty in faculties:
+            fid = faculty["_id"]
+            table = []
+            for _day in range(max_days):
+                row = []
+                for hour in range(HOURS_PER_DAY):
+                    row.append(BREAK if hour in break_hours_set else EMPTY)
+                table.append(row)
+            faculty_timetables[fid] = table
+
+        remaining_hours = {
+            class_id: {
+                subject_id: int(hours or 0)
+                for subject_id, hours in subject_map.items()
+            }
+            for class_id, subject_map in required_hours_by_class_subject.items()
+        }
+        occupied_class_slots: set[Tuple[str, int, int]] = set()
+        occupied_teacher_slots: set[Tuple[str, int, int]] = set()
+        placed_combo_starts = 0
+
+        for combo in sorted_combos:
+            combo_id = combo["_id"]
+            class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
+            if not class_ids:
+                continue
+            subj = subject_by_id.get(combo["subject_id"])
+            if not subj:
+                continue
+            block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+            candidate_starts = combo_candidate_starts.get(combo_id, [])
+            if not candidate_starts:
+                continue
+            ordered_starts = sorted(
+                candidate_starts,
+                key=lambda slot: (
+                    -int((combo_id, slot[0], slot[1]) in fixed_slot_keys),
+                    -sum(
+                        class_slot_pressure.get((class_id, slot[0], h), 0)
+                        for h in range(slot[1], slot[1] + block)
+                        for class_id in class_ids
+                    ),
+                    -sum(
+                        teacher_slot_pressure.get((fid, slot[0], h), 0)
+                        for h in range(slot[1], slot[1] + block)
+                        for fid in combo.get("faculty_ids", [])
+                    ),
+                    slot[0],
+                    hour_rank.get(slot[1], slot[1]),
+                ),
+            )
+
+            while min(
+                remaining_hours.get(class_id, {}).get(combo["subject_id"], 0)
+                for class_id in class_ids
+            ) >= block:
+                placed = False
+                for day, hour in ordered_starts:
+                    slot_hours = list(range(hour, hour + block))
+                    if any(
+                        (class_id, day, h) in occupied_class_slots
+                        for class_id in class_ids
+                        for h in slot_hours
+                    ):
+                        continue
+                    if any(
+                        (str(fid), day, h) in occupied_teacher_slots
+                        for fid in combo.get("faculty_ids", [])
+                        for h in slot_hours
+                    ):
+                        continue
+                    if any(
+                        day >= int(class_by_id[class_id].get("days_per_week") or DAYS_PER_WEEK)
+                        for class_id in class_ids
+                    ):
+                        continue
+
+                    for h in slot_hours:
+                        for class_id in class_ids:
+                            class_timetables[class_id][day][h] = combo_id
+                            occupied_class_slots.add((class_id, day, h))
+                        for fid in combo.get("faculty_ids", []):
+                            if day < len(faculty_timetables.get(str(fid), [])):
+                                faculty_timetables[str(fid)][day][h] = combo_id
+                            occupied_teacher_slots.add((str(fid), day, h))
+                    for class_id in class_ids:
+                        remaining_hours[class_id][combo["subject_id"]] -= block
+                    placed_combo_starts += 1
+                    placed = True
+                    break
+                if not placed:
+                    break
+
+        placed_class_slots = sum(
+            1
+            for rows in class_timetables.values()
+            for row in rows
+            for slot in row
+            if slot not in (EMPTY, BREAK, None)
+        )
+        total_required = sum(
+            max(0, int(hours or 0))
+            for subject_map in required_hours_by_class_subject.values()
+            for hours in subject_map.values()
+        )
+        remaining_required = sum(
+            max(0, int(hours or 0))
+            for subject_map in remaining_hours.values()
+            for hours in subject_map.values()
+        )
+
+        return {
+            "class_timetables": class_timetables,
+            "faculty_timetables": faculty_timetables,
+            "preview_stats": {
+                "placedComboStarts": placed_combo_starts,
+                "placedClassSlots": placed_class_slots,
+                "scheduledHours": total_required - remaining_required,
+                "remainingHours": remaining_required,
+            },
+        }
 
     for cls in classes:
         class_id = cls["_id"]
@@ -2029,6 +2476,8 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             early_abort_thread.join(timeout=0.2)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        failure_diagnostics = _build_failure_diagnostics()
+        partial_preview = _build_partial_preview()
         solver_stats = {
             "candidate_start_count": len(x),
             "combo_count": len(combos),
@@ -2052,20 +2501,28 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": "early_abort_no_solution",
                 "hint": "Try increasing solver time or reducing constraints.",
                 "classes": classes,
+                "class_timetables": partial_preview.get("class_timetables"),
+                "faculty_timetables": partial_preview.get("faculty_timetables"),
                 "unmet_requirements": unmet_requirements,
                 "warnings": fixed_slot_warnings,
                 "config": applied_config,
                 "solver_stats": solver_stats,
+                "diagnostics": failure_diagnostics,
+                "preview_stats": partial_preview.get("preview_stats"),
             }
         return {
             "ok": False,
             "error": f"No valid timetable found within time limit ({solver.StatusName(status)})",
             "hint": "Try increasing solver time or reducing constraints.",
             "classes": classes,
+            "class_timetables": partial_preview.get("class_timetables"),
+            "faculty_timetables": partial_preview.get("faculty_timetables"),
             "unmet_requirements": unmet_requirements,
             "warnings": fixed_slot_warnings,
             "config": applied_config,
             "solver_stats": solver_stats,
+            "diagnostics": failure_diagnostics,
+            "preview_stats": partial_preview.get("preview_stats"),
         }
 
     # Build outputs
