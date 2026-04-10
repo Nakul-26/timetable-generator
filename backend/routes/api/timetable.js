@@ -147,7 +147,10 @@ protectedRouter.post('/generate', async (req, res) => {
         generatorData.faculties || []
       );
 
-      const normalizedSolutionCount = Math.max(1, Math.min(5, Number(solutionCount) || 5));
+      const normalizedSolutionCount = Math.max(
+        1,
+        Math.min(5, Number(solutionCount) || Number(constraintConfig?.solver?.solutionCount) || 5)
+      );
       const job = await GenerationJob.create({
         status: "pending",
         phase: "queued",

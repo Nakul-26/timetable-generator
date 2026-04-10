@@ -1,21 +1,10 @@
 // runGenerator.js
 const DEFAULT_SOLVER_URL = process.env.SOLVER_URL || "http://localhost:8001";
-const DEFAULT_SOLVER_TIME_LIMIT_SEC = Number(process.env.SOLVER_TIME_LIMIT_SEC || 180);
+const DEFAULT_SOLVER_TIME_LIMIT_SEC = 180;
 const DEFAULT_TIMEOUT_MS = Number(
   process.env.SOLVER_TIMEOUT_MS || (DEFAULT_SOLVER_TIME_LIMIT_SEC * 1000 + 30000)
 );
-const DEFAULT_SOLUTION_COUNT = Math.max(
-  1,
-  Math.min(5, Number(process.env.GENERATOR_SOLUTION_COUNT || 5))
-);
-const MIN_SOLVER_TIME_PER_ATTEMPT_SEC = Math.max(
-  5,
-  Number(process.env.MIN_SOLVER_TIME_PER_ATTEMPT_SEC || 15)
-);
-const MIN_CANDIDATE_DIFFERENCE_RATIO = Math.min(
-  0.25,
-  Math.max(0, Number(process.env.MIN_CANDIDATE_DIFFERENCE_RATIO || 0.02))
-);
+const DEFAULT_SOLUTION_COUNT = 5;
 
 function analyzeClassInternalGaps(classTimetables) {
   let gapCount = 0;
@@ -205,16 +194,32 @@ async function runGenerate({
   const enforceHardNoGaps =
     constraintConfig?.noGaps?.hard !== undefined
       ? Boolean(constraintConfig.noGaps.hard)
-      : String(process.env.ENFORCE_HARD_NO_GAPS || "true").toLowerCase() !== "false";
+      : true;
 
   let lastError = null;
   let bestPartial = null;
   let bestPartialFilled = -1;
   const generationBatchId = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const desiredSolutions = Math.max(1, Math.min(5, Number(solutionCount) || DEFAULT_SOLUTION_COUNT));
+  const desiredSolutions = Math.max(
+    1,
+    Math.min(
+      5,
+      Number(solutionCount) ||
+        Number(constraintConfig?.solver?.solutionCount) ||
+        DEFAULT_SOLUTION_COUNT
+    )
+  );
   const maxAttempts = Math.max(attempts, desiredSolutions * 2);
   const configuredSolverTimeLimitSec =
     Number(constraintConfig?.solver?.timeLimitSec) || DEFAULT_SOLVER_TIME_LIMIT_SEC;
+  const minSolverTimePerAttemptSec = Math.max(
+    5,
+    Number(constraintConfig?.solver?.minTimePerAttemptSec) || 15
+  );
+  const minCandidateDifferenceRatio = Math.min(
+    0.25,
+    Math.max(0, Number(constraintConfig?.solver?.minCandidateDifferenceRatio) || 0.02)
+  );
   const candidates = [];
   const seenTimetableHashes = new Set();
   const generationStartedAt = Date.now();
@@ -361,7 +366,7 @@ async function runGenerate({
     }
     const remainingAttempts = maxAttempts - attempt;
     const perAttemptTimeLimitSec = Math.max(
-      MIN_SOLVER_TIME_PER_ATTEMPT_SEC,
+      minSolverTimePerAttemptSec,
       Math.min(
         configuredSolverTimeLimitSec / Math.max(1, desiredSolutions),
         remainingBudgetSec / Math.max(1, remainingAttempts)
@@ -451,7 +456,7 @@ async function runGenerate({
         result.class_timetables
       );
       if (totalSlots <= 0) return false;
-      return differentSlots < Math.max(3, Math.floor(totalSlots * MIN_CANDIDATE_DIFFERENCE_RATIO));
+      return differentSlots < Math.max(3, Math.floor(totalSlots * minCandidateDifferenceRatio));
     });
     if (isTooSimilar) {
       if (process.env.NODE_ENV !== "production") {

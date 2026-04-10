@@ -94,6 +94,13 @@ export const DEFAULT_CONSTRAINT_CONFIG = {
   },
   solver: {
     timeLimitSec: 180,
+    solutionCount: 5,
+    maxCandidatesPerCombo: 15,
+    earlyAbortNoSolution: true,
+    noSolutionAbortRatio: 0.4,
+    noSolutionAbortMinSec: 10,
+    minTimePerAttemptSec: 15,
+    minCandidateDifferenceRatio: 0.02,
   },
 };
 
@@ -414,6 +421,49 @@ export function normalizeConstraintConfig(input = {}) {
     },
     solver: {
       timeLimitSec: safeInt(solver.timeLimitSec, DEFAULT_CONSTRAINT_CONFIG.solver.timeLimitSec, 1),
+      solutionCount: Math.min(
+        5,
+        safeInt(solver.solutionCount, DEFAULT_CONSTRAINT_CONFIG.solver.solutionCount, 1)
+      ),
+      maxCandidatesPerCombo: safeInt(
+        solver.maxCandidatesPerCombo,
+        DEFAULT_CONSTRAINT_CONFIG.solver.maxCandidatesPerCombo,
+        1
+      ),
+      earlyAbortNoSolution: toBool(
+        solver.earlyAbortNoSolution,
+        DEFAULT_CONSTRAINT_CONFIG.solver.earlyAbortNoSolution
+      ),
+      noSolutionAbortRatio: Math.min(
+        0.95,
+        Math.max(
+          0,
+          safeNum(
+            solver.noSolutionAbortRatio,
+            DEFAULT_CONSTRAINT_CONFIG.solver.noSolutionAbortRatio
+          )
+        )
+      ),
+      noSolutionAbortMinSec: safeNum(
+        solver.noSolutionAbortMinSec,
+        DEFAULT_CONSTRAINT_CONFIG.solver.noSolutionAbortMinSec,
+        1
+      ),
+      minTimePerAttemptSec: safeNum(
+        solver.minTimePerAttemptSec,
+        DEFAULT_CONSTRAINT_CONFIG.solver.minTimePerAttemptSec,
+        5
+      ),
+      minCandidateDifferenceRatio: Math.min(
+        0.25,
+        Math.max(
+          0,
+          safeNum(
+            solver.minCandidateDifferenceRatio,
+            DEFAULT_CONSTRAINT_CONFIG.solver.minCandidateDifferenceRatio
+          )
+        )
+      ),
     },
   };
 }

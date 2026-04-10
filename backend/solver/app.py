@@ -58,13 +58,8 @@ def _load_local_env() -> None:
 
 _load_local_env()
 
-DEFAULT_SOLVER_TIME_LIMIT_SEC = float(os.getenv("SOLVER_TIME_LIMIT_SEC", "180"))
-DEFAULT_SOLUTION_COUNT = max(1, min(5, int(os.getenv("GENERATOR_SOLUTION_COUNT", "5"))))
-MIN_SOLVER_TIME_PER_ATTEMPT_SEC = max(5.0, float(os.getenv("MIN_SOLVER_TIME_PER_ATTEMPT_SEC", "15")))
-MIN_CANDIDATE_DIFFERENCE_RATIO = min(
-    0.25,
-    max(0.0, float(os.getenv("MIN_CANDIDATE_DIFFERENCE_RATIO", "0.02"))),
-)
+DEFAULT_SOLVER_TIME_LIMIT_SEC = 180.0
+DEFAULT_SOLUTION_COUNT = 5
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
 JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
@@ -278,12 +273,21 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     days_per_week = int(payload.get("DAYS_PER_WEEK") or 6)
     hours_per_day = int(payload.get("HOURS_PER_DAY") or 8)
     constraint_config = payload.get("constraintConfig") or {}
-    solution_count = max(1, min(5, int(payload.get("solutionCount") or DEFAULT_SOLUTION_COUNT)))
+    solution_count = max(
+        1,
+        min(
+            5,
+            int(
+                payload.get("solutionCount")
+                or _cfg_get(constraint_config, ["solver", "solutionCount"], DEFAULT_SOLUTION_COUNT)
+            ),
+        ),
+    )
     attempts = max(3, int(payload.get("attempts") or 3))
     enforce_hard_no_gaps = (
         bool(constraint_config.get("noGaps", {}).get("hard"))
         if isinstance(constraint_config.get("noGaps"), dict) and constraint_config.get("noGaps", {}).get("hard") is not None
-        else str(os.getenv("ENFORCE_HARD_NO_GAPS", "true")).lower() != "false"
+        else True
     )
 
     generation_batch_id = f"gen_{int(__import__('time').time() * 1000)}_{os.urandom(3).hex()}"
@@ -294,6 +298,14 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     started = __import__("time").time()
     configured_time_limit = float(
         _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
+    )
+    min_solver_time_per_attempt_sec = max(
+        5.0,
+        float(_cfg_get(constraint_config, ["solver", "minTimePerAttemptSec"], 15)),
+    )
+    min_candidate_difference_ratio = min(
+        0.25,
+        max(0.0, float(_cfg_get(constraint_config, ["solver", "minCandidateDifferenceRatio"], 0.02))),
     )
     max_attempts = max(attempts, solution_count * 2)
     strategy_templates = [
@@ -418,7 +430,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         ) or 1.0
         target_time_share = float(strategy.get("timeShare") or 0) / remaining_share
         per_attempt_time_limit_sec = max(
-            MIN_SOLVER_TIME_PER_ATTEMPT_SEC,
+            min_solver_time_per_attempt_sec,
             min(
                 configured_time_limit * (float(strategy.get("timeShare") or 0) / total_time_share),
                 remaining_budget_sec * target_time_share,
@@ -511,7 +523,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                 result.get("class_timetables") or {},
             )
             if diff["totalSlots"] > 0 and diff["differentSlots"] < max(
-                3, int(diff["totalSlots"] * MIN_CANDIDATE_DIFFERENCE_RATIO)
+                3, int(diff["totalSlots"] * min_candidate_difference_ratio)
             ):
                 is_too_similar = True
                 break
@@ -869,14 +881,14 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         _cfg_get(
             constraint_config,
             ["solver", "timeLimitSec"],
-            payload.get("solver_time_limit_sec") or os.getenv("SOLVER_TIME_LIMIT_SEC", "180"),
+            payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC,
         )
     )
     max_candidates_per_combo = int(
         _cfg_get(
             constraint_config,
             ["solver", "maxCandidatesPerCombo"],
-            os.getenv("SOLVER_MAX_CANDIDATES_PER_COMBO", "15"),
+            15,
         )
     )
     early_abort_no_solution_enabled = _to_bool(
@@ -1164,10 +1176,15 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         "noTeacherSessions": {"earlySlotWeight": no_teacher_early_slot_weight},
         "solver": {
             "timeLimitSec": solver_time_limit_sec,
+            "solutionCount": int(_cfg_get(constraint_config, ["solver", "solutionCount"], DEFAULT_SOLUTION_COUNT)),
             "maxCandidatesPerCombo": max_candidates_per_combo,
             "earlyAbortNoSolution": early_abort_no_solution_enabled,
             "noSolutionAbortRatio": no_solution_abort_ratio,
             "noSolutionAbortMinSec": no_solution_abort_min_sec,
+            "minTimePerAttemptSec": float(_cfg_get(constraint_config, ["solver", "minTimePerAttemptSec"], 15)),
+            "minCandidateDifferenceRatio": float(
+                _cfg_get(constraint_config, ["solver", "minCandidateDifferenceRatio"], 0.02)
+            ),
         },
     }
 

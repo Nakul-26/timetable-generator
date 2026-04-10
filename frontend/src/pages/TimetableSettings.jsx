@@ -1630,6 +1630,138 @@ function TimetableSettings() {
             }
           />
         </label>
+        <label>
+          Generated Options Count
+          <input
+            type="number"
+            min="1"
+            max="5"
+            value={config.solver.solutionCount}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  solutionCount: Math.max(1, Math.min(5, Number(e.target.value) || 1)),
+                },
+              }))
+            }
+          />
+        </label>
+        <label>
+          Max Candidates Per Combo
+          <input
+            type="number"
+            min="1"
+            value={config.solver.maxCandidatesPerCombo}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  maxCandidatesPerCombo: Math.max(1, Number(e.target.value) || 1),
+                },
+              }))
+            }
+          />
+        </label>
+        <label>
+          Early Abort If No Solution
+          <select
+            value={config.solver.earlyAbortNoSolution ? "yes" : "no"}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  earlyAbortNoSolution: e.target.value === "yes",
+                },
+              }))
+            }
+          >
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </label>
+        </div>
+        <div className="filters-container tt-settings-row">
+        <label>
+          No-Solution Abort Ratio
+          <input
+            type="number"
+            min="0"
+            max="0.95"
+            step="0.01"
+            value={config.solver.noSolutionAbortRatio}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  noSolutionAbortRatio: Math.max(0, Math.min(0.95, Number(e.target.value) || 0)),
+                },
+              }))
+            }
+          />
+        </label>
+        <label>
+          No-Solution Abort Min Seconds
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={config.solver.noSolutionAbortMinSec}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  noSolutionAbortMinSec: Math.max(1, Number(e.target.value) || 1),
+                },
+              }))
+            }
+          />
+        </label>
+        <label>
+          Min Time Per Attempt (seconds)
+          <input
+            type="number"
+            min="5"
+            step="1"
+            value={config.solver.minTimePerAttemptSec}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  minTimePerAttemptSec: Math.max(5, Number(e.target.value) || 5),
+                },
+              }))
+            }
+          />
+        </label>
+        <label>
+          Min Difference Ratio Between Options
+          <input
+            type="number"
+            min="0"
+            max="0.25"
+            step="0.01"
+            value={config.solver.minCandidateDifferenceRatio}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                solver: {
+                  ...prev.solver,
+                  minCandidateDifferenceRatio: Math.max(
+                    0,
+                    Math.min(0.25, Number(e.target.value) || 0)
+                  ),
+                },
+              }))
+            }
+          />
+        </label>
         </div>
         <div className="actions-bar tt-settings-actions" style={{ marginTop: 8 }}>
           <button className="secondary-btn" onClick={() => setJsonMode((v) => !v)}>

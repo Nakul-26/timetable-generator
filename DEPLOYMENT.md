@@ -40,9 +40,7 @@ Environment variables:
 - `JWT_SECRET`
 - `CORS_ORIGINS=https://your-frontend.pages.dev,https://your-custom-domain.com`
 - `SOLVER_URL=https://your-solver-service.onrender.com`
-- `SOLVER_TIME_LIMIT_SEC=180`
 - `SOLVER_TIMEOUT_MS=210000`
-- `GENERATOR_SOLUTION_COUNT=5`
 
 Notes:
 
@@ -66,10 +64,6 @@ Environment variables:
 
 - `MONGO_URI`
 - `MONGO_DB_NAME=timetable_jayanth`
-- `SOLVER_TIME_LIMIT_SEC=180`
-- `GENERATOR_SOLUTION_COUNT=5`
-- `MIN_SOLVER_TIME_PER_ATTEMPT_SEC=15`
-- `MIN_CANDIDATE_DIFFERENCE_RATIO=0.02`
 - `SOLVER_WORKERS=8`
 
 Notes:
@@ -88,3 +82,5 @@ Notes:
 ## Important constraint
 
 The backend is serverless, but timetable generation still depends on the long-running Python solver on Render. The current Vercel setup is suitable because the backend only creates jobs, polls MongoDB, and proxies normal API traffic. The heavy computation stays out of Vercel.
+
+Generation policy values such as solver time, option count, early-abort thresholds, and diversity thresholds are controlled from the timetable settings page and sent as part of `constraintConfig`, not deployment env vars.

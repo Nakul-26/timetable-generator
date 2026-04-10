@@ -526,7 +526,7 @@ function Timetable() {
 
   /* ===================== ACTIONS ===================== */
 
-  const generateTimetable = async (solutionCount = 5) => {
+  const generateTimetable = async (solutionCountOverride = null) => {
     if (isGenerateBlockedByHealth) {
       setError(
         "Generation blocked: health check contains errors. Resolve issues or disable blocking."
@@ -549,6 +549,14 @@ function Timetable() {
       const latestConstraintConfig = loadConstraintConfig();
       setConstraintConfig(latestConstraintConfig);
       const solverBudgetSec = Math.max(1, Number(latestConstraintConfig?.solver?.timeLimitSec) || 180);
+      const configuredSolutionCount = Math.max(
+        1,
+        Math.min(5, Number(latestConstraintConfig?.solver?.solutionCount) || 5)
+      );
+      const solutionCount = Math.max(
+        1,
+        Math.min(5, Number(solutionCountOverride) || configuredSolutionCount)
+      );
       setSolverDeadlineAt(Date.now() + solverBudgetSec * 1000);
 
       const payload = transformFixedSlots(fixedSlots);
@@ -1149,7 +1157,7 @@ function Timetable() {
         </button>
         <button
           className="primary-btn"
-          onClick={() => generateTimetable(5)}
+          onClick={() => generateTimetable()}
           disabled={loading || isGenerateBlockedByHealth}
           title={
             isGenerateBlockedByHealth
@@ -1157,7 +1165,7 @@ function Timetable() {
               : "Generate timetable"
           }
         >
-          Generate Top 5
+          Generate Top {constraintConfig?.solver?.solutionCount ?? 5}
         </button>
         {/* <button className="danger-btn" onClick={stopGeneration} disabled={!loading}>
           Stop
@@ -1304,6 +1312,7 @@ function Timetable() {
           <span>Days: {constraintConfig?.schedule?.daysPerWeek ?? 6}</span>
           <span>Hours: {constraintConfig?.schedule?.hoursPerDay ?? 8}</span>
           <span>Solver Time: {constraintConfig?.solver?.timeLimitSec ?? 180}s</span>
+          <span>Options: {constraintConfig?.solver?.solutionCount ?? 5}</span>
           <Link className="secondary-btn tt-soft-accent-btn" to="/timetable/settings">
             Open Timetable Settings
           </Link>
