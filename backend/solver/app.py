@@ -649,6 +649,34 @@ def _solver_loop_exception_handler(loop, context):
     loop.default_exception_handler(context)
 
 
+def _solve_with_solution_callback(solver, model, callback):
+    solve_method = getattr(solver, "SolveWithSolutionCallback", None)
+    if callable(solve_method):
+        return solve_method(model, callback)
+
+    solve_method = getattr(solver, "solve_with_solution_callback", None)
+    if callable(solve_method):
+        return solve_method(model, callback)
+
+    raise AttributeError(
+        "CpSolver does not support solution callback solving on this OR-Tools build"
+    )
+
+
+def _stop_search(solver) -> None:
+    stop_method = getattr(solver, "StopSearch", None)
+    if callable(stop_method):
+        stop_method()
+        return
+
+    stop_method = getattr(solver, "stop_search", None)
+    if callable(stop_method):
+        stop_method()
+        return
+
+    raise AttributeError("CpSolver does not support stop_search on this OR-Tools build")
+
+
 def _normalize_id(item: Dict[str, Any]) -> Dict[str, Any]:
     _id = item.get("_id") or item.get("id")
     return {**item, "_id": str(_id)}
@@ -1963,13 +1991,13 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return
             if not progress_callback.solution_found:
                 early_abort_state["triggered"] = True
-                solver.StopSearch()
+                _stop_search(solver)
 
         early_abort_thread = threading.Thread(target=stop_if_stuck, daemon=True)
         early_abort_thread.start()
 
     try:
-        status = solver.SolveWithSolutionCallback(model, progress_callback)
+        status = _solve_with_solution_callback(solver, model, progress_callback)
     finally:
         early_abort_stop.set()
         if early_abort_thread is not None:
