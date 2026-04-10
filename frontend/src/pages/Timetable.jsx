@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/axios";
 import axios from "../api/axios";
@@ -20,7 +20,11 @@ function Timetable() {
   // Async generation
   const [taskId, setTaskId] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [progressTarget, setProgressTarget] = useState(0);
   const [progressPhase, setProgressPhase] = useState("idle");
+  const [solverDeadlineAt, setSolverDeadlineAt] = useState(null);
+  const [solverRemainingSec, setSolverRemainingSec] = useState(null);
+  const progressRef = useRef(0);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthReport, setHealthReport] = useState(null);
   const [healthSeverityFilter, setHealthSeverityFilter] = useState("all");
@@ -317,6 +321,63 @@ function Timetable() {
     }
   }, [classes, fixedClassId]);
 
+  useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
+
+  useEffect(() => {
+    if (!loading || !solverDeadlineAt) {
+      setSolverRemainingSec(null);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((solverDeadlineAt - Date.now()) / 1000));
+      setSolverRemainingSec(remaining);
+    };
+
+    updateRemaining();
+    const timerId = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timerId);
+  }, [loading, solverDeadlineAt]);
+
+  useEffect(() => {
+    if (!loading) {
+      setProgress(progressTarget);
+      return;
+    }
+
+    const startValue = progressRef.current;
+    if (Math.abs(progressTarget - startValue) < 1) {
+      if (startValue !== progressTarget) setProgress(progressTarget);
+      return;
+    }
+
+    let frameId = null;
+    const delta = progressTarget - startValue;
+    const durationMs = 700;
+    const startedAt = performance.now();
+
+    const step = (now) => {
+      const elapsed = now - startedAt;
+      const ratio = Math.min(1, elapsed / durationMs);
+      const eased = 1 - Math.pow(1 - ratio, 3);
+      const nextValue = startValue + delta * eased;
+      progressRef.current = nextValue;
+      setProgress(nextValue);
+      if (ratio < 1) {
+        frameId = window.requestAnimationFrame(step);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(step);
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [loading, progressTarget]);
+
   const sortedHealthWarnings = useMemo(() => {
     const list = Array.isArray(healthReport?.warnings) ? [...healthReport.warnings] : [];
     return list.sort((a, b) => {
@@ -359,22 +420,22 @@ function Timetable() {
       try {
         const res = await api.get(`/generation-status/${taskId}`);
         const { status, progress, phase, result, error, partialData } = res.data;
+        const isRunning = status === "running" || status === "pending";
+        const isFailure = status === "failed" || status === "cancelled" || status === "error";
 
-        if (status === "running") {
+        if (isRunning) {
           const nextPhase = phase || "running";
           setProgressPhase(nextPhase);
-          setProgress(
-            nextPhase === "candidate_ready"
-              ? Math.max(85, progress ?? 0)
-              : progress ?? 0
-          );
+          setProgressTarget(progress ?? 0);
           if (partialData) {
             applyTimetableState(partialData, selectedOptionId);
           }
         } else {
-          setProgress(status === "completed" ? 100 : progress ?? 0);
+          setProgressTarget(status === "completed" ? 100 : progress ?? 0);
           setProgressPhase(phase || status || "done");
-          if (status === "error") setError(error || "Generation failed");
+          if (isFailure) {
+            setError(error || result?.error || partialData?.error || "Generation failed");
+          }
 
           if (result || partialData) {
             const normalized = applyTimetableState(result || partialData, selectedOptionId);
@@ -385,7 +446,12 @@ function Timetable() {
             applyTimetableState(partialData, selectedOptionId);
           }
 
-          setLoading(false);
+          if (status === "completed") {
+            window.setTimeout(() => setLoading(false), 500);
+          } else {
+            setLoading(false);
+          }
+          setSolverDeadlineAt(null);
           setTaskId(null);
           clearInterval(poll);
         }
@@ -393,10 +459,12 @@ function Timetable() {
         setError("Failed to poll generation status.");
         setLoading(false);
         setTaskId(null);
+        setProgressTarget(0);
+        setSolverDeadlineAt(null);
         setProgressPhase("error");
         clearInterval(poll);
       }
-    }, 2000);
+    }, 1000);
 
     return () => clearInterval(poll);
   }, [applyTimetableState, selectedOptionId, taskId]);
@@ -435,7 +503,7 @@ function Timetable() {
 
   /* ===================== ACTIONS ===================== */
 
-  const generateTimetable = async () => {
+  const generateTimetable = async (solutionCount = 5) => {
     if (isGenerateBlockedByHealth) {
       setError(
         "Generation blocked: health check contains errors. Resolve issues or disable blocking."
@@ -449,11 +517,16 @@ function Timetable() {
     setTimetableOptions([]);
     setSelectedOptionId("");
     setProgress(0);
+    setProgressTarget(0);
     setProgressPhase("queued");
+    setSolverDeadlineAt(null);
+    setSolverRemainingSec(null);
 
     try {
       const latestConstraintConfig = loadConstraintConfig();
       setConstraintConfig(latestConstraintConfig);
+      const solverBudgetSec = Math.max(1, Number(latestConstraintConfig?.solver?.timeLimitSec) || 180);
+      setSolverDeadlineAt(Date.now() + solverBudgetSec * 1000);
 
       const payload = transformFixedSlots(fixedSlots);
       const classElectiveGroups =
@@ -462,11 +535,14 @@ function Timetable() {
         fixedSlots: payload,
         classElectiveGroups,
         constraintConfig: latestConstraintConfig,
+        solutionCount,
       });
       setTaskId(res.data.taskId);
     } catch {
       setError("Failed to start generation.");
       setLoading(false);
+      setSolverDeadlineAt(null);
+      setSolverRemainingSec(null);
       setProgressPhase("error");
     }
   };
@@ -982,6 +1058,13 @@ function Timetable() {
     }
   };
 
+  const formatCountdown = (totalSec) => {
+    const safe = Math.max(0, Number(totalSec) || 0);
+    const minutes = Math.floor(safe / 60);
+    const seconds = safe % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  };
+
   /* ===================== RENDER ===================== */
 
   return (
@@ -991,8 +1074,11 @@ function Timetable() {
       {loading && (
         <div className="tt-progress-wrap">
           <progress value={progress} max="100" className="tt-progress-bar" />
-          <span>{progress}%</span>
+          <span>{Math.round(progress)}%</span>
           <span>{getProgressMessage()}</span>
+          {solverRemainingSec != null && (
+            <span>Time Left: {formatCountdown(solverRemainingSec)}</span>
+          )}
         </div>
       )}
 
@@ -1001,8 +1087,20 @@ function Timetable() {
           {healthLoading ? "Checking..." : "Run Health Check"}
         </button>
         <button
+          className="secondary-btn"
+          onClick={() => generateTimetable(1)}
+          disabled={loading || isGenerateBlockedByHealth}
+          title={
+            isGenerateBlockedByHealth
+              ? "Blocked by health check errors"
+              : "Generate a single timetable"
+          }
+        >
+          Generate 1
+        </button>
+        <button
           className="primary-btn"
-          onClick={generateTimetable}
+          onClick={() => generateTimetable(5)}
           disabled={loading || isGenerateBlockedByHealth}
           title={
             isGenerateBlockedByHealth

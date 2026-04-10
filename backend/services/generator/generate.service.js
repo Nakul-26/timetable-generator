@@ -13,6 +13,7 @@ export async function runGeneration({
   DAYS_PER_WEEK,
   HOURS_PER_DAY,
   constraintConfig,
+  solutionCount,
   onProgress
 }) {
   // Delegate the actual generation to runGenerate which encapsulates the generator.generate call
@@ -25,6 +26,7 @@ export async function runGeneration({
     DAYS_PER_WEEK,
     HOURS_PER_DAY,
     constraintConfig,
+    solutionCount,
     onProgress
   });
 }

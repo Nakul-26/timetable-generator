@@ -8,11 +8,20 @@
 
 # FastAPI CP-SAT timetable solver service
 import asyncio
+import hashlib
+import json
 import os
+from pathlib import Path
 import sys
+import threading
+import time
+import urllib.error
+import urllib.request
 from typing import Dict, List, Any, Tuple
 from fastapi import FastAPI, Request
 from ortools.sat.python import cp_model
+from bson import ObjectId
+from pymongo import MongoClient
 
 # Avoid noisy Proactor transport shutdown tracebacks on Windows when clients disconnect.
 if sys.platform == "win32":
@@ -22,6 +31,521 @@ app = FastAPI()
 
 EMPTY = -1
 BREAK = "BREAK"
+
+
+def _load_local_env() -> None:
+    # Match the Node backend behavior by loading backend/.env for local runs.
+    candidates = [
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in candidates:
+        if not env_path.is_file():
+            continue
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            os.environ[key] = value
+        break
+
+
+_load_local_env()
+
+DEFAULT_SOLVER_TIME_LIMIT_SEC = float(os.getenv("SOLVER_TIME_LIMIT_SEC", "180"))
+DEFAULT_SOLUTION_COUNT = max(1, min(5, int(os.getenv("GENERATOR_SOLUTION_COUNT", "5"))))
+MIN_SOLVER_TIME_PER_ATTEMPT_SEC = max(5.0, float(os.getenv("MIN_SOLVER_TIME_PER_ATTEMPT_SEC", "15")))
+MIN_CANDIDATE_DIFFERENCE_RATIO = min(
+    0.25,
+    max(0.0, float(os.getenv("MIN_CANDIDATE_DIFFERENCE_RATIO", "0.02"))),
+)
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
+JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
+TIMETABLE_RESULT_COLLECTION_NAME = os.getenv("TIMETABLE_RESULT_COLLECTION", "timetableresults")
+ACTIVE_JOB_TASKS = set()
+
+
+def _job_filter(job_id: str) -> Dict[str, Any]:
+    try:
+        return {"_id": ObjectId(job_id)}
+    except Exception:
+        return {"_id": job_id}
+
+
+def _get_jobs_collection():
+    if not MONGO_URI:
+        raise RuntimeError("MONGO_URI is required for solver job processing")
+    client = MongoClient(MONGO_URI)
+    return client, client[MONGO_DB_NAME][JOB_COLLECTION_NAME]
+
+
+def _get_timetable_results_collection():
+    if not MONGO_URI:
+        raise RuntimeError("MONGO_URI is required for timetable result persistence")
+    client = MongoClient(MONGO_URI)
+    return client, client[MONGO_DB_NAME][TIMETABLE_RESULT_COLLECTION_NAME]
+
+
+def _set_job_state(job_id: str, **fields: Any) -> None:
+    client, jobs = _get_jobs_collection()
+    try:
+        fields["updatedAt"] = fields.get("updatedAt") or __import__("datetime").datetime.utcnow()
+        jobs.update_one(_job_filter(job_id), {"$set": fields})
+    finally:
+        client.close()
+
+
+def _is_cancel_requested(job_id: str) -> bool:
+    client, jobs = _get_jobs_collection()
+    try:
+        doc = jobs.find_one(_job_filter(job_id), {"cancel_requested": 1})
+        return bool(doc and doc.get("cancel_requested"))
+    finally:
+        client.close()
+
+
+def _persist_completed_timetable(job_id: str, result: Dict[str, Any]) -> None:
+    best_class_timetables = result.get("bestClassTimetables") or result.get("class_timetables")
+    if not isinstance(best_class_timetables, dict) or not best_class_timetables:
+        return
+
+    now = __import__("datetime").datetime.utcnow()
+    document = {
+        "name": f"Generated Timetable - {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "source": "generator",
+        "status": "generated",
+        "source_generation_job_id": str(job_id),
+        "class_timetables": best_class_timetables,
+        "faculty_timetables": result.get("bestFacultyTimetables") or result.get("faculty_timetables"),
+        "faculty_daily_hours": result.get("bestFacultyDailyHours") or result.get("faculty_daily_hours"),
+        "score": result.get("bestScore") if result.get("bestScore") is not None else result.get("score"),
+        "objective_value": (
+            result.get("objectiveValue")
+            if result.get("objectiveValue") is not None
+            else result.get("objective_value")
+        ),
+        "generation_batch_id": result.get("generation_batch_id"),
+        "selected_option_id": result.get("selected_option_id"),
+        "generation_options": result.get("generation_options") or [],
+        "combos": result.get("combos"),
+        "allocations_report": result.get("allocations_report"),
+        "config": result.get("config"),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+    client, results = _get_timetable_results_collection()
+    try:
+        results.update_one(
+            {"source_generation_job_id": str(job_id)},
+            {"$setOnInsert": document},
+            upsert=True,
+        )
+    finally:
+        client.close()
+
+
+def _solver_base_url() -> str:
+    port = os.getenv("PORT", "8001")
+    return f"http://127.0.0.1:{port}"
+
+
+def _call_local_solve(payload: Dict[str, Any]) -> Dict[str, Any]:
+    req = urllib.request.Request(
+        f"{_solver_base_url()}/solve",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=max(30, int((payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC) + 30))) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        try:
+            return json.loads(body)
+        except Exception:
+            return {"ok": False, "error": body or f"Solver HTTP {exc.code}"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc) or "Solver request failed"}
+
+
+def _analyze_class_internal_gaps(class_timetables: Dict[str, Any]) -> Dict[str, int]:
+    gap_count = 0
+    if not isinstance(class_timetables, dict):
+        return {"gapCount": 0}
+
+    for rows in class_timetables.values():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            teaching_slots = [
+                idx
+                for idx, slot in enumerate(row)
+                if slot not in (EMPTY, BREAK, None)
+            ]
+            if len(teaching_slots) <= 1:
+                continue
+            first = teaching_slots[0]
+            last = teaching_slots[-1]
+            for hour in range(first + 1, last):
+                slot = row[hour]
+                if slot in (EMPTY, None):
+                    gap_count += 1
+    return {"gapCount": gap_count}
+
+
+def _stable_serialize(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_stable_serialize(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _stable_serialize(value[key]) for key in sorted(value.keys())}
+    return value
+
+
+def _hash_timetable(class_timetables: Dict[str, Any]) -> str:
+    if not isinstance(class_timetables, dict):
+        return ""
+    stable = json.dumps(_stable_serialize(class_timetables), separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(stable.encode("utf-8")).hexdigest()
+
+
+def _compare_timetable_difference(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, int]:
+    class_ids = set((left or {}).keys()) | set((right or {}).keys())
+    total_slots = 0
+    different_slots = 0
+    for class_id in class_ids:
+        left_days = left.get(class_id) if isinstance(left, dict) else []
+        right_days = right.get(class_id) if isinstance(right, dict) else []
+        left_days = left_days if isinstance(left_days, list) else []
+        right_days = right_days if isinstance(right_days, list) else []
+        day_count = max(len(left_days), len(right_days))
+        for day in range(day_count):
+            left_row = left_days[day] if day < len(left_days) and isinstance(left_days[day], list) else []
+            right_row = right_days[day] if day < len(right_days) and isinstance(right_days[day], list) else []
+            hour_count = max(len(left_row), len(right_row))
+            for hour in range(hour_count):
+                left_value = left_row[hour] if hour < len(left_row) else None
+                right_value = right_row[hour] if hour < len(right_row) else None
+                total_slots += 1
+                if left_value != right_value:
+                    different_slots += 1
+    return {"totalSlots": total_slots, "differentSlots": different_slots}
+
+
+def _build_option_label(candidate: Dict[str, Any], index: int) -> str:
+    if index == 0:
+        return "Option 1 (Best balanced)"
+    if not candidate.get("unmet_requirements") and not candidate.get("warnings"):
+        return f"Option {index + 1} (Cleanest fit)"
+    if (candidate.get("score") or 0) <= 0:
+        return f"Option {index + 1} (Compact schedule)"
+    if len(candidate.get("warnings") or []) <= 1:
+        return f"Option {index + 1} (Lower friction)"
+    return f"Option {index + 1} (Alternative)"
+
+
+def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cancel_check=None) -> Dict[str, Any]:
+    classes = payload.get("classes") or []
+    faculties = payload.get("faculties") or []
+    subjects = payload.get("subjects") or []
+    combos = payload.get("combos") or []
+    fixed_slots = payload.get("fixedSlots") or []
+    days_per_week = int(payload.get("DAYS_PER_WEEK") or 6)
+    hours_per_day = int(payload.get("HOURS_PER_DAY") or 8)
+    constraint_config = payload.get("constraintConfig") or {}
+    solution_count = max(1, min(5, int(payload.get("solutionCount") or DEFAULT_SOLUTION_COUNT)))
+    attempts = max(3, int(payload.get("attempts") or 3))
+    enforce_hard_no_gaps = (
+        bool(constraint_config.get("noGaps", {}).get("hard"))
+        if isinstance(constraint_config.get("noGaps"), dict) and constraint_config.get("noGaps", {}).get("hard") is not None
+        else str(os.getenv("ENFORCE_HARD_NO_GAPS", "true")).lower() != "false"
+    )
+
+    generation_batch_id = f"gen_{int(__import__('time').time() * 1000)}_{os.urandom(3).hex()}"
+    candidates: List[Dict[str, Any]] = []
+    seen_hashes = set()
+    attempts_run = 0
+    last_error = None
+    started = __import__("time").time()
+    configured_time_limit = float(
+        _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
+    )
+    max_attempts = max(attempts, solution_count * 2)
+
+    def ranked_candidates() -> List[Dict[str, Any]]:
+        return sorted(
+            candidates,
+            key=lambda item: (
+                item["objectiveValue"]
+                if isinstance(item.get("objectiveValue"), (int, float))
+                else (item["score"] if isinstance(item.get("score"), (int, float)) else float("inf")),
+                item.get("seed", 0),
+            ),
+        )
+
+    def build_selected_result(option: Dict[str, Any] | None) -> Dict[str, Any]:
+        ranked = []
+        for index, candidate in enumerate(ranked_candidates()[:solution_count]):
+            item = dict(candidate)
+            item["rank"] = index + 1
+            item["label"] = _build_option_label(candidate, index)
+            ranked.append(item)
+        selected = option or (ranked[0] if ranked else None)
+        return {
+            "ok": bool(selected),
+            "error": None if selected else (last_error or "Failed to generate timetable"),
+            "generation_batch_id": generation_batch_id,
+            "optionsGenerated": len(ranked),
+            "selected_option_id": selected.get("optionId") if selected else None,
+            "score": selected.get("score") if selected else None,
+            "objectiveValue": selected.get("objectiveValue") if selected else None,
+            "class_timetables": selected.get("class_timetables") if selected else None,
+            "faculty_timetables": selected.get("faculty_timetables") if selected else None,
+            "faculty_daily_hours": selected.get("faculty_daily_hours") if selected else None,
+            "classes": selected.get("classes") if selected else None,
+            "combos": selected.get("combos") if selected else None,
+            "config": selected.get("config") if selected else constraint_config,
+            "allocations_report": selected.get("allocations_report") if selected else None,
+            "unmet_requirements": selected.get("unmet_requirements") if selected else [],
+            "warnings": selected.get("warnings") if selected else [],
+            "solver_stats": selected.get("solver_stats") if selected else None,
+            "attemptsTried": attempts_run,
+            "generation_options": ranked,
+            "bestClassTimetables": selected.get("class_timetables") if selected else None,
+            "bestFacultyTimetables": selected.get("faculty_timetables") if selected else None,
+            "bestFacultyDailyHours": selected.get("faculty_daily_hours") if selected else None,
+            "bestScore": selected.get("score") if selected else None,
+        }
+
+    for attempt in range(max_attempts):
+        if cancel_check and cancel_check():
+            return {
+                "ok": False,
+                "error": "Generation cancelled",
+                "generation_options": ranked_candidates()[:solution_count],
+            }
+
+        elapsed_sec = __import__("time").time() - started
+        remaining_budget_sec = configured_time_limit - elapsed_sec
+        if remaining_budget_sec <= 0:
+            last_error = "Solver time budget exhausted"
+            break
+
+        remaining_attempts = max_attempts - attempt
+        per_attempt_time_limit_sec = max(
+            MIN_SOLVER_TIME_PER_ATTEMPT_SEC,
+            min(
+                configured_time_limit / max(1, solution_count),
+                remaining_budget_sec / max(1, remaining_attempts),
+            ),
+        )
+        if per_attempt_time_limit_sec > remaining_budget_sec:
+            break
+
+        progress_start = int((attempt * 95) / max(1, max_attempts))
+        progress_end = int(((attempt + 1) * 95) / max(1, max_attempts))
+        attempts_run += 1
+        seed = attempt + 1
+        progress_callback and progress_callback({"progress": progress_start, "phase": "start"})
+
+        expected_ms = max(15_000, int(per_attempt_time_limit_sec * 1000))
+        progress_span = max(1, progress_end - progress_start)
+        cap_before_done = min(99, max(progress_start, progress_end - 1))
+        heartbeat_stop = threading.Event()
+        started_at = time.time()
+        current_progress = progress_start
+
+        def emit_progress(value: float, phase: str = "running") -> None:
+            nonlocal current_progress
+            clamped = max(progress_start, min(cap_before_done, round(value)))
+            current_progress = max(current_progress, clamped)
+            progress_callback and progress_callback({"progress": clamped, "phase": phase})
+
+        def heartbeat() -> None:
+            while not heartbeat_stop.wait(1.0):
+                elapsed_ms = int((time.time() - started_at) * 1000)
+                ratio = min(1.0, elapsed_ms / max(1, expected_ms))
+                eased = 1.0 - pow(1.0 - ratio, 2)
+                emit_progress(progress_start + eased * progress_span, "running")
+
+        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+        heartbeat_thread.start()
+
+        try:
+            result = _call_local_solve(
+                {
+                    "faculties": faculties,
+                    "subjects": subjects,
+                    "classes": classes,
+                    "combos": combos,
+                    "DAYS_PER_WEEK": days_per_week,
+                    "HOURS_PER_DAY": hours_per_day,
+                    "fixedSlots": fixed_slots,
+                    "constraintConfig": constraint_config,
+                    "random_seed": seed,
+                    "solver_time_limit_sec": per_attempt_time_limit_sec,
+                }
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=0.2)
+
+        if not result.get("ok"):
+            last_error = result.get("error") or "Unknown generator failure"
+            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
+            continue
+
+        progress_callback and progress_callback(
+            {"progress": current_progress, "phase": "solver_done"}
+        )
+
+        gap_count = _analyze_class_internal_gaps(result.get("class_timetables") or {}).get("gapCount", 0)
+        if enforce_hard_no_gaps and gap_count > 0:
+            last_error = f"Generated timetable has {gap_count} internal class gaps"
+            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
+            continue
+
+        objective_value = result.get("objective_value")
+        if not isinstance(objective_value, (int, float)):
+            objective_value = gap_count
+
+        timetable_hash = _hash_timetable(result.get("class_timetables") or {})
+        if not timetable_hash or timetable_hash in seen_hashes:
+            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
+            continue
+
+        is_too_similar = False
+        for candidate in candidates:
+            diff = _compare_timetable_difference(
+                candidate.get("class_timetables") or {},
+                result.get("class_timetables") or {},
+            )
+            if diff["totalSlots"] > 0 and diff["differentSlots"] < max(
+                3, int(diff["totalSlots"] * MIN_CANDIDATE_DIFFERENCE_RATIO)
+            ):
+                is_too_similar = True
+                break
+        if is_too_similar:
+            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
+            continue
+
+        seen_hashes.add(timetable_hash)
+        candidates.append(
+            {
+                "optionId": f"{generation_batch_id}_opt_{len(candidates) + 1}",
+                "seed": seed,
+                "score": gap_count,
+                "objectiveValue": objective_value,
+                "class_timetables": result.get("class_timetables"),
+                "faculty_timetables": result.get("faculty_timetables"),
+                "faculty_daily_hours": result.get("faculty_daily_hours"),
+                "classes": result.get("classes") or classes,
+                "combos": combos,
+                "config": result.get("config") or constraint_config,
+                "allocations_report": result.get("allocations_report"),
+                "unmet_requirements": result.get("unmet_requirements") or [],
+                "warnings": result.get("warnings") or [],
+                "solver_stats": result.get("solver_stats"),
+            }
+        )
+
+        best = ranked_candidates()[0] if ranked_candidates() else None
+        progress_callback and progress_callback(
+            {
+                "progress": max(current_progress, min(94, round(current_progress + 2))),
+                "phase": "candidate_ready",
+                "partialData": build_selected_result(best),
+            }
+        )
+
+        if len(candidates) >= solution_count:
+            break
+
+    progress_callback and progress_callback({"progress": 100, "phase": "done"})
+    best = ranked_candidates()[0] if ranked_candidates() else None
+    return build_selected_result(best)
+
+
+async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
+    def cancel_check() -> bool:
+        return _is_cancel_requested(job_id)
+
+    def progress_callback(message: Dict[str, Any]) -> None:
+        update = {
+            "status": "running",
+            "phase": message.get("phase") or "running",
+            "progress": max(0, min(100, int(message.get("progress") or 0))),
+        }
+        if message.get("partialData") is not None:
+            update["partial_data"] = message.get("partialData")
+        _set_job_state(job_id, **update)
+
+    try:
+        _set_job_state(job_id, status="running", phase="start", progress=0, error=None)
+        result = await asyncio.to_thread(
+            _run_generation_batch,
+            payload,
+            progress_callback,
+            cancel_check,
+        )
+
+        if cancel_check() and not result.get("ok"):
+            _set_job_state(
+                job_id,
+                status="cancelled",
+                phase="cancelled",
+                progress=100,
+                error=result.get("error") or "Generation cancelled",
+                result=result,
+            )
+            return
+
+        final_status = "completed" if result.get("ok") else "failed"
+        final_phase = "done" if result.get("ok") else "error"
+        persistence_error = None
+        if result.get("ok"):
+            try:
+                await asyncio.to_thread(_persist_completed_timetable, job_id, result)
+            except Exception as exc:
+                persistence_error = str(exc) or "Failed to persist completed timetable"
+        _set_job_state(
+            job_id,
+            status=final_status,
+            phase=final_phase,
+            progress=100,
+            result=result,
+            partial_data=result if result.get("ok") else None,
+            error=(
+                persistence_error
+                if result.get("ok") and persistence_error
+                else (None if result.get("ok") else (result.get("error") or "Generation failed"))
+            ),
+        )
+    except Exception as exc:
+        _set_job_state(
+            job_id,
+            status="failed",
+            phase="error",
+            progress=100,
+            error=str(exc) or "Generation failed",
+        )
+
+
+def _spawn_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
+    task = asyncio.create_task(_process_generation_job(job_id, payload))
+    ACTIVE_JOB_TASKS.add(task)
+    task.add_done_callback(lambda done: ACTIVE_JOB_TASKS.discard(done))
 
 def _solver_loop_exception_handler(loop, context):
     exc = context.get("exception")
@@ -151,6 +675,19 @@ def health() -> Dict[str, str]:
     return {"ok": "true"}
 
 
+@app.post("/jobs")
+async def start_job(request: Request) -> Dict[str, Any]:
+    body = await request.json()
+    job_id = str(body.get("jobId") or "").strip()
+    payload = body.get("payload") or {}
+    if not job_id:
+        return {"ok": False, "error": "jobId is required"}
+
+    _set_job_state(job_id, status="pending", phase="queued", progress=0, error=None)
+    _spawn_generation_job(job_id, payload)
+    return {"ok": True, "jobId": job_id}
+
+
 @app.post("/solve")
 async def solve(request: Request) -> Dict[str, Any]:
     payload = await request.json()
@@ -192,6 +729,13 @@ async def solve(request: Request) -> Dict[str, Any]:
             constraint_config,
             ["solver", "timeLimitSec"],
             payload.get("solver_time_limit_sec") or os.getenv("SOLVER_TIME_LIMIT_SEC", "180"),
+        )
+    )
+    max_candidates_per_combo = int(
+        _cfg_get(
+            constraint_config,
+            ["solver", "maxCandidatesPerCombo"],
+            os.getenv("SOLVER_MAX_CANDIDATES_PER_COMBO", "0"),
         )
     )
 
@@ -465,7 +1009,10 @@ async def solve(request: Request) -> Dict[str, Any]:
         },
         "teacherPreferences": teacher_preferences,
         "noTeacherSessions": {"earlySlotWeight": no_teacher_early_slot_weight},
-        "solver": {"timeLimitSec": solver_time_limit_sec},
+        "solver": {
+            "timeLimitSec": solver_time_limit_sec,
+            "maxCandidatesPerCombo": max_candidates_per_combo,
+        },
     }
 
     subject_by_id = {s["_id"]: s for s in subjects}
@@ -573,6 +1120,8 @@ async def solve(request: Request) -> Dict[str, Any]:
     }
     combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {}
     combo_search_rank: Dict[str, int] = {}
+    class_slot_pressure: Dict[Tuple[str, int, int], int] = {}
+    teacher_slot_pressure: Dict[Tuple[str, int, int], int] = {}
 
     for combo in combos:
         combo_id = combo["_id"]
@@ -612,6 +1161,14 @@ async def solve(request: Request) -> Dict[str, Any]:
             continue
 
         combo_candidate_starts[combo_id] = candidate_starts
+        for day, hour in candidate_starts:
+            for h in range(hour, hour + block):
+                for class_id in class_ids:
+                    key = (class_id, day, h)
+                    class_slot_pressure[key] = class_slot_pressure.get(key, 0) + 1
+                for fid in combo.get("faculty_ids", []):
+                    key = (fid, day, h)
+                    teacher_slot_pressure[key] = teacher_slot_pressure.get(key, 0) + 1
 
         required_hours = max(
             [required_hours_by_class_subject[cid].get(combo["subject_id"], 0) for cid in class_ids] or [0]
@@ -659,10 +1216,29 @@ async def solve(request: Request) -> Dict[str, Any]:
             candidate_starts,
             key=lambda slot: (
                 -int((combo_id, slot[0], slot[1]) in fixed_slot_keys),
+                -sum(
+                    class_slot_pressure.get((class_id, slot[0], h), 0)
+                    for h in range(slot[1], slot[1] + block)
+                    for class_id in class_ids
+                ),
+                -sum(
+                    teacher_slot_pressure.get((fid, slot[0], h), 0)
+                    for h in range(slot[1], slot[1] + block)
+                    for fid in combo.get("faculty_ids", [])
+                ),
                 slot[0],
                 hour_rank.get(slot[1], slot[1]),
             ),
         )
+        if max_candidates_per_combo > 0 and len(ordered_starts) > max_candidates_per_combo:
+            fixed_starts = [
+                slot for slot in ordered_starts if (combo_id, slot[0], slot[1]) in fixed_slot_keys
+            ]
+            non_fixed_starts = [
+                slot for slot in ordered_starts if (combo_id, slot[0], slot[1]) not in fixed_slot_keys
+            ]
+            remaining_capacity = max(0, max_candidates_per_combo - len(fixed_starts))
+            ordered_starts = fixed_starts + non_fixed_starts[:remaining_capacity]
         for day, hour in ordered_starts:
             violates_availability = False
             if teacher_avail_enabled:

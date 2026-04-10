@@ -1,6 +1,4 @@
 import { Router } from 'express';
-import { Worker } from 'worker_threads';
-import path from 'path';
 // import { fileURLTo__dirname } from 'url';
 import Faculty from '../../models/Faculty.js';
 import Subject from '../../models/Subject.js';
@@ -8,20 +6,37 @@ import ClassModel from '../../models/Class.js';
 import ClassSubject from '../../models/ClassSubject.js';
 import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import TimetableResult from '../../models/TimetableResult.js';
+import GenerationJob from '../../models/GenerationJob.js';
 import ElectiveSubjectSetting from '../../models/ElectiveSubjectSetting.js';
 import runGenerate from '../../models/lib/runGenerator.js';
 // Removed: import converter from '../../models/lib/convertNewCollegeInputToGeneratorData.js';
 import { prepareGeneratorData } from '../../services/generator/prepareGeneratorData.js';
 import { buildConstraintHealthReport } from '../../services/generator/healthCheck.service.js';
-import {
-  startGenerationWorker,
-  stopGenerationWorker,
-  getGenerationStatus,
-} from "../../services/generator/workerManager.service.js";
 import auth from '../../middleware/auth.js';
 import { mergeTeacherAvailabilityConstraintConfig } from '../../utils/teacherAvailability.js';
 import { mergeTeacherPreferenceConstraintConfig } from '../../utils/teacherPreferences.js';
 import { exportTimetableExcel } from "../../services/export/timetableExport.service.js";
+
+const SOLVER_BASE_URL = String(process.env.SOLVER_URL || 'http://localhost:8001').replace(/\/+$/, '');
+if (!SOLVER_BASE_URL) {
+  throw new Error("SOLVER_URL is not defined");
+}
+
+const serializeJobStatus = (job) => {
+  if (!job) return null;
+  return {
+    taskId: String(job._id),
+    status: job.status,
+    progress: Number(job.progress || 0),
+    phase: job.phase || "queued",
+    partialData: job.partial_data || null,
+    result: job.result || null,
+    error: job.error || null,
+    cancelRequested: Boolean(job.cancel_requested),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+};
 
 
 const protectedRouter = Router();
@@ -33,7 +48,7 @@ protectedRouter.post('/process-new-input', async (req, res) => {
         console.log("[POST /process-new-input] Starting data processing for assignments...");
 
         // Step 1: Use prepareGeneratorData to get all necessary processed data
-        const generatorData = await prepareGeneratorData({});
+        const generatorData = await prepareGeneratorData();
         const { classes: classesOut, combos: generatedCombos, subjects, faculties } = generatorData;
         
         // Step 2: Create lookup maps for names
@@ -118,21 +133,11 @@ protectedRouter.post('/process-new-input', async (req, res) => {
 
 protectedRouter.post('/generate', async (req, res) => {
     try {
-      const { fixedSlots, constraintConfig = {} } = req.body;
+      const { fixedSlots, constraintConfig = {}, solutionCount } = req.body;
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
   
-      // Fetch elective subject settings from the database
-      const electiveSettings = await ElectiveSubjectSetting.find().lean();
-      const classElectiveSubjects = electiveSettings.map(s => ({
-          classId: s.class.toString(),
-          subjectId: s.subject.toString(),
-          numberOfTeachers: s.numberOfTeachers
-      }));
-  
-      const generatorData = await prepareGeneratorData({
-        classElectiveSubjects, // Pass the fetched settings
-      });
+      const generatorData = await prepareGeneratorData();
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -140,18 +145,68 @@ protectedRouter.post('/generate', async (req, res) => {
         ),
         generatorData.faculties || []
       );
-  
-      const taskId = startGenerationWorker({
-        payload: {
-          ...generatorData,
-          fixedSlots,
-          DAYS_PER_WEEK: daysPerWeek,
-          HOURS_PER_DAY: hoursPerDay,
+
+      const normalizedSolutionCount = Math.max(1, Math.min(5, Number(solutionCount) || 5));
+      const job = await GenerationJob.create({
+        status: "pending",
+        phase: "queued",
+        progress: 0,
+        solution_count: normalizedSolutionCount,
+        created_by: req.user?._id || null,
+        input: {
+          fixedSlots: fixedSlots || [],
           constraintConfig: mergedConstraintConfig,
+          schedule: {
+            daysPerWeek,
+            hoursPerDay,
+          },
         },
       });
-  
-      res.json({ taskId });
+
+      let solverRes;
+      let solverBody = null;
+      try {
+        solverRes = await fetch(`${SOLVER_BASE_URL}/jobs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId: String(job._id),
+            payload: {
+              ...generatorData,
+              fixedSlots,
+              DAYS_PER_WEEK: daysPerWeek,
+              HOURS_PER_DAY: hoursPerDay,
+              constraintConfig: mergedConstraintConfig,
+              solutionCount: normalizedSolutionCount,
+            },
+          }),
+        });
+        solverBody = await solverRes.json().catch(() => null);
+      } catch (solverErr) {
+        const solverUnavailableMessage =
+          SOLVER_BASE_URL === "http://localhost:8001"
+            ? "Solver service is unreachable at http://localhost:8001. Set SOLVER_URL to your deployed Python solver when the backend runs serverlessly."
+            : `Solver service is unreachable at ${SOLVER_BASE_URL}.`;
+        await GenerationJob.findByIdAndUpdate(job._id, {
+          status: "failed",
+          phase: "error",
+          error: solverUnavailableMessage,
+          progress: 100,
+        });
+        return res.status(502).json({ error: solverUnavailableMessage });
+      }
+
+      if (!solverRes.ok || solverBody?.ok === false) {
+        await GenerationJob.findByIdAndUpdate(job._id, {
+          status: "failed",
+          phase: "error",
+          error: solverBody?.error || `Solver job start failed (${solverRes.status})`,
+          progress: 100,
+        });
+        return res.status(502).json({ error: "Failed to start solver job." });
+      }
+
+      res.json({ taskId: String(job._id) });
     } catch (e) {
       console.error("Error in /generate:", e)
       res.status(500).json({ error: "Internal Server Error" });
@@ -162,16 +217,7 @@ protectedRouter.post('/health-check', async (req, res) => {
     try {
       const { fixedSlots = [], constraintConfig = {} } = req.body || {};
 
-      const electiveSettings = await ElectiveSubjectSetting.find().lean();
-      const classElectiveSubjects = electiveSettings.map(s => ({
-          classId: s.class.toString(),
-          subjectId: s.subject.toString(),
-          numberOfTeachers: s.numberOfTeachers
-      }));
-
-      const generatorData = await prepareGeneratorData({
-        classElectiveSubjects,
-      });
+      const generatorData = await prepareGeneratorData();
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -237,31 +283,44 @@ protectedRouter.post('/elective-settings', async (req, res) => {
 });
 
 protectedRouter.post('/stop-generator/:taskId', (req, res) => {
-  const taskId = Number(req.params.taskId);
-
-  const stopped = stopGenerationWorker(taskId);
-  if (!stopped) {
-    return res.status(404).json({ error: "Task not found" });
-  }
-
-  res.json({ ok: true, message: `Stop signal sent to task ${taskId}` });
+  GenerationJob.findByIdAndUpdate(req.params.taskId, {
+    cancel_requested: true,
+    phase: "cancel_requested",
+  })
+    .then((job) => {
+      if (!job) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      return res.json({ ok: true, message: `Stop signal recorded for task ${req.params.taskId}` });
+    })
+    .catch(() => res.status(500).json({ error: "Internal Server Error" }));
 });
 
-protectedRouter.get('/generation-status/:taskId', (req, res) => {
-  const taskId = Number(req.params.taskId);
-  const status = getGenerationStatus(taskId);
-
-  if (!status) {
-    return res.status(404).json({ error: "Task not found" });
+protectedRouter.get('/generation-status/:taskId', async (req, res) => {
+  try {
+    const job = await GenerationJob.findById(req.params.taskId).lean();
+    if (!job) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+    res.json(serializeJobStatus(job));
+  } catch {
+    res.status(500).json({ error: "Internal Server Error" });
   }
-
-  res.json(status);
 });
 
 
 protectedRouter.get('/result/latest', async (req, res) => {
   console.log("[GET /result/latest] Fetching latest timetable result");
   try {
+    const latestJob = await GenerationJob.findOne({
+      status: 'completed',
+      result: { $ne: null },
+    }).sort({ updatedAt: -1 }).lean();
+    if (latestJob?.result) {
+      console.log("[GET /result/latest] Found completed generation job result");
+      return res.json(latestJob.result);
+    }
+
     const r = await TimetableResult.findOne({ source: 'generator' }).sort({ createdAt: -1 }).lean();
     console.log("[GET /result/latest] Found:", r ? "Yes" : "No");
     res.json(r);
@@ -353,15 +412,7 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
   
-      // Fetch elective subject settings from the database
-      const electiveSettings = await ElectiveSubjectSetting.find().lean();
-      const classElectiveSubjects = electiveSettings.map(s => ({
-          classId: s.class.toString(),
-          subjectId: s.subject.toString(),
-          numberOfTeachers: s.numberOfTeachers
-      }));
-  
-      const generatorData = await prepareGeneratorData({ classElectiveSubjects });
+      const generatorData = await prepareGeneratorData();
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,

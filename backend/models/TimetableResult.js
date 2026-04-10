@@ -60,6 +60,11 @@ const ResultSchema = new Schema(
     score: Number,
     objective_value: Number,
     generation_batch_id: String,
+    source_generation_job_id: {
+      type: String,
+      default: null,
+      index: true,
+    },
     selected_option_id: String,
     generation_options: Object,
 
@@ -76,6 +81,10 @@ const ResultSchema = new Schema(
 // Indexes for fast queries
 ResultSchema.index({ createdAt: -1 });
 ResultSchema.index({ source: 1, createdAt: -1 });
+ResultSchema.index(
+  { source_generation_job_id: 1 },
+  { unique: true, sparse: true }
+);
 
 // Post-find hook to populate assignments when the source is 'assignments'
 ResultSchema.post('find', async function(docs, next) {
