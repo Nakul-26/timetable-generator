@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: timetable-solver
+    runtime: python
+    plan: starter
+    rootDir: backend/solver
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        value: timetable_jayanth
+      - key: SOLVER_TIME_LIMIT_SEC
+        value: 180
+      - key: GENERATOR_SOLUTION_COUNT
+        value: 5
+      - key: MIN_SOLVER_TIME_PER_ATTEMPT_SEC
+        value: 15
+      - key: MIN_CANDIDATE_DIFFERENCE_RATIO
+        value: 0.02
+      - key: SOLVER_WORKERS
+        value: 8

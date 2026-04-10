@@ -59,7 +59,12 @@ router.post('/login', loginLimiter, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid credentials' });
         }
         const token = admin.generateAuthToken();
-        res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none' });
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'none',
+            path: '/'
+        });
         res.json({ success: true, user: admin });
     } catch (err) {
         console.error('Login error:', err);
@@ -68,7 +73,12 @@ router.post('/login', loginLimiter, async (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
-    res.clearCookie('token').json({ success: true });
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        path: '/'
+    }).json({ success: true });
 });
 
 protectedRouter.get('/me', (req, res) => {
