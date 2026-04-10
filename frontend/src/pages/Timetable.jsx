@@ -11,6 +11,7 @@ const GENERATION_STATUS_POLL_MS = Math.max(
   1000,
   Number(import.meta.env.VITE_GENERATION_STATUS_POLL_MS) || 3000
 );
+const HEALTH_ERROR_PREVIEW_LIMIT = 3;
 
 function Timetable() {
   const [loading, setLoading] = useState(false);
@@ -434,6 +435,45 @@ function Timetable() {
   const isGenerateBlockedByHealth =
     blockGenerateOnHealthErrors && healthReport && healthErrorsCount > 0;
 
+  const summarizeHealthIssues = useCallback((report) => {
+    if (!report || !Array.isArray(report.warnings)) return "";
+    const topErrors = report.warnings
+      .filter((item) => String(item?.severity || "").toLowerCase() === "error")
+      .slice(0, HEALTH_ERROR_PREVIEW_LIMIT)
+      .map((item) => item.message)
+      .filter(Boolean);
+
+    if (!topErrors.length) return "";
+    return `Health check found blocking issues: ${topErrors.join(" | ")}`;
+  }, []);
+
+  const buildGenerationFailureMessage = useCallback((message, report = null) => {
+    const baseMessage = String(message || "Generation failed").trim();
+    const normalized = baseMessage.toLowerCase();
+    const looksInfeasible =
+      normalized.includes("infeasible") ||
+      normalized.includes("no valid timetable found") ||
+      normalized.includes("no solution");
+
+    if (!looksInfeasible) return baseMessage;
+
+    const healthSummary = summarizeHealthIssues(report);
+    if (!healthSummary) {
+      return `${baseMessage}. This deployed site uses its own browser-saved timetable settings, so run Health Check and compare Timetable Settings with your local setup.`;
+    }
+
+    return `${baseMessage}. ${healthSummary}`;
+  }, [summarizeHealthIssues]);
+
+  const requestHealthCheck = useCallback(async (latestConstraintConfig) => {
+    const payload = transformFixedSlots(fixedSlots);
+    const res = await api.post("/health-check", {
+      fixedSlots: payload,
+      constraintConfig: latestConstraintConfig,
+    });
+    return res.data || null;
+  }, [fixedSlots]);
+
   /* ===================== POLLING ===================== */
 
   useEffect(() => {
@@ -457,13 +497,25 @@ function Timetable() {
           setProgressTarget(status === "completed" ? 100 : progress ?? 0);
           setProgressPhase(phase || status || "completed");
           if (isFailure) {
-            setError(error || result?.error || partialData?.error || "Generation failed");
+            const failureMessage = error || result?.error || partialData?.error || "Generation failed";
+            const derivedHealthReport =
+              healthReport ||
+              result?.health_report ||
+              partialData?.health_report ||
+              null;
+            setError(buildGenerationFailureMessage(failureMessage, derivedHealthReport));
           }
 
           if (result || partialData) {
             const normalized = applyTimetableState(result || partialData, selectedOptionId);
             if (normalized?.ok === false && normalized?.error) {
-              setError(normalized.error);
+              const derivedHealthReport =
+                healthReport ||
+                normalized?.health_report ||
+                result?.health_report ||
+                partialData?.health_report ||
+                null;
+              setError(buildGenerationFailureMessage(normalized.error, derivedHealthReport));
             }
           } else if (partialData) {
             applyTimetableState(partialData, selectedOptionId);
@@ -490,7 +542,7 @@ function Timetable() {
     }, GENERATION_STATUS_POLL_MS);
 
     return () => clearInterval(poll);
-  }, [applyTimetableState, selectedOptionId, taskId]);
+  }, [applyTimetableState, buildGenerationFailureMessage, healthReport, selectedOptionId, taskId]);
 
   /* ===================== FIXED SLOTS ===================== */
 
@@ -527,13 +579,6 @@ function Timetable() {
   /* ===================== ACTIONS ===================== */
 
   const generateTimetable = async (solutionCountOverride = null) => {
-    if (isGenerateBlockedByHealth) {
-      setError(
-        "Generation blocked: health check contains errors. Resolve issues or disable blocking."
-      );
-      return;
-    }
-
     setLoading(true);
     setError("");
     setTimetable(null);
@@ -548,6 +593,20 @@ function Timetable() {
     try {
       const latestConstraintConfig = loadConstraintConfig();
       setConstraintConfig(latestConstraintConfig);
+      const latestHealthReport = await requestHealthCheck(latestConstraintConfig);
+      setHealthReport(latestHealthReport);
+      if (
+        blockGenerateOnHealthErrors &&
+        Number(latestHealthReport?.summary?.errors || 0) > 0
+      ) {
+        setError(
+          summarizeHealthIssues(latestHealthReport) ||
+            "Generation blocked: health check contains errors. Resolve issues or disable blocking."
+        );
+        setLoading(false);
+        setProgressPhase("error");
+        return;
+      }
       const solverBudgetSec = Math.max(1, Number(latestConstraintConfig?.solver?.timeLimitSec) || 180);
       const configuredSolutionCount = Math.max(
         1,
@@ -569,8 +628,8 @@ function Timetable() {
         solutionCount,
       });
       setTaskId(res.data.taskId);
-    } catch {
-      setError("Failed to start generation.");
+    } catch (err) {
+      setError(err?.response?.data?.error || "Failed to start generation.");
       setLoading(false);
       setSolverDeadlineAt(null);
       setSolverRemainingSec(null);
@@ -578,24 +637,19 @@ function Timetable() {
     }
   };
 
-  const runHealthCheck = async () => {
+  const runHealthCheck = useCallback(async () => {
     setHealthLoading(true);
     setError("");
     try {
       const latestConstraintConfig = loadConstraintConfig();
       setConstraintConfig(latestConstraintConfig);
-      const payload = transformFixedSlots(fixedSlots);
-      const res = await api.post("/health-check", {
-        fixedSlots: payload,
-        constraintConfig: latestConstraintConfig,
-      });
-      setHealthReport(res.data || null);
+      setHealthReport(await requestHealthCheck(latestConstraintConfig));
     } catch {
       setError("Failed to run health check.");
     } finally {
       setHealthLoading(false);
     }
-  };
+  }, [requestHealthCheck]);
 
   const stopGeneration = async () => {
     if (!taskId) return;
