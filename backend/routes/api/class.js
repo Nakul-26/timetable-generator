@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import ClassModel from '../../models/Class.js';
 import ClassSubject from '../../models/ClassSubject.js';
+import Faculty from '../../models/Faculty.js';
+import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import auth from '../../middleware/auth.js';
+import { validateOwnership, validateOwnershipMany } from '../../utils/validateTenantRefs.js';
 
 
 const protectedRouter = Router();
@@ -12,8 +15,28 @@ protectedRouter.use(auth);
 protectedRouter.post('/classes', async (req, res) => {
   console.log("[POST /classes] Body:", req.body);
   try {
+    const comboIds = Array.isArray(req.body.assigned_teacher_subject_combos)
+      ? req.body.assigned_teacher_subject_combos
+      : [];
+    const facultyIds = Array.isArray(req.body.faculties)
+      ? req.body.faculties
+      : [];
+
+    if (comboIds.length > 0) {
+      await validateOwnershipMany(
+        TeacherSubjectCombination,
+        comboIds,
+        req.collegeId,
+        "assigned_teacher_subject_combos"
+      );
+    }
+    if (facultyIds.length > 0) {
+      await validateOwnershipMany(Faculty, facultyIds, req.collegeId, "faculties");
+    }
+
     const c = new ClassModel({
       ...req.body,
+      collegeId: req.collegeId,
       assigned_teacher_subject_combos: req.body.assigned_teacher_subject_combos || [],
       total_class_hours: req.body.total_class_hours || 0
     });
@@ -21,7 +44,7 @@ protectedRouter.post('/classes', async (req, res) => {
     console.log("[POST /classes] Saved class:", c);
     res.json(c);
   } catch (e) {
-    res.status(400).json({ error: 'Bad Request' });
+    res.status(e.status || 400).json({ error: e.message || 'Bad Request' });
   }
 });
 
@@ -29,7 +52,7 @@ protectedRouter.post('/classes', async (req, res) => {
 protectedRouter.get('/classes', async (req, res) => {
   console.log("[GET /classes] Fetching all classes");
   try {
-    const classes = await ClassModel.find().populate('faculties').lean();
+    const classes = await ClassModel.find({ collegeId: req.collegeId }).populate('faculties').lean();
     console.log("[GET /classes] Found:", classes.length, "records");
     res.json(classes);
   } catch (e) {
@@ -45,7 +68,7 @@ protectedRouter.put('/classes/:id', async (req, res) => {
     const updateData = { name, sem, section, id: classId, days_per_week };
 
     const updatedClass = await ClassModel.findOneAndUpdate(
-      { _id: id },
+      { _id: id, collegeId: req.collegeId },
       updateData,
       { new: true, runValidators: true }
     );
@@ -62,13 +85,13 @@ protectedRouter.put('/classes/:id', async (req, res) => {
 protectedRouter.delete('/classes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const deletedClass = await ClassModel.findByIdAndDelete(id);
+    const deletedClass = await ClassModel.findOneAndDelete({ _id: id, collegeId: req.collegeId });
     if (!deletedClass) {
       return res.status(404).json({ error: 'Class not found.' });
     }
 
     // Delete associated class-subject assignments
-    await ClassSubject.deleteMany({ class: id });
+    await ClassSubject.deleteMany({ class: id, collegeId: req.collegeId });
 
     res.json({ message: 'Class deleted successfully.' });
   } catch (e) {
@@ -81,9 +104,10 @@ protectedRouter.post('/classes/:classId/faculties', async (req, res) => {
     try {
         const { classId } = req.params;
         const { facultyId } = req.body;
+        await validateOwnership(Faculty, facultyId, req.collegeId, "Faculty");
 
-        const updatedClass = await ClassModel.findByIdAndUpdate(
-            classId,
+        const updatedClass = await ClassModel.findOneAndUpdate(
+            { _id: classId, collegeId: req.collegeId },
             { $addToSet: { faculties: facultyId } },
             { new: true }
         ).populate('faculties');
@@ -93,7 +117,7 @@ protectedRouter.post('/classes/:classId/faculties', async (req, res) => {
         }
         res.json(updatedClass);
     } catch (e) {
-        res.status(400).json({ error: 'Bad Request' });
+        res.status(e.status || 400).json({ error: e.message || 'Bad Request' });
     }
 });
 
@@ -102,8 +126,8 @@ protectedRouter.delete('/classes/:classId/faculties/:facultyId', async (req, res
     try {
         const { classId, facultyId } = req.params;
 
-        const updatedClass = await ClassModel.findByIdAndUpdate(
-            classId,
+        const updatedClass = await ClassModel.findOneAndUpdate(
+            { _id: classId, collegeId: req.collegeId },
             { $pull: { faculties: facultyId } },
             { new: true }
         ).populate('faculties');

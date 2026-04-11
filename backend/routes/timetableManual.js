@@ -1,5 +1,7 @@
 import { Router } from "express";
 const router = Router();
+import auth from "../middleware/auth.js";
+import requireCollegeContext from "../middleware/collegeScope.js";
 import ClassModel from "../models/Class.js";
 import Faculty from "../models/Faculty.js";
 import Subject from "../models/Subject.js";
@@ -40,6 +42,9 @@ import {
   assertState,
   deleteState,
 } from "../state/timetableState.js";
+
+router.use(auth);
+router.use(requireCollegeContext);
 
 function buildSessionMeta(existingState = {}, overrides = {}) {
   return {
@@ -83,6 +88,7 @@ router.post("/initialize", async (req, res) => {
         sourceTimetableId,
       }),
       constraintConfig,
+      collegeId: req.collegeId,
     };
     loadState(timetableId, nextState);
 
@@ -101,7 +107,7 @@ router.post("/valid-options", async (req, res) => {
     const state = getState(timetableId);
     const { classTimetable, teacherTimetable, subjectHoursAssigned, electiveGroups, teacherAvailability, teacherPreferences, config } = state;
 
-    const classObj = await ClassModel.findById(classId).lean();
+    const classObj = await ClassModel.findOne({ _id: classId, collegeId: req.collegeId }).lean();
     if (!classObj) return res.status(404).json({ ok: false, error: "Class not found" });
 
     const combos = await getClassCombosForEdit(state, classObj);
@@ -294,9 +300,9 @@ router.post("/clear-all", async (req, res) => {
   assertState(timetableId);
 
   const [classes, faculties, subjects] = await Promise.all([
-    ClassModel.find().lean(),
-    Faculty.find().lean(),
-    Subject.find().lean()
+    ClassModel.find({ collegeId: req.collegeId }).lean(),
+    Faculty.find({ collegeId: req.collegeId }).lean(),
+    Subject.find({ collegeId: req.collegeId }).lean()
   ]);
 
   initializeState(timetableId, classes, faculties, subjects, config);
@@ -360,6 +366,7 @@ router.post("/load", async (req, res) => {
     const savedState = await loadSavedTimetable({
       timetableId,
       savedTimetableId,
+      collegeId: req.collegeId,
     });
 
     const currentState = getState(timetableId);
@@ -386,6 +393,7 @@ router.post("/save", async (req, res) => {
     const saved = await saveTimetable({
       name,
       state,
+      collegeId: req.collegeId,
       userId: req.user?._id || null,
       savedTimetableId,
     });
@@ -403,7 +411,7 @@ router.post("/save", async (req, res) => {
 // Get all processed assignments (saved timetables or assignment lists)
 router.get("/processed-assignments", async (req, res) => {
   try {
-    const results = await getProcessedAssignments();
+    const results = await getProcessedAssignments(req.collegeId);
     res.json({ ok: true, savedTimetables: results });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

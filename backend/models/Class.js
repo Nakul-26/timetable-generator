@@ -8,7 +8,6 @@ const ClassSchema = new Schema(
       type: String,
       required: true,
       trim: true,
-      default: "default",
       index: true,
     },
     id: {

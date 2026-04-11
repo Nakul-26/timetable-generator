@@ -77,6 +77,7 @@ export function startGenerationWorker({ payload }) {
         const generatedName = `Generated Timetable Batch (${optionCount} options) - ${new Date().toLocaleString()}`;
         try {
           const rec = new TimetableResult({
+            collegeId: payload.collegeId || resultData.collegeId,
             name: generatedName,
             source: "generator",
             status: "generated",

@@ -101,7 +101,7 @@ export async function placeCombo({
     lockedSlots,
   } = newState;
 
-  const classObj = newState.classMap?.get?.(String(classId)) || await ClassModel.findById(classId).lean();
+  const classObj = newState.classMap?.get?.(String(classId)) || await ClassModel.findOne({ _id: classId, collegeId: newState?.collegeId }).lean();
   if (!classObj) throw new Error("Class not found");
 
   if (lockedSlots?.[classId]?.[day]?.[hour]) {
@@ -171,7 +171,7 @@ export async function placeCombo({
   for (const targetClassId of targetClassIds) {
     const targetClassObj = targetClassId === String(classObj._id)
       ? classObj
-      : newState.classMap?.get?.(String(targetClassId)) || await ClassModel.findById(targetClassId).lean();
+      : newState.classMap?.get?.(String(targetClassId)) || await ClassModel.findOne({ _id: targetClassId, collegeId: newState?.collegeId }).lean();
     if (!targetClassObj) {
       throw new Error("Combined class not found");
     }

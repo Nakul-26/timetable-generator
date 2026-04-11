@@ -6,6 +6,7 @@ import Faculty from "../../models/Faculty.js";
 import ClassSubject from "../../models/ClassSubject.js";
 import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
 import TeachingAllocation from "../../models/TeachingAllocation.js";
+import { validateOwnership, validateOwnershipMany } from "../../utils/validateTenantRefs.js";
 
 const protectedRouter = Router();
 protectedRouter.use(auth);
@@ -14,7 +15,7 @@ const toId = (value) => String(value || "").trim();
 
 protectedRouter.get("/teaching-allocations", async (req, res) => {
   try {
-    const allocations = await TeachingAllocation.find()
+    const allocations = await TeachingAllocation.find({ collegeId: req.collegeId })
       .populate("classIds", "name id sem section")
       .populate("subject", "name id type")
       .populate("teacher", "name id")
@@ -65,21 +66,15 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     }
 
     const [classes, subject, teacher] = await Promise.all([
-      ClassModel.find({ _id: { $in: classIds } }),
-      Subject.findById(subjectId),
-      normalizedTeacherId ? Faculty.findById(normalizedTeacherId) : Promise.resolve(null),
+      validateOwnershipMany(ClassModel, classIds, req.collegeId, "classIds"),
+      validateOwnership(Subject, subjectId, req.collegeId, "Subject"),
+      normalizedTeacherId
+        ? validateOwnership(Faculty, normalizedTeacherId, req.collegeId, "Faculty")
+        : Promise.resolve(null),
     ]);
-
-    if (classes.length !== classIds.length || !subject) {
-      return res.status(404).json({ error: "Class or subject not found." });
-    }
 
     const subjectType = String(subject.type || "").toLowerCase();
     const requiresTeacher = subjectType !== "no_teacher";
-
-    if (requiresTeacher && !teacher) {
-      return res.status(404).json({ error: "Teacher not found." });
-    }
 
     if (!requiresTeacher && normalizedTeacherId) {
       return res.status(400).json({ error: "No-teacher subjects must not have a teacher assigned." });
@@ -91,20 +86,20 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
 
     if (requiresTeacher) {
       await TeacherSubjectCombination.findOneAndUpdate(
-        { faculty: normalizedTeacherId, subject: subjectId },
-        { $setOnInsert: { faculty: normalizedTeacherId, subject: subjectId } },
+        { faculty: normalizedTeacherId, subject: subjectId, collegeId: req.collegeId },
+        { $setOnInsert: { faculty: normalizedTeacherId, subject: subjectId, collegeId: req.collegeId } },
         { new: true, upsert: true }
       );
     }
 
     for (const classId of classIds) {
       await ClassSubject.findOneAndUpdate(
-        { class: classId, subject: subjectId },
-        { $set: { hoursPerWeek } },
+        { class: classId, subject: subjectId, collegeId: req.collegeId },
+        { $set: { hoursPerWeek, collegeId: req.collegeId } },
         { new: true, upsert: true }
       );
       if (requiresTeacher) {
-        await ClassModel.findByIdAndUpdate(classId, {
+        await ClassModel.findOneAndUpdate({ _id: classId, collegeId: req.collegeId }, {
           $addToSet: {
             faculties: normalizedTeacherId,
           },
@@ -113,6 +108,7 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     }
 
     const allocation = await TeachingAllocation.create({
+      collegeId: req.collegeId,
       classIds,
       subject: subjectId,
       teacher: normalizedTeacherId,
@@ -120,7 +116,7 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       combinedClassGroupId,
     });
 
-    const populatedAllocation = await TeachingAllocation.findById(allocation._id)
+    const populatedAllocation = await TeachingAllocation.findOne({ _id: allocation._id, collegeId: req.collegeId })
       .populate("classIds", "name id sem section")
       .populate("subject", "name id type")
       .populate("teacher", "name id")
@@ -133,16 +129,16 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     });
   } catch (e) {
     console.error("[POST /teaching-allocations] Error:", e);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(e.status || 500).json({ error: e.message || "Internal Server Error" });
   }
 });
 
 protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
   try {
     const [classes, classSubjects, combos] = await Promise.all([
-      ClassModel.find().select("_id name faculties").lean(),
-      ClassSubject.find().select("class subject").lean(),
-      TeacherSubjectCombination.find().select("_id faculty subject").lean(),
+      ClassModel.find({ collegeId: req.collegeId }).select("_id name faculties").lean(),
+      ClassSubject.find({ collegeId: req.collegeId }).select("class subject").lean(),
+      TeacherSubjectCombination.find({ collegeId: req.collegeId }).select("_id faculty subject").lean(),
     ]);
 
     const subjectIdsByClassId = new Map();
@@ -186,6 +182,7 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
         if (!combo) continue;
         await TeachingAllocation.findOneAndUpdate(
           {
+            collegeId: req.collegeId,
             classIds: [klass._id],
             subject: combo.subject,
             teacher: combo.faculty,
@@ -196,6 +193,7 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
               classIds: [klass._id],
               subject: combo.subject,
               teacher: combo.faculty,
+              collegeId: req.collegeId,
               hoursPerWeek: 1,
               combinedClassGroupId: null,
             },
@@ -233,7 +231,7 @@ protectedRouter.delete("/teaching-allocations", async (req, res) => {
     if (!allocationId) {
       return res.status(400).json({ error: "allocationId is required." });
     }
-    const allocation = await TeachingAllocation.findByIdAndDelete(allocationId).lean();
+    const allocation = await TeachingAllocation.findOneAndDelete({ _id: allocationId, collegeId: req.collegeId }).lean();
     if (!allocation) {
       return res.status(404).json({ error: "Allocation not found." });
     }

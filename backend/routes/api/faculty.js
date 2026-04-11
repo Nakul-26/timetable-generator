@@ -16,6 +16,7 @@ protectedRouter.post('/faculties', async (req, res) => {
   console.log("[POST /faculties] Body:", req.body);
   try {
     const f = new Faculty();
+    f.collegeId = req.collegeId;
     f.id = req.body.id;
     f.name = req.body.name;
     f.unavailableSlots = normalizeAvailabilitySlots(req.body.unavailableSlots || []);
@@ -33,7 +34,7 @@ protectedRouter.post('/faculties', async (req, res) => {
 protectedRouter.get('/faculties', async (req, res) => {
   console.log("[GET /faculties] Fetching all faculties");
   try {
-    const faculties = await Faculty.find().lean();
+    const faculties = await Faculty.find({ collegeId: req.collegeId }).lean();
     console.log("[GET /faculties] Found:", faculties.length, "records");
     res.json(faculties);
   } catch (e) {
@@ -56,7 +57,7 @@ protectedRouter.put('/faculties/:id', async (req, res) => {
     }
 
     const updatedFaculty = await Faculty.findOneAndUpdate(
-      { _id: id },
+      { _id: id, collegeId: req.collegeId },
       updateData,
       { new: true, runValidators: true }
     );
@@ -73,7 +74,7 @@ protectedRouter.put('/faculties/:id', async (req, res) => {
 
 protectedRouter.get('/faculties/:id/preferences', async (req, res) => {
   try {
-    const faculty = await Faculty.findById(req.params.id).select('name preferences').lean();
+    const faculty = await Faculty.findOne({ _id: req.params.id, collegeId: req.collegeId }).select('name preferences').lean();
     if (!faculty) {
       return res.status(404).json({ error: 'Faculty not found.' });
     }
@@ -91,8 +92,8 @@ protectedRouter.get('/faculties/:id/preferences', async (req, res) => {
 protectedRouter.post('/faculties/:id/preferences', async (req, res) => {
   try {
     const preferences = normalizeTeacherPreferences(req.body?.preferences || req.body || {});
-    const faculty = await Faculty.findByIdAndUpdate(
-      req.params.id,
+    const faculty = await Faculty.findOneAndUpdate(
+      { _id: req.params.id, collegeId: req.collegeId },
       { preferences },
       { new: true, runValidators: true }
     ).select('name preferences');
@@ -113,7 +114,7 @@ protectedRouter.post('/faculties/:id/preferences', async (req, res) => {
 
 protectedRouter.get('/faculties/:id/availability', async (req, res) => {
   try {
-    const faculty = await Faculty.findById(req.params.id).select('name unavailableSlots').lean();
+    const faculty = await Faculty.findOne({ _id: req.params.id, collegeId: req.collegeId }).select('name unavailableSlots').lean();
     if (!faculty) {
       return res.status(404).json({ error: 'Faculty not found.' });
     }
@@ -131,8 +132,8 @@ protectedRouter.get('/faculties/:id/availability', async (req, res) => {
 protectedRouter.post('/faculties/:id/availability', async (req, res) => {
   try {
     const unavailableSlots = normalizeAvailabilitySlots(req.body?.unavailableSlots || []);
-    const faculty = await Faculty.findByIdAndUpdate(
-      req.params.id,
+    const faculty = await Faculty.findOneAndUpdate(
+      { _id: req.params.id, collegeId: req.collegeId },
       { unavailableSlots },
       { new: true, runValidators: true }
     ).select('name unavailableSlots');
@@ -156,17 +157,17 @@ protectedRouter.delete('/faculties/:id', async (req, res) => {
   console.log("[DELETE /faculties/:id] Params:", req.params);
   try {
     const { id } = req.params;
-    const deletedFaculty = await Faculty.findByIdAndDelete(id);
+    const deletedFaculty = await Faculty.findOneAndDelete({ _id: id, collegeId: req.collegeId });
     if (!deletedFaculty) {
       console.warn("[DELETE /faculties/:id] Faculty not found:", id);
       return res.status(404).json({ error: 'Faculty not found.' });
     }
 
     // Delete associated teacher-subject combinations
-    await TeacherSubjectCombination.deleteMany({ faculty: id });
+    await TeacherSubjectCombination.deleteMany({ faculty: id, collegeId: req.collegeId });
 
     // Remove faculty from all classes
-    await ClassModel.updateMany({}, { $pull: { faculties: id } });
+    await ClassModel.updateMany({ collegeId: req.collegeId }, { $pull: { faculties: id } });
 
     console.log("[DELETE /faculties/:id] Deleted faculty and associated data:", deletedFaculty);
     res.json({ message: 'Faculty deleted successfully.' });

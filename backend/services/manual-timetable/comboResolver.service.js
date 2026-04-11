@@ -51,7 +51,7 @@ export async function resolveComboFromState(state, comboId) {
     return null;
   }
 
-  const combo = await TeacherSubjectCombination.findById(comboIdStr)
+  const combo = await TeacherSubjectCombination.findOne({ _id: comboIdStr, collegeId: state?.collegeId })
     .populate("subject", "name type")
     .populate("faculty", "name")
     .lean();
@@ -128,8 +128,8 @@ export async function getClassCombosForEdit(state, classObj) {
     )];
 
     const [subjects, faculties] = await Promise.all([
-      subjectIds.length > 0 ? Subject.find({ _id: { $in: subjectIds } }).select("name type").lean() : Promise.resolve([]),
-      facultyIds.length > 0 ? Faculty.find({ _id: { $in: facultyIds } }).select("name").lean() : Promise.resolve([]),
+      subjectIds.length > 0 ? Subject.find({ _id: { $in: subjectIds }, collegeId: state?.collegeId }).select("name type").lean() : Promise.resolve([]),
+      facultyIds.length > 0 ? Faculty.find({ _id: { $in: facultyIds }, collegeId: state?.collegeId }).select("name").lean() : Promise.resolve([]),
     ]);
 
     const subjectMap = new Map(subjects.map((subject) => [String(subject._id), subject]));
@@ -171,6 +171,7 @@ export async function getClassCombosForEdit(state, classObj) {
   }
 
   return TeacherSubjectCombination.find({
-    _id: { $in: validMongoIds }
+    _id: { $in: validMongoIds },
+    collegeId: state?.collegeId,
   }).populate("faculty subject").lean();
 }

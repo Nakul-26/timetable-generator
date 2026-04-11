@@ -64,7 +64,7 @@ function createLockedSlotGrid(classTimetable) {
   return lockedSlots;
 }
 
-async function buildDerivedState(saved) {
+async function buildDerivedState(saved, collegeId) {
   const classTimetable = normalizeClassTimetables(
     JSON.parse(JSON.stringify(saved.class_timetables || {}))
   );
@@ -83,6 +83,7 @@ async function buildDerivedState(saved) {
 
   const comboDocs = validComboIds.length
     ? await TeacherSubjectCombination.find({
+        collegeId,
         _id: { $in: validComboIds },
       }).lean()
     : [];
@@ -176,23 +177,25 @@ async function buildDerivedState(saved) {
 /* ------------------- Load / Save ---------------- */
 /* ------------------------------------------------ */
 
-export async function loadSavedTimetable({ timetableId, savedTimetableId }) {
-  const saved = await TimetableResult.findById(savedTimetableId).lean();
+export async function loadSavedTimetable({ timetableId, savedTimetableId, collegeId }) {
+  const saved = await TimetableResult.findOne({ _id: savedTimetableId, collegeId }).lean();
   if (!saved) {
     throw new Error("Saved timetable not found");
   }
 
-  return buildDerivedState(saved);
+  return buildDerivedState(saved, collegeId);
 }
 
 export async function saveTimetable({
   name,
   state,
+  collegeId,
   userId = null,
   savedTimetableId = null,
 }) {
   const isEditedDraft = !!state.generatedFromId;
   const payload = {
+    collegeId,
     name,
     source: "manual",
     status: isEditedDraft ? "edited" : (state.lifecycleStatus || "draft"),
@@ -212,8 +215,8 @@ export async function saveTimetable({
   };
 
   if (savedTimetableId) {
-    const updated = await TimetableResult.findByIdAndUpdate(
-      savedTimetableId,
+    const updated = await TimetableResult.findOneAndUpdate(
+      { _id: savedTimetableId, collegeId },
       payload,
       { new: true }
     );
@@ -225,6 +228,7 @@ export async function saveTimetable({
 
   if (state.parentTimetableId) {
     const latestSibling = await TimetableResult.find({
+      collegeId,
       $or: [
         { parent_timetable_id: state.parentTimetableId },
         { _id: state.parentTimetableId },
@@ -249,19 +253,19 @@ export async function saveTimetable({
 /* -------- Processed Assignments / Results -------- */
 /* ------------------------------------------------ */
 
-async function populateCombos(comboIds) {
+async function populateCombos(comboIds, collegeId) {
   if (!comboIds || comboIds.length === 0) return [];
 
   const uniqueIds = [...new Set(comboIds.filter(Boolean))];
 
-  return TeacherSubjectCombination.find({ _id: { $in: uniqueIds } })
+  return TeacherSubjectCombination.find({ _id: { $in: uniqueIds }, collegeId })
     .populate("faculty", "name")
     .populate("subject", "name")
     .lean();
 }
 
-export async function getProcessedAssignments() {
-  const results = await TimetableResult.find({})
+export async function getProcessedAssignments(collegeId) {
+  const results = await TimetableResult.find({ collegeId })
     .sort({ createdAt: -1 })
     .lean();
 
@@ -271,7 +275,8 @@ export async function getProcessedAssignments() {
         const populatedAssignments = {};
         for (const classId in result.assignments_only) {
           populatedAssignments[classId] = await populateCombos(
-            result.assignments_only[classId]
+            result.assignments_only[classId],
+            collegeId
           );
         }
         result.populated_assignments = populatedAssignments;
@@ -288,7 +293,7 @@ export async function getProcessedAssignments() {
         )
         .filter(Boolean);
 
-      const populated = await populateCombos(allComboIds);
+      const populated = await populateCombos(allComboIds, collegeId);
       const comboMap = new Map(
         populated.map((c) => [c._id.toString(), c])
       );

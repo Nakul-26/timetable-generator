@@ -19,7 +19,8 @@ export async function runAutoFill({ timetableId, classId }) {
 
   // Populate details for frontend
   const placedCombosDetails = await TeacherSubjectCombination.find({
-    _id: { $in: result.placedComboIds }
+    _id: { $in: result.placedComboIds },
+    collegeId: state?.collegeId,
   })
     .populate("faculty", "name")
     .populate("subject", "name")

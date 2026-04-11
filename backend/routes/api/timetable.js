@@ -49,7 +49,7 @@ protectedRouter.post('/process-new-input', async (req, res) => {
         console.log("[POST /process-new-input] Starting data processing for assignments...");
 
         // Step 1: Use prepareGeneratorData to get all necessary processed data
-        const generatorData = await prepareGeneratorData();
+        const generatorData = await prepareGeneratorData(req.collegeId);
         const { classes: classesOut, combos: generatedCombos, subjects, faculties } = generatorData;
         
         // Step 2: Create lookup maps for names
@@ -108,6 +108,7 @@ protectedRouter.post('/process-new-input', async (req, res) => {
         // 4. Save the generated assignments as a new TimetableResult
         const newAssignmentName = `Processed Assignments - ${new Date().toLocaleString()}`;
     const newAssignmentResult = new TimetableResult({
+      collegeId: req.collegeId,
       name: newAssignmentName,
       source: 'assignments',
       status: 'draft',
@@ -138,7 +139,7 @@ protectedRouter.post('/generate', async (req, res) => {
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
   
-      const generatorData = await prepareGeneratorData();
+      const generatorData = await prepareGeneratorData(req.collegeId);
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -152,6 +153,7 @@ protectedRouter.post('/generate', async (req, res) => {
         Math.min(5, Number(solutionCount) || Number(constraintConfig?.solver?.solutionCount) || 5)
       );
       const job = await GenerationJob.create({
+        collegeId: req.collegeId,
         status: "pending",
         phase: "queued",
         progress: 0,
@@ -176,6 +178,7 @@ protectedRouter.post('/generate', async (req, res) => {
           body: JSON.stringify({
             jobId: String(job._id),
             payload: {
+              collegeId: req.collegeId,
               ...generatorData,
               fixedSlots,
               DAYS_PER_WEEK: daysPerWeek,
@@ -191,7 +194,7 @@ protectedRouter.post('/generate', async (req, res) => {
           SOLVER_BASE_URL === "http://localhost:8001"
             ? "Solver service is unreachable at http://localhost:8001. Set SOLVER_URL to your deployed Python solver when the backend runs serverlessly."
             : `Solver service is unreachable at ${SOLVER_BASE_URL}.`;
-        await GenerationJob.findByIdAndUpdate(job._id, {
+        await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
           status: "failed",
           phase: "error",
           error: solverUnavailableMessage,
@@ -201,7 +204,7 @@ protectedRouter.post('/generate', async (req, res) => {
       }
 
       if (!solverRes.ok || solverBody?.ok === false) {
-        await GenerationJob.findByIdAndUpdate(job._id, {
+        await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
           status: "failed",
           phase: "error",
           error: solverBody?.error || `Solver job start failed (${solverRes.status})`,
@@ -221,7 +224,7 @@ protectedRouter.post('/health-check', async (req, res) => {
     try {
       const { fixedSlots = [], constraintConfig = {} } = req.body || {};
 
-      const generatorData = await prepareGeneratorData();
+      const generatorData = await prepareGeneratorData(req.collegeId);
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -246,7 +249,7 @@ protectedRouter.post('/health-check', async (req, res) => {
 protectedRouter.get('/elective-settings/:classId', async (req, res) => {
     try {
         const { classId } = req.params;
-        const settings = await ElectiveSubjectSetting.find({ class: classId }).lean();
+        const settings = await ElectiveSubjectSetting.find({ class: classId, collegeId: req.collegeId }).lean();
         
         const settingsMap = settings.map(setting => ({
             subjectId: setting.subject.toString(),
@@ -267,9 +270,10 @@ protectedRouter.post('/elective-settings', async (req, res) => {
             return res.status(400).json({ error: 'Invalid request body' });
         }
 
-        await ElectiveSubjectSetting.deleteMany({ class: classId });
+        await ElectiveSubjectSetting.deleteMany({ class: classId, collegeId: req.collegeId });
 
         const settingsToInsert = settings.map(setting => ({
+            collegeId: req.collegeId,
             class: classId,
             subject: setting.subjectId,
             teacherCategoryRequirements: setting.teacherCategoryRequirements || {}
@@ -287,7 +291,7 @@ protectedRouter.post('/elective-settings', async (req, res) => {
 });
 
 protectedRouter.post('/stop-generator/:taskId', (req, res) => {
-  GenerationJob.findByIdAndUpdate(req.params.taskId, {
+  GenerationJob.findOneAndUpdate({ _id: req.params.taskId, collegeId: req.collegeId }, {
     cancel_requested: true,
     phase: "cancel_requested",
   })
@@ -302,7 +306,7 @@ protectedRouter.post('/stop-generator/:taskId', (req, res) => {
 
 protectedRouter.get('/generation-status/:taskId', async (req, res) => {
   try {
-    const job = await GenerationJob.findById(req.params.taskId).lean();
+    const job = await GenerationJob.findOne({ _id: req.params.taskId, collegeId: req.collegeId }).lean();
     if (!job) {
       return res.status(404).json({ error: "Task not found" });
     }
@@ -317,6 +321,7 @@ protectedRouter.get('/result/latest', async (req, res) => {
   console.log("[GET /result/latest] Fetching latest timetable result");
   try {
     const latestJob = await GenerationJob.findOne({
+      collegeId: req.collegeId,
       status: 'completed',
       result: { $ne: null },
     }).sort({ updatedAt: -1 }).lean();
@@ -325,7 +330,7 @@ protectedRouter.get('/result/latest', async (req, res) => {
       return res.json(latestJob.result);
     }
 
-    const r = await TimetableResult.findOne({ source: 'generator' }).sort({ createdAt: -1 }).lean();
+    const r = await TimetableResult.findOne({ collegeId: req.collegeId, source: 'generator' }).sort({ createdAt: -1 }).lean();
     console.log("[GET /result/latest] Found:", r ? "Yes" : "No");
     res.json(r);
   } catch (e) {
@@ -337,6 +342,7 @@ protectedRouter.get('/timetables', async (req, res) => {
     console.log("[GET /timetables] Fetching all saved timetables");
     try {
         const timetables = await TimetableResult.find({
+          collegeId: req.collegeId,
           source: { $in: ['manual', 'generator'] }
         })
           .sort({ createdAt: -1 })
@@ -352,7 +358,7 @@ protectedRouter.get('/processed-assignments', async (req, res) => {
     console.log("[GET /processed-assignments] Fetching all saved assignment-only results");
     try {
         // The post-find hook on TimetableResult will populate 'populated_assignments'
-        const timetables = await TimetableResult.find({ source: 'assignments' }).sort({ createdAt: -1 });
+        const timetables = await TimetableResult.find({ collegeId: req.collegeId, source: 'assignments' }).sort({ createdAt: -1 });
         console.log("[GET /processed-assignments] Found:", timetables.length, "records");
         res.json({ savedTimetables: timetables });
     } catch (e) {
@@ -364,7 +370,7 @@ protectedRouter.get('/processed-assignments', async (req, res) => {
 protectedRouter.get('/timetable/:id', async (req, res) => {
     console.log("[GET /timetable/:id] Fetching timetable with id:", req.params.id);
     try {
-        const timetable = await TimetableResult.findById(req.params.id).lean();
+        const timetable = await TimetableResult.findOne({ _id: req.params.id, collegeId: req.collegeId }).lean();
         if (!timetable) {
             return res.status(404).json({ error: 'Timetable not found.' });
         }
@@ -379,7 +385,7 @@ protectedRouter.get('/timetable/:id', async (req, res) => {
             collectSubjectIdsFromEncodedSubjectId(subjectId).forEach((id) => missingSubjectIds.add(id));
           });
           const subjectDocs = missingSubjectIds.size
-            ? await Subject.find({ _id: { $in: [...missingSubjectIds] } }).select("name type").lean()
+            ? await Subject.find({ _id: { $in: [...missingSubjectIds] }, collegeId: req.collegeId }).select("name type").lean()
             : [];
           const subjectMap = new Map([
             ...storedSubjectMap.entries(),
@@ -420,7 +426,7 @@ protectedRouter.get('/timetable/:id/export/excel', async (req, res) => {
             return res.status(400).json({ error: 'Invalid export mode.' });
         }
 
-        const timetable = await TimetableResult.findById(req.params.id).lean();
+        const timetable = await TimetableResult.findOne({ _id: req.params.id, collegeId: req.collegeId }).lean();
         if (!timetable) {
             return res.status(404).json({ error: 'Timetable not found.' });
         }
@@ -454,7 +460,7 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
   
-      const generatorData = await prepareGeneratorData();
+      const generatorData = await prepareGeneratorData(req.collegeId);
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -492,6 +498,7 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
     }
 
     const rec = new TimetableResult({
+      collegeId: req.collegeId,
       name: `Generated Timetable - ${new Date().toLocaleString()}`,
       source: 'generator',
       status: 'generated',
@@ -527,7 +534,7 @@ protectedRouter.post("/result/regenerate", async (req, res) => {
 protectedRouter.delete("/timetables", async (req, res) => {
   try {
     // Delete all timetables
-    const result = await TimetableResult.deleteMany({});
+    const result = await TimetableResult.deleteMany({ collegeId: req.collegeId });
 
     res.status(200).json({
       ok: true,
@@ -548,6 +555,7 @@ protectedRouter.post("/timetables", async (req, res) => {
     }
 
     const newTimetable = new TimetableResult({
+      collegeId: req.collegeId,
       name,
       source: 'generator', // Mark as from the generator
       status: 'generated',

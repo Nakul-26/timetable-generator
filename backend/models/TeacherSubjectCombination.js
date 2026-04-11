@@ -8,7 +8,6 @@ const TeacherSubjectCombinationSchema = new Schema(
       type: String,
       required: true,
       trim: true,
-      default: "default",
       index: true,
     },
     faculty: { type: Schema.Types.ObjectId, ref: 'Faculty', required: true },

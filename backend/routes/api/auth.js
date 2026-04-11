@@ -4,10 +4,12 @@ import Admin from '../../models/Admin.js';
 import Faculty from '../../models/Faculty.js';
 import adminAuth from '../../middleware/adminAuth.js';
 import auth from '../../middleware/auth.js';
+import requireCollegeContext from '../../middleware/collegeScope.js';
 
 const router = Router();
 const protectedRouter = Router();
 protectedRouter.use(auth);
+protectedRouter.use(requireCollegeContext);
 
 // --- Rate Limiter for Login ---
 const loginLimiter = rateLimit({
@@ -21,8 +23,11 @@ const loginLimiter = rateLimit({
 // --- User Authentication ---
 router.post('/register', async (req, res) => {
   try {
-    const { id, name } = req.body;
-    const user = new Faculty({ id, name });
+    const { id, name, collegeId } = req.body;
+    if (!collegeId) {
+      return res.status(400).json({ error: 'collegeId is required.' });
+    }
+    const user = new Faculty({ id, name, collegeId });
     await user.save();
     res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
@@ -33,7 +38,7 @@ router.post('/register', async (req, res) => {
 protectedRouter.post('/users/create', adminAuth, async (req, res) => {
   try {
     const { id, name } = req.body;
-    const user = new Faculty({ id, name });
+    const user = new Faculty({ id, name, collegeId: req.collegeId });
     await user.save();
     res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
@@ -59,13 +64,15 @@ router.post('/login', loginLimiter, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid credentials' });
         }
         const token = admin.generateAuthToken();
+        const user = admin.toObject();
+        delete user.password;
         res.cookie('token', token, {
             httpOnly: true,
             secure: true,
             sameSite: 'none',
             path: '/'
         });
-        res.json({ success: true, user: admin });
+        res.json({ success: true, user });
     } catch (err) {
         console.error('Login error:', err);
         res.status(500).json({ success: false, message: 'Internal Server Error' });

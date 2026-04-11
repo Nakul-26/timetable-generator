@@ -47,6 +47,9 @@ const Navbar = () => {
         <NavLink to="/timetable/settings" className="nav-item" onClick={() => setIsMenuOpen(false)}>Timetable Settings</NavLink>
         {/* <NavLink to="/manual-timetable" className="nav-item">Manual Timetable</NavLink> */}
         <NavLink to="/saved-timetables" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generated Timetables</NavLink>
+        {user.role === 'superadmin' && (
+          <NavLink to="/superadmin" className="nav-item" onClick={() => setIsMenuOpen(false)}>Superadmin</NavLink>
+        )}
         <button onClick={handleLogout} className="nav-item-logout">
           Logout
         </button>

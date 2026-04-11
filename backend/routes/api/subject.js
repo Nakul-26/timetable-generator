@@ -15,6 +15,7 @@ protectedRouter.post('/subjects', async (req, res) => {
   try {
     const { id, name, sem, combined_classes, isElective } = req.body;
     const s = new Subject({
+      collegeId: req.collegeId,
       id,
       name,
       sem,
@@ -35,7 +36,7 @@ protectedRouter.post('/subjects', async (req, res) => {
 protectedRouter.get('/subjects', async (req, res) => {
   console.log("[GET /subjects] Fetching all subjects");
   try {
-    const subjects = await Subject.find().lean();
+    const subjects = await Subject.find({ collegeId: req.collegeId }).lean();
     console.log("[GET /subjects] Found:", subjects.length, "records");
     res.json(subjects);
   } catch (e) {
@@ -50,7 +51,7 @@ protectedRouter.put('/subjects/:id', async (req, res) => {
     const { name, sem, type, combined_classes, isElective } = req.body;
 
     const updatedSubject = await Subject.findOneAndUpdate(
-      { _id: id },
+      { _id: id, collegeId: req.collegeId },
       { name, sem, type, combined_classes, isElective },
       { new: true, runValidators: true }
     );
@@ -68,16 +69,16 @@ protectedRouter.put('/subjects/:id', async (req, res) => {
 protectedRouter.delete('/subjects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const deletedSubject = await Subject.findByIdAndDelete(id);
+    const deletedSubject = await Subject.findOneAndDelete({ _id: id, collegeId: req.collegeId });
     if (!deletedSubject) {
       return res.status(404).json({ error: "Subject not found." });
     }
 
     // Delete associated teacher-subject combinations
-    await TeacherSubjectCombination.deleteMany({ subject: id });
+    await TeacherSubjectCombination.deleteMany({ subject: id, collegeId: req.collegeId });
 
     // Delete associated class-subject assignments
-    await ClassSubject.deleteMany({ subject: id });
+    await ClassSubject.deleteMany({ subject: id, collegeId: req.collegeId });
 
     res.json({ message: "Subject deleted successfully." });
   } catch (e) {

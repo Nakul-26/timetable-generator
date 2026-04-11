@@ -120,7 +120,7 @@ function getComboClassIds(combo, fallbackClassId = null) {
 }
 
 async function getClassMap(classIds = []) {
-  const docs = await ClassModel.find({ _id: { $in: classIds } }).lean();
+  const docs = await ClassModel.find({ _id: { $in: classIds }, collegeId: state?.collegeId }).lean();
   return new Map(docs.map((doc) => [String(doc._id), doc]));
 }
 

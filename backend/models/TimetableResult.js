@@ -8,7 +8,6 @@ const ResultSchema = new Schema(
       type: String,
       required: true,
       trim: true,
-      default: "default",
       index: true,
     },
     name: { type: String, required: true },
@@ -92,7 +91,12 @@ ResultSchema.index({ collegeId: 1, createdAt: -1 });
 ResultSchema.index({ collegeId: 1, source: 1, createdAt: -1 });
 ResultSchema.index(
   { collegeId: 1, source_generation_job_id: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    partialFilterExpression: {
+      source_generation_job_id: { $type: "string" },
+    },
+  }
 );
 
 // Post-find hook to populate assignments when the source is 'assignments'
@@ -119,6 +123,7 @@ ResultSchema.post('find', async function(docs, next) {
             let populatedCombos = [];
             if (validMongoIds.length > 0) {
                 populatedCombos = await TeacherSubjectCombination.find({
+                    collegeId: doc.collegeId,
                     '_id': { $in: validMongoIds }
                 }).populate('faculty', 'name').populate('subject', 'name').lean();
             }

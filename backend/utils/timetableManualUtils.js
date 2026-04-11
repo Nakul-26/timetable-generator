@@ -237,13 +237,14 @@ export async function autoFillTimetable(classId, currentState) {
      */
     const { config, classTimetable, teacherTimetable, subjectHoursAssigned, teacherAvailability } = currentState;
 
-    const classObj = await ClassModel.findById(classId).lean();
+    const classObj = await ClassModel.findOne({ _id: classId, collegeId: currentState?.collegeId }).lean();
     if (!classObj) {
         return { ok: false, error: "Class not found" };
     }
 
     const combos = await TeacherSubjectCombination.find({
-        '_id': { $in: classObj.assigned_teacher_subject_combos }
+        '_id': { $in: classObj.assigned_teacher_subject_combos },
+        collegeId: currentState?.collegeId,
     }).populate('faculty subject').lean();
 
     let newClassTimetable = JSON.parse(JSON.stringify(classTimetable));

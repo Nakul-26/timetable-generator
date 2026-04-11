@@ -5,7 +5,6 @@ const ElectiveSubjectSettingSchema = new mongoose.Schema({
         type: String,
         required: true,
         trim: true,
-        default: 'default',
         index: true
     },
     class: {

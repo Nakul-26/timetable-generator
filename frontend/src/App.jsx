@@ -19,6 +19,9 @@ import ManualTimetable from './pages/manual/ManualTimetable.jsx';
 import ProcessInputs from './pages/assignments/ProcessInputs.jsx';
 import SavedTimetables from './pages/SavedTimetables.jsx';
 import ViewTimetable from './pages/ViewTimetable.jsx';
+import SuperadminDashboard from './pages/superadmin/SuperadminDashboard';
+import CreateCollege from './pages/superadmin/CreateCollege';
+import CreateAdmin from './pages/superadmin/CreateAdmin';
 import Navbar from './components/Navbar2';
 import Login from './pages/Login';
 import { AuthProvider } from './context/AuthContext';
@@ -101,6 +104,9 @@ function App() {
           <Route path="/manual-timetable" element={<PrivateRoute><ManualTimetable /></PrivateRoute>} />
           <Route path="/saved-timetables" element={<PrivateRoute><SavedTimetables /></PrivateRoute>} />
           <Route path="/process-inputs" element={<PrivateRoute><ProcessInputs /></PrivateRoute>} />
+          <Route path="/superadmin" element={<PrivateRoute><SuperadminDashboard /></PrivateRoute>} />
+          <Route path="/superadmin/create-college" element={<PrivateRoute><CreateCollege /></PrivateRoute>} />
+          <Route path="/superadmin/create-admin" element={<PrivateRoute><CreateAdmin /></PrivateRoute>} />
         </Routes>
       </main>
     </div>

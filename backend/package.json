@@ -8,7 +8,12 @@
     "dev": "nodemon --require dotenv/config server.js",
     "vercel-build": "echo 'Vercel build step complete'",
     "seed-new-data": "node seedNewData.js",
-    "seed-combos": "node seedCombos.js"
+    "seed-combos": "node seedCombos.js",
+    "create-superadmin": "node scripts/createSuperAdmin.mjs",
+    "tenant-assign:dry-run": "node scripts/assignLegacyCollege.mjs",
+    "tenant-assign:apply": "node scripts/assignLegacyCollege.mjs --apply",
+    "tenant-migration:dry-run": "node scripts/migrateCollegeIds.mjs",
+    "tenant-migration:apply": "node scripts/migrateCollegeIds.mjs --apply"
   },
   "keywords": [],
   "author": "",

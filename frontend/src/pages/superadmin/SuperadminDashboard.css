@@ -1,0 +1,64 @@
+.superadmin-dashboard {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.superadmin-dashboard h1 {
+  color: #ff6b6b;
+  margin-bottom: 20px;
+}
+
+.dashboard-actions {
+  margin-bottom: 30px;
+}
+
+.dashboard-actions button {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-right: 10px;
+  font-size: 16px;
+}
+
+.dashboard-actions button:hover {
+  background: #45a049;
+}
+
+.colleges-list h2 {
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.colleges-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.college-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  border: 1px solid #ddd;
+}
+
+.college-card h3 {
+  color: #ff6b6b;
+  margin-bottom: 10px;
+}
+
+.college-card p {
+  margin: 5px 0;
+  color: #555;
+}
+
+.loading, .error {
+  text-align: center;
+  padding: 50px;
+  font-size: 18px;
+}

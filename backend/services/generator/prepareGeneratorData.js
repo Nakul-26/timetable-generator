@@ -9,7 +9,11 @@ import converter from "../../models/lib/convertNewCollegeInputToGeneratorData.js
 import { normalizeAvailabilitySlots } from "../../utils/teacherAvailability.js";
 import { normalizeTeacherPreferences } from "../../utils/teacherPreferences.js";
 
-export async function prepareGeneratorData() {
+export async function prepareGeneratorData(collegeId) {
+  if (!collegeId) {
+    throw new Error("Missing collegeId in generator.");
+  }
+
   const [
     faculties,
     subjects,
@@ -19,13 +23,13 @@ export async function prepareGeneratorData() {
     electiveSettings,
     teachingAllocations,
   ] = await Promise.all([
-    Faculty.find().lean(),
-    Subject.find().lean(),
-    ClassModel.find().populate("faculties").lean(),
-    ClassSubject.find().lean(),
-    TeacherSubjectCombination.find().lean(),
-    ElectiveSubjectSetting.find().lean(),
-    TeachingAllocation.find().lean(),
+    Faculty.find({ collegeId }).lean(),
+    Subject.find({ collegeId }).lean(),
+    ClassModel.find({ collegeId }).populate("faculties").lean(),
+    ClassSubject.find({ collegeId }).lean(),
+    TeacherSubjectCombination.find({ collegeId }).lean(),
+    ElectiveSubjectSetting.find({ collegeId }).lean(),
+    TeachingAllocation.find({ collegeId }).lean(),
   ]);
 
   const explicitClassSubjectKeys = new Set();

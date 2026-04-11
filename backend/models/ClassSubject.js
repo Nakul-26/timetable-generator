@@ -7,7 +7,6 @@ const ClassSubjectSchema = new Schema(
       type: String,
       required: true,
       trim: true,
-      default: "default",
       index: true,
     },
     class: { type: Schema.Types.ObjectId, ref: 'Class', required: true },

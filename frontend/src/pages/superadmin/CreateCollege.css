@@ -1,0 +1,92 @@
+.create-college {
+  padding: 20px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.create-college h1 {
+  color: #ff6b6b;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.college-form {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  border: 1px solid #ddd;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: #444;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+.form-group small {
+  color: #777;
+  font-size: 14px;
+}
+
+button[type="submit"] {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  width: 100%;
+}
+
+button[type="submit"]:hover:not(:disabled) {
+  background: #45a049;
+}
+
+button[type="submit"]:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 20px;
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.message {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.back-btn {
+  background: #6c757d;
+  margin-top: 20px;
+  width: 100%;
+}
+
+.back-btn:hover {
+  background: #5a6268;
+}
