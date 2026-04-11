@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from '../api/axios';
+import axios from '../../api/axios.jsx';
 import './CreateAdmin.css';
 
 const CreateAdmin = () => {

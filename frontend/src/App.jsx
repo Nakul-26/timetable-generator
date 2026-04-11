@@ -22,6 +22,8 @@ import ViewTimetable from './pages/ViewTimetable.jsx';
 import SuperadminDashboard from './pages/superadmin/SuperadminDashboard';
 import CreateCollege from './pages/superadmin/CreateCollege';
 import CreateAdmin from './pages/superadmin/CreateAdmin';
+import SuperadminColleges from './pages/superadmin/SuperadminColleges';
+import SuperadminAdmins from './pages/superadmin/SuperadminAdmins';
 import Navbar from './components/Navbar2';
 import Login from './pages/Login';
 import { AuthProvider } from './context/AuthContext';
@@ -105,6 +107,8 @@ function App() {
           <Route path="/saved-timetables" element={<PrivateRoute><SavedTimetables /></PrivateRoute>} />
           <Route path="/process-inputs" element={<PrivateRoute><ProcessInputs /></PrivateRoute>} />
           <Route path="/superadmin" element={<PrivateRoute><SuperadminDashboard /></PrivateRoute>} />
+          <Route path="/superadmin/colleges" element={<PrivateRoute><SuperadminColleges /></PrivateRoute>} />
+          <Route path="/superadmin/admins" element={<PrivateRoute><SuperadminAdmins /></PrivateRoute>} />
           <Route path="/superadmin/create-college" element={<PrivateRoute><CreateCollege /></PrivateRoute>} />
           <Route path="/superadmin/create-admin" element={<PrivateRoute><CreateAdmin /></PrivateRoute>} />
         </Routes>

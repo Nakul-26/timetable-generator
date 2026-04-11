@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from '../../api/axios.jsx';
 import './SuperadminDashboard.css';
 
-const SuperadminDashboard = () => {
+const SuperadminColleges = () => {
   const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -13,8 +13,8 @@ const SuperadminDashboard = () => {
 
   const fetchColleges = async () => {
     try {
-      const response = await axios.get('/api/superadmin/colleges');
-      setColleges(response.data.colleges || []);
+      const res = await axios.get('/superadmin/colleges');
+      setColleges(res.data.colleges || []);
     } catch (err) {
       setError('Failed to load colleges');
       console.error(err);
@@ -28,15 +28,11 @@ const SuperadminDashboard = () => {
 
   return (
     <div className="superadmin-dashboard">
-      <h1>Superadmin Dashboard</h1>
-      <div className="dashboard-actions">
-        <button onClick={() => window.location.href = '/superadmin/colleges'}>Manage Colleges</button>
-        <button onClick={() => window.location.href = '/superadmin/admins'}>Manage Admins</button>
-      </div>
+      <h1>College Management</h1>
       <div className="colleges-list">
         <h2>Colleges ({colleges.length})</h2>
         {colleges.length === 0 ? (
-          <p>No colleges found. Create your first college!</p>
+          <p>No colleges found.</p>
         ) : (
           <div className="colleges-grid">
             {colleges.map(college => (
@@ -54,4 +50,4 @@ const SuperadminDashboard = () => {
   );
 };
 
-export default SuperadminDashboard;
+export default SuperadminColleges;

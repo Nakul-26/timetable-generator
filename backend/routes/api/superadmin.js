@@ -1,9 +1,12 @@
 import { Router } from "express";
 import College from "../../models/College.js";
 import Admin from "../../models/Admin.js";
+import auth from "../../middleware/auth.js";
 import requireSuperAdmin from "../../middleware/superAdminAuth.js";
 
 const router = Router();
+// Require authentication first so `req.user` is populated, then enforce superadmin role
+router.use(auth);
 router.use(requireSuperAdmin);
 
 function toCollegeSlug(value = "") {
@@ -23,6 +26,16 @@ router.get("/superadmin/colleges", async (_req, res) => {
     res.json({ colleges });
   } catch (error) {
     console.error("[GET /superadmin/colleges] Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.get("/superadmin/admins", async (_req, res) => {
+  try {
+    const admins = await Admin.find({ role: "admin" }).select("-password").lean();
+    res.json({ admins });
+  } catch (error) {
+    console.error("[GET /superadmin/admins] Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });

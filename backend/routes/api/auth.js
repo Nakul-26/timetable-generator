@@ -66,11 +66,12 @@ router.post('/login', loginLimiter, async (req, res) => {
         const token = admin.generateAuthToken();
         const user = admin.toObject();
         delete user.password;
+        const isProd = process.env.NODE_ENV === 'production';
         res.cookie('token', token, {
-            httpOnly: true,
-            secure: true,
-            sameSite: 'none',
-            path: '/'
+          httpOnly: true,
+          secure: isProd,
+          sameSite: isProd ? 'none' : 'lax',
+          path: '/',
         });
         res.json({ success: true, user });
     } catch (err) {
