@@ -41,6 +41,22 @@ const SuperadminColleges = () => {
                 <p><strong>Code:</strong> {college.code}</p>
                 <p><strong>College ID:</strong> {college.collegeId}</p>
                 <p><strong>Created:</strong> {new Date(college.createdAt).toLocaleDateString()}</p>
+                <div style={{ marginTop: 8 }}>
+                  <button onClick={async () => {
+                    const name = window.prompt('New name', college.name) || college.name;
+                    const code = window.prompt('New code', college.code) || college.code;
+                    const cid = window.prompt('New collegeId', college.collegeId) || college.collegeId;
+                    try {
+                      await axios.put(`/superadmin/colleges/${college._id}`, { name, code, collegeId: cid });
+                      fetchColleges();
+                    } catch (err) { alert(err?.response?.data?.error || 'Update failed'); }
+                  }}>Edit</button>
+                  <button style={{ marginLeft: 8 }} onClick={async () => {
+                    if (!confirm('Delete this college? This cannot be undone.')) return;
+                    try { await axios.delete(`/superadmin/colleges/${college._id}`); fetchColleges(); }
+                    catch (err) { alert(err?.response?.data?.error || 'Delete failed'); }
+                  }}>Delete</button>
+                </div>
               </div>
             ))}
           </div>

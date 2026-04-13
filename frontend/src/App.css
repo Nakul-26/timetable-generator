@@ -1,5 +1,12 @@
 /* Add Pages Styles */
 /* Container */
+:root {
+  --primary-color: #ff8c42;
+  --accent-color: #ff6b6b;
+  --primary-gradient: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+  --focus-glow: rgba(255,140,66,0.18);
+}
+
 .form-container {
   max-width: 550px;
   margin: 40px auto;
@@ -40,9 +47,9 @@
 
 .elective-highlight-group {
   padding: 14px 16px;
-  border: 2px solid #ffd5ba;
+  border: 2px solid rgba(255,140,66,0.22);
   border-radius: 10px;
-  background: #fff7f2;
+  background: rgba(255,140,66,0.03);
 }
 
 .elective-highlight-label {
@@ -135,8 +142,8 @@
   margin-top: 16px;
   padding: 10px 14px;
   border-radius: 8px;
-  background: #e6ffe6;
-  color: #28a745;
+  background: rgba(255,140,66,0.06);
+  color: var(--primary-color);
   font-weight: 500;
   text-align: center;
 }
@@ -542,7 +549,8 @@ h2 {
     font-weight: 600;
 }
 .add-form > div {
-    flex-grow: 1;
+  flex: 1 1 220px;
+  min-width: 160px;
 }
 .add-form .hours-input {
     flex-grow: 1;
@@ -553,6 +561,20 @@ h2 {
     border-radius: 4px;
     font-size: 1rem;
     box-sizing: border-box;
+}
+
+/* Ensure Add button doesn't squeeze selects */
+.add-form button.primary-btn {
+  flex: 0 0 auto;
+  min-width: 120px;
+  align-self: center;
+}
+
+/* cst-actions (combo forms) */
+.cst-actions .primary-btn,
+.add-form .cst-actions .primary-btn {
+  min-width: 140px;
+  flex: 0 0 auto;
 }
 .add-form .hours-input:focus {
     border-color: #ff8c42;
@@ -567,8 +589,8 @@ h2 {
 .elective-help-box {
   margin-bottom: 18px;
   padding: 12px 14px;
-  border: 1px solid #ffd8bf;
-  background: #fff7f2;
+  border: 1px solid rgba(255,140,66,0.12);
+  background: rgba(255,140,66,0.03);
   border-radius: 8px;
 }
 
@@ -713,7 +735,7 @@ h2 {
 
 .tt-inline-toggle {
   background: #fff;
-  border: 1px solid #ffd8bf;
+  border: 1px solid rgba(255,140,66,0.12);
   border-radius: 8px;
   padding: 8px 12px;
   display: inline-flex;
@@ -724,7 +746,7 @@ h2 {
 }
 
 .tt-inline-toggle input[type="checkbox"] {
-  accent-color: #ff8c42;
+  accent-color: var(--primary-color);
 }
 
 .tt-options-row {
@@ -837,7 +859,7 @@ h2 {
   gap: 6px;
   width: 100%;
   padding: 14px;
-  border: 1px solid #ffd8bf;
+  border: 1px solid rgba(255,140,66,0.12);
   border-radius: 10px;
   background: #fff;
   color: #333;
@@ -847,14 +869,14 @@ h2 {
 }
 
 .tt-option-card:hover {
-  border-color: #ff8c42;
+  border-color: var(--primary-color);
   box-shadow: 0 4px 14px rgba(255, 140, 66, 0.12);
   transform: translateY(-1px);
 }
 
 .tt-option-card.is-active {
-  border-color: #ff8c42;
-  background: #fff3eb;
+  border-color: var(--primary-color);
+  background: rgba(255,140,66,0.03);
   box-shadow: 0 4px 14px rgba(255, 140, 66, 0.16);
 }
 
@@ -914,11 +936,12 @@ h2 {
 }
 
 .teacher-availability-cell.is-available {
-  background: #d9fbe7;
+  background: rgba(255,140,66,0.06);
+  color: var(--primary-color);
 }
 
 .teacher-availability-cell.is-unavailable {
-  background: #ffd6d6;
+  background: rgba(255,99,132,0.12); /* soft red */
   color: #7f1d1d;
 }
 
@@ -1108,7 +1131,7 @@ h2 {
 }
 
 .manual-action-load { background: #0d6efd; }
-.manual-action-save { background: #28a745; }
+.manual-action-save { background: var(--primary-gradient); }
 .manual-action-save-as { background: #6f42c1; }
 .manual-action-clear { background: #ff8c42; }
 .manual-action-delete { background: #e74c3c; }

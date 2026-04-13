@@ -32,10 +32,20 @@ protectedRouter.post('/faculties', async (req, res) => {
 
 //get all faculties
 protectedRouter.get('/faculties', async (req, res) => {
-  console.log("[GET /faculties] Fetching all faculties");
+  console.log("[GET /faculties] Fetching all faculties, collegeId=", req.collegeId);
   try {
+    // Debug: log distinct collegeIds and a sample doc when unexpected results
+    try {
+      const distinct = await Faculty.distinct('collegeId');
+      console.log('[GET /faculties] distinct collegeIds sample:', distinct.slice(0,10));
+      const sample = await Faculty.findOne().lean();
+      console.log('[GET /faculties] sample doc collegeId:', sample ? sample.collegeId : null);
+    } catch (dbgErr) {
+      console.error('[GET /faculties] debug error:', dbgErr);
+    }
+
     const faculties = await Faculty.find({ collegeId: req.collegeId }).lean();
-    console.log("[GET /faculties] Found:", faculties.length, "records");
+    console.log('[GET /faculties] Found:', faculties.length, 'records');
     res.json(faculties);
   } catch (e) {
     res.status(500).json({ error: 'Internal Server Error' });

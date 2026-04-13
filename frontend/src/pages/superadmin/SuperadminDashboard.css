@@ -14,7 +14,6 @@
 }
 
 .dashboard-actions button {
-  background: #4CAF50;
   color: white;
   border: none;
   padding: 10px 20px;
@@ -22,10 +21,12 @@
   cursor: pointer;
   margin-right: 10px;
   font-size: 16px;
+  background: var(--primary-gradient);
+  transition: transform 0.18s ease, background 0.25s ease;
 }
 
 .dashboard-actions button:hover {
-  background: #45a049;
+  transform: translateY(-2px);
 }
 
 .colleges-list h2 {
@@ -48,7 +49,7 @@
 }
 
 .college-card h3 {
-  color: #ff6b6b;
+  color: var(--accent-color);
   margin-bottom: 10px;
 }
 

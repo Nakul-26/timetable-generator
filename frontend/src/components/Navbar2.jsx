@@ -97,6 +97,7 @@ const Navbar = () => {
             <div className="nav-item" style={{ marginLeft: 8 }}>
               <label style={{ marginRight: 6, fontSize: 12 }}>Act as:</label>
               <select
+                className="act-as-select"
                 value={selectedCollege || ""}
                 onChange={(e) => {
                   const val = e.target.value || '';
@@ -108,7 +109,6 @@ const Navbar = () => {
                   // reload so pages refetch under new context
                   window.location.reload();
                 }}
-                style={{ padding: '4px' }}
               >
                 <option value="">-- Select college --</option>
                 {colleges.map((c) => (

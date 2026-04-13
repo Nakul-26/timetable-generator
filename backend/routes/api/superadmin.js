@@ -30,6 +30,50 @@ router.get("/colleges", async (_req, res) => {
   }
 });
 
+// Update a college
+router.put('/colleges/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { name, code, collegeId } = req.body || {};
+    if (!name && !code && !collegeId) return res.status(400).json({ error: 'Nothing to update.' });
+
+    const update = {};
+    if (name) update.name = String(name).trim();
+    if (code) update.code = String(code).trim().toUpperCase();
+    if (collegeId) update.collegeId = String(collegeId).trim().toLowerCase();
+
+    // check unique collegeId/code
+    if (update.collegeId) {
+      const exists = await College.findOne({ collegeId: update.collegeId, _id: { $ne: id } }).lean();
+      if (exists) return res.status(409).json({ error: 'collegeId already in use.' });
+    }
+    if (update.code) {
+      const existsCode = await College.findOne({ code: update.code, _id: { $ne: id } }).lean();
+      if (existsCode) return res.status(409).json({ error: 'code already in use.' });
+    }
+
+    const updated = await College.findByIdAndUpdate(id, { $set: update }, { new: true }).lean();
+    if (!updated) return res.status(404).json({ error: 'College not found.' });
+    res.json({ college: updated });
+  } catch (error) {
+    console.error('[PUT /superadmin/colleges/:id] Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Delete a college
+router.delete('/colleges/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const deleted = await College.findByIdAndDelete(id).lean();
+    if (!deleted) return res.status(404).json({ error: 'College not found.' });
+    res.status(204).end();
+  } catch (error) {
+    console.error('[DELETE /superadmin/colleges/:id] Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 router.get("/admins", async (_req, res) => {
   try {
     const admins = await Admin.find({ role: "admin" }).select("-password").lean();
@@ -37,6 +81,42 @@ router.get("/admins", async (_req, res) => {
   } catch (error) {
     console.error("[GET /superadmin/admins] Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Update admin (email/password/collegeId)
+router.put('/admins/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { email, password, collegeId } = req.body || {};
+    const admin = await Admin.findById(id);
+    if (!admin) return res.status(404).json({ error: 'Admin not found.' });
+
+    if (email) admin.email = String(email).trim().toLowerCase();
+    if (typeof collegeId !== 'undefined') admin.collegeId = collegeId ? String(collegeId).trim().toLowerCase() : null;
+    if (password) admin.password = String(password);
+
+    await admin.save();
+    const adminUser = admin.toObject();
+    delete adminUser.password;
+    res.json({ admin: adminUser });
+  } catch (error) {
+    console.error('[PUT /superadmin/admins/:id] Error:', error);
+    if (error.code === 11000) return res.status(409).json({ error: 'Email already in use.' });
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Delete admin
+router.delete('/admins/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const deleted = await Admin.findByIdAndDelete(id).lean();
+    if (!deleted) return res.status(404).json({ error: 'Admin not found.' });
+    res.status(204).end();
+  } catch (error) {
+    console.error('[DELETE /superadmin/admins/:id] Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

@@ -76,6 +76,30 @@
   cursor: pointer;
 }
 
+/* Act-as select styling for superadmin */
+.nav-item select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.9);
+  background: #fff;
+  color: #333;
+  font-weight: 600;
+  min-width: 160px;
+}
+
+.nav-item select:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--focus-glow);
+  border-color: var(--primary-color);
+}
+
+.nav-item label {
+  color: rgba(255,255,255,0.92);
+  font-size: 12px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
 @media (max-width: 1024px) {
   .navbar {
     padding: 12px 16px;
