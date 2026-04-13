@@ -5,6 +5,22 @@ const API = axios.create({
     withCredentials: true 
 });
 
+// Attach selected college id (if set) so superadmin can act within a college context.
+API.interceptors.request.use((config) => {
+  try {
+    if (typeof window !== "undefined") {
+      const selected = window.localStorage.getItem("selectedCollegeId");
+      if (selected) {
+        config.headers = config.headers || {};
+        config.headers["x-college-id"] = selected;
+      }
+    }
+  } catch (e) {
+    // ignore localStorage errors
+  }
+  return config;
+});
+
 API.interceptors.response.use(
   (response) => response,
   (error) => {

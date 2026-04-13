@@ -13,7 +13,7 @@ const SuperadminDashboard = () => {
 
   const fetchColleges = async () => {
     try {
-      const response = await axios.get('/api/superadmin/colleges');
+      const response = await axios.get('/superadmin/colleges');
       setColleges(response.data.colleges || []);
     } catch (err) {
       setError('Failed to load colleges');

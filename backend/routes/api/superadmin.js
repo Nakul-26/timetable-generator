@@ -17,7 +17,7 @@ function toCollegeSlug(value = "") {
     .replace(/^-+|-+$/g, "");
 }
 
-router.get("/superadmin/colleges", async (_req, res) => {
+router.get("/colleges", async (_req, res) => {
   try {
     const colleges = await College.find({})
       .sort({ createdAt: -1 })
@@ -30,7 +30,7 @@ router.get("/superadmin/colleges", async (_req, res) => {
   }
 });
 
-router.get("/superadmin/admins", async (_req, res) => {
+router.get("/admins", async (_req, res) => {
   try {
     const admins = await Admin.find({ role: "admin" }).select("-password").lean();
     res.json({ admins });
@@ -40,7 +40,7 @@ router.get("/superadmin/admins", async (_req, res) => {
   }
 });
 
-router.post("/superadmin/colleges", async (req, res) => {
+router.post("/colleges", async (req, res) => {
   try {
     const name = String(req.body?.name || "").trim();
     const code = String(req.body?.code || "").trim().toUpperCase();
@@ -74,7 +74,7 @@ router.post("/superadmin/colleges", async (req, res) => {
   }
 });
 
-router.post("/superadmin/admins", async (req, res) => {
+router.post("/admins", async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
@@ -129,7 +129,7 @@ router.post("/superadmin/admins", async (req, res) => {
   }
 });
 
-router.post("/superadmin/colleges-with-admin", async (req, res) => {
+router.post("/colleges-with-admin", async (req, res) => {
   try {
     const name = String(req.body?.name || "").trim();
     const code = String(req.body?.code || "").trim().toUpperCase();

@@ -1,13 +1,50 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import "../styles/Navbar.css";
 import { useAuth } from "../context/AuthContext";
+import API from "../api/axios";
 
 const Navbar = () => {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const isSuper = user?.role === 'superadmin';
+  const [colleges, setColleges] = useState([]);
+  const [selectedCollege, setSelectedCollege] = useState(
+    typeof window !== 'undefined' ? window.localStorage.getItem('selectedCollegeId') || '' : ''
+  );
+  const showTenantLinks = !isSuper || (isSuper && selectedCollege);
+
+  useEffect(() => {
+    if (!isSuper) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await API.get('/superadmin/colleges');
+        const list = res?.data?.colleges || res?.data || [];
+        if (mounted && Array.isArray(list)) {
+          setColleges(list);
+          // If superadmin and only one college exists, auto-select it to reveal tenant links
+          try {
+            const existing = typeof window !== 'undefined' ? window.localStorage.getItem('selectedCollegeId') || '' : '';
+            if (!existing && list.length === 1) {
+              const cid = list[0].collegeId || list[0]._id || '';
+              if (cid) {
+                if (typeof window !== 'undefined') window.localStorage.setItem('selectedCollegeId', cid);
+                setSelectedCollege(cid);
+                window.location.reload();
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      } catch (err) {
+        // ignore — selector can stay empty
+      }
+    })();
+    return () => { mounted = false; };
+  }, [isSuper]);
 
   const handleLogout = async () => {
     await logout();
@@ -32,7 +69,7 @@ const Navbar = () => {
         {isMenuOpen ? "Close" : "Menu"}
       </button>
       <div className={`navbar-links ${isMenuOpen ? "open" : ""}`}>
-        {!isSuper && (
+        {showTenantLinks && (
           <>
             <NavLink to="/" className="nav-item" onClick={() => setIsMenuOpen(false)}>Home</NavLink>
             <NavLink to="/faculties" className="nav-item" onClick={() => setIsMenuOpen(false)}>Faculties</NavLink>
@@ -51,8 +88,37 @@ const Navbar = () => {
           </>
         )}
         {isSuper && (
-          <NavLink to="/superadmin" className="nav-item" onClick={() => setIsMenuOpen(false)}>Superadmin</NavLink>
+          <>
+            <NavLink to="/superadmin" className="nav-item" onClick={() => setIsMenuOpen(false)}>Superadmin</NavLink>
+            <NavLink to="/superadmin/colleges" className="nav-item" onClick={() => setIsMenuOpen(false)}>Manage Colleges</NavLink>
+            <NavLink to="/superadmin/admins" className="nav-item" onClick={() => setIsMenuOpen(false)}>Manage Admins</NavLink>
+            <NavLink to="/superadmin/create-college" className="nav-item" onClick={() => setIsMenuOpen(false)}>Create College</NavLink>
+            <NavLink to="/superadmin/create-admin" className="nav-item" onClick={() => setIsMenuOpen(false)}>Create Admin</NavLink>
+            <div className="nav-item" style={{ marginLeft: 8 }}>
+              <label style={{ marginRight: 6, fontSize: 12 }}>Act as:</label>
+              <select
+                value={selectedCollege || ""}
+                onChange={(e) => {
+                  const val = e.target.value || '';
+                  try {
+                    if (val) window.localStorage.setItem('selectedCollegeId', val);
+                    else window.localStorage.removeItem('selectedCollegeId');
+                  } catch (err) {}
+                  setSelectedCollege(val);
+                  // reload so pages refetch under new context
+                  window.location.reload();
+                }}
+                style={{ padding: '4px' }}
+              >
+                <option value="">-- Select college --</option>
+                {colleges.map((c) => (
+                  <option key={c._id || c.collegeId} value={c.collegeId || c._id}>{c.name || c.collegeName || c.name}</option>
+                ))}
+              </select>
+            </div>
+          </>
         )}
+        
         <button onClick={handleLogout} className="nav-item-logout">
           Logout
         </button>

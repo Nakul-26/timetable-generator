@@ -21,8 +21,8 @@ protectedRouter.use(requireCollegeContext);
 router.use(authRoutes);
 
 // superadmin routes need auth but must NOT be wrapped by tenant scope middleware
-// mount them directly on the top-level router so they are not blocked by requireCollegeContext
-router.use(superAdminRoutes);
+// mount them under the '/superadmin' path so their middleware only runs for those routes
+router.use('/superadmin', superAdminRoutes);
 protectedRouter.use(facultyRoutes);
 protectedRouter.use(subjectRoutes);
 protectedRouter.use(classRoutes);

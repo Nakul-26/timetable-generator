@@ -18,7 +18,7 @@ const CreateAdmin = () => {
 
   const fetchColleges = async () => {
     try {
-      const response = await axios.get('/api/superadmin/colleges');
+      const response = await axios.get('/superadmin/colleges');
       setColleges(response.data.colleges || []);
     } catch (err) {
       console.error('Failed to load colleges', err);
@@ -38,7 +38,7 @@ const CreateAdmin = () => {
     setMessage('');
 
     try {
-      const response = await axios.post('/api/superadmin/admins', formData);
+      const response = await axios.post('/superadmin/admins', formData);
       setMessage('Admin created successfully!');
       setFormData({ email: '', password: '', collegeId: '' });
     } catch (err) {

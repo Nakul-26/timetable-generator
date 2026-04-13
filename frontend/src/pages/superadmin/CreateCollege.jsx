@@ -24,7 +24,7 @@ const CreateCollege = () => {
     setMessage('');
 
     try {
-      const response = await axios.post('/api/superadmin/colleges', formData);
+      const response = await axios.post('/superadmin/colleges', formData);
       setMessage('College created successfully!');
       setFormData({ name: '', code: '', collegeId: '' });
     } catch (err) {

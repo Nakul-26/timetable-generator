@@ -11,6 +11,13 @@ const protectedRouter = Router();
 protectedRouter.use(auth);
 protectedRouter.use(requireCollegeContext);
 
+// Provide a /me endpoint that requires authentication but NOT tenant context.
+// This allows superadmins (who do not belong to a tenant) to fetch their profile.
+router.get('/me', auth, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  res.json(req.user);
+});
+
 // --- Rate Limiter for Login ---
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
