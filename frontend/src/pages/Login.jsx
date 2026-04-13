@@ -21,7 +21,7 @@ const Login = () => {
             if (response.data.success) {
                 login(response.data.user);
                 queryClient.invalidateQueries();
-                navigate('/timetable');
+                navigate('/');
             } else {
                 setError(response.data.message);
             }

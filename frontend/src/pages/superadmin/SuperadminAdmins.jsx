@@ -41,25 +41,6 @@ const SuperadminAdmins = () => {
                 <p><strong>Role:</strong> {a.role}</p>
                 <p><strong>College ID:</strong> {a.collegeId || '—'}</p>
                 <p><strong>Created:</strong> {new Date(a.createdAt).toLocaleDateString()}</p>
-                <div style={{ marginTop: 8 }}>
-                  <button onClick={async () => {
-                    const email = window.prompt('New email', a.email) || a.email;
-                    const pwd = window.prompt('New password (leave blank to keep)', '') || undefined;
-                    const cid = window.prompt('College ID (leave blank for none)', a.collegeId || '') || '';
-                    try {
-                      const body = { email };
-                      if (pwd) body.password = pwd;
-                      body.collegeId = cid || null;
-                      await axios.put(`/superadmin/admins/${a._id}`, body);
-                      fetchAdmins();
-                    } catch (err) { alert(err?.response?.data?.error || 'Update failed'); }
-                  }}>Edit</button>
-                  <button style={{ marginLeft: 8 }} onClick={async () => {
-                    if (!confirm('Delete this admin?')) return;
-                    try { await axios.delete(`/superadmin/admins/${a._id}`); fetchAdmins(); }
-                    catch (err) { alert(err?.response?.data?.error || 'Delete failed'); }
-                  }}>Delete</button>
-                </div>
               </div>
             ))}
           </div>

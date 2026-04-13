@@ -1,65 +1,95 @@
+:root{--sa-bg:#fbfbfb}
 .superadmin-dashboard {
-  padding: 20px;
+  padding: 26px;
   max-width: 1200px;
   margin: 0 auto;
+  color: #222;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background: var(--sa-bg);
+}
+
+.superadmin-dashboard .header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom: 14px;
 }
 
 .superadmin-dashboard h1 {
-  color: #ff6b6b;
-  margin-bottom: 20px;
+  margin: 0;
+  font-size: 22px;
+  color: var(--primary-color, #ff8c42);
 }
 
-.dashboard-actions {
-  margin-bottom: 30px;
+.toolbar { display:flex; gap:10px; align-items:center }
+.toolbar .count-badge {
+  background: rgba(0,0,0,0.06);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 13px;
 }
 
-.dashboard-actions button {
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-  margin-right: 10px;
-  font-size: 16px;
-  background: var(--primary-gradient);
-  transition: transform 0.18s ease, background 0.25s ease;
-}
-
-.dashboard-actions button:hover {
-  transform: translateY(-2px);
-}
-
-.colleges-list h2 {
-  color: #333;
-  margin-bottom: 20px;
+.superadmin-dashboard .colleges-list h2 {
+  margin: 6px 0 12px 0;
+  font-size: 18px;
 }
 
 .colleges-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
 }
 
 .college-card {
-  background: white;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  border: 1px solid #ddd;
+  background: #fff;
+  border: 1px solid rgba(16,24,40,0.04);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 6px 18px rgba(12,20,40,0.04);
+  transition: transform .14s ease, box-shadow .14s ease;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  min-height:120px;
 }
+
+.college-card:hover { transform: translateY(-4px); box-shadow: 0 10px 26px rgba(12,20,40,0.06); }
 
 .college-card h3 {
-  color: var(--accent-color);
-  margin-bottom: 10px;
+  margin: 0 0 8px 0;
+  font-size: 16px;
 }
 
-.college-card p {
-  margin: 5px 0;
-  color: #555;
+.meta-row { display:flex; gap:12px; flex-wrap:wrap; color:#444; font-size:13px }
+.college-card p { margin: 6px 0; font-size: 13px; color: #444; }
+
+.college-card .actions { margin-top: 12px; display:flex; gap:8px; justify-content:flex-end }
+
+.btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
 }
 
-.loading, .error {
-  text-align: center;
-  padding: 50px;
-  font-size: 18px;
+.btn-edit {
+  background: linear-gradient(90deg, var(--primary-color, #ff8c42), var(--accent-color, #ff6b6b));
+  color: #fff;
+  box-shadow: 0 6px 12px rgba(255,140,66,0.12);
+}
+
+.btn-delete {
+  background: #fff;
+  color: #c62828;
+  border: 1px solid rgba(198,40,40,0.12);
+}
+
+.loading, .error { padding: 16px; text-align: center; color: #555 }
+
+@media (max-width: 720px) {
+  .superadmin-dashboard { padding: 14px }
+  .college-card { padding: 12px }
+  .college-card .actions { justify-content:flex-start }
 }

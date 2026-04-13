@@ -28,9 +28,24 @@ const SuperadminColleges = () => {
 
   return (
     <div className="superadmin-dashboard">
-      <h1>College Management</h1>
+      <div className="header">
+        <h1>College Management</h1>
+        <div className="toolbar">
+          <span className="count-badge">{colleges.length} colleges</span>
+          <button className="btn btn-edit" onClick={async () => {
+            const name = window.prompt('College name') || '';
+            if (!name) return;
+            const code = window.prompt('College code') || '';
+            const collegeId = window.prompt('College ID (unique)') || '';
+            try {
+              await axios.post('/superadmin/colleges', { name, code, collegeId });
+              fetchColleges();
+            } catch (err) { alert(err?.response?.data?.error || 'Create failed'); }
+          }}>New college</button>
+        </div>
+      </div>
       <div className="colleges-list">
-        <h2>Colleges ({colleges.length})</h2>
+        <h2>Colleges</h2>
         {colleges.length === 0 ? (
           <p>No colleges found.</p>
         ) : (
@@ -41,8 +56,8 @@ const SuperadminColleges = () => {
                 <p><strong>Code:</strong> {college.code}</p>
                 <p><strong>College ID:</strong> {college.collegeId}</p>
                 <p><strong>Created:</strong> {new Date(college.createdAt).toLocaleDateString()}</p>
-                <div style={{ marginTop: 8 }}>
-                  <button onClick={async () => {
+                <div className="actions">
+                  <button className="btn btn-edit" onClick={async () => {
                     const name = window.prompt('New name', college.name) || college.name;
                     const code = window.prompt('New code', college.code) || college.code;
                     const cid = window.prompt('New collegeId', college.collegeId) || college.collegeId;
@@ -51,7 +66,7 @@ const SuperadminColleges = () => {
                       fetchColleges();
                     } catch (err) { alert(err?.response?.data?.error || 'Update failed'); }
                   }}>Edit</button>
-                  <button style={{ marginLeft: 8 }} onClick={async () => {
+                  <button className="btn btn-delete" onClick={async () => {
                     if (!confirm('Delete this college? This cannot be undone.')) return;
                     try { await axios.delete(`/superadmin/colleges/${college._id}`); fetchColleges(); }
                     catch (err) { alert(err?.response?.data?.error || 'Delete failed'); }

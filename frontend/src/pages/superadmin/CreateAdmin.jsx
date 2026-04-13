@@ -97,7 +97,6 @@ const CreateAdmin = () => {
         </button>
       </form>
       {message && <p className="message">{message}</p>}
-      <button onClick={() => window.location.href = '/superadmin'} className="back-btn">Back to Dashboard</button>
     </div>
   );
 };

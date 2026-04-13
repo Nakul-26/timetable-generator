@@ -4,7 +4,7 @@
 #  python -m venv .venv
 #  .\.venv\Scripts\Activate.ps1
 #  pip install -r requirements.txt (only if not working)
-#  uvicorn app:app --host 0.0.0.0 --port 8001
+#  uvicorn app:app --host 0.0.0.0 --port 8001 --reload
 
 # FastAPI CP-SAT timetable solver service
 import asyncio

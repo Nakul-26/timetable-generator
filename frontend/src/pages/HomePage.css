@@ -1,0 +1,5 @@
+.home-container { max-width: 1200px; margin: 40px auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
+.guide-section { margin-bottom: 20px; }
+.guide-section h2 { color: var(--accent-color); }
+.guide-section ul { margin-left: 18px; }
+.guide-section a { color: var(--primary-color); font-weight:600; }

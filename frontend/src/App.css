@@ -535,9 +535,10 @@ h2 {
     margin-top: 2.5rem;
 }
 .add-form {
-    display: flex;
-    gap: 1rem;
-    align-items: center;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap; /* allow items (button) to wrap instead of overflowing */
     margin-bottom: 2rem;
     background: #f9f9f9;
     padding: 1.5rem;
@@ -545,8 +546,9 @@ h2 {
 }
 .add-form h3 {
     margin: 0;
-    margin-right: 1rem;
-    font-weight: 600;
+  margin-right: 1rem;
+  font-weight: 600;
+  flex: 0 0 auto; /* keep title from growing/shrinking */
 }
 .add-form > div {
   flex: 1 1 220px;
