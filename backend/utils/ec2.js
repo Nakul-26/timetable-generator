@@ -1,0 +1,63 @@
+import AWS from "aws-sdk";
+
+const ec2 = new AWS.EC2({
+  region: process.env.AWS_REGION,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+});
+
+export const startEC2 = async () => {
+  const instanceId = process.env.EC2_INSTANCE_ID;
+  if (!instanceId) throw new Error("EC2_INSTANCE_ID is not set in environment");
+
+  const res = await ec2
+    .describeInstances({ InstanceIds: [instanceId] })
+    .promise();
+
+  const state = res?.Reservations?.[0]?.Instances?.[0]?.State?.Name;
+
+  console.log("EC2 state:", state);
+
+  if (state === "running") {
+    console.log("EC2 already running");
+    return;
+  }
+
+  console.log("Starting EC2...");
+
+  await ec2
+    .startInstances({
+      InstanceIds: [instanceId],
+    })
+    .promise();
+};
+
+export const waitForEC2 = async (opts = {}) => {
+  const instanceId = process.env.EC2_INSTANCE_ID;
+  if (!instanceId) throw new Error("EC2_INSTANCE_ID is not set in environment");
+
+  const intervalMs = opts.intervalMs || 5000;
+  const timeoutMs = opts.timeoutMs || 120000; // default 2 minutes
+  const start = Date.now();
+
+  while (true) {
+    const res = await ec2
+      .describeInstances({ InstanceIds: [instanceId] })
+      .promise();
+
+    const state = res?.Reservations?.[0]?.Instances?.[0]?.State?.Name;
+
+    console.log("Waiting EC2:", state);
+
+    if (state === "running") {
+      console.log("EC2 is ready");
+      return;
+    }
+
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Timeout waiting for EC2 to become running");
+    }
+
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+};
