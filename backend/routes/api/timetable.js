@@ -17,7 +17,7 @@ import { mergeTeacherAvailabilityConstraintConfig } from '../../utils/teacherAva
 import { mergeTeacherPreferenceConstraintConfig } from '../../utils/teacherPreferences.js';
 import { exportTimetableExcel } from "../../services/export/timetableExport.service.js";
 import { buildSubjectMap, collectSubjectIdsFromEncodedSubjectId, getComboSubjectDisplayName } from "../../utils/subjectDisplay.js";
-import { startEC2, waitForEC2 } from '../../utils/ec2.js';
+import { startEC2, waitForEC2, waitForSolver } from '../../utils/ec2.js';
 
 const SOLVER_BASE_URL = String(process.env.SOLVER_URL || 'http://localhost:8001').replace(/\/+$/, '');
 if (!SOLVER_BASE_URL) {
@@ -178,15 +178,16 @@ protectedRouter.post('/generate', async (req, res) => {
           try {
             await startEC2();
             await waitForEC2();
+            await waitForSolver();
           } catch (ec2Err) {
-            console.error("[POST /generate] EC2 control failed:", ec2Err);
+            console.error("[POST /generate] EC2/Solver control failed:", ec2Err);
             await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
               status: "failed",
               phase: "error",
-              error: `EC2 control failed: ${String(ec2Err)}`,
+              error: `EC2/Solver control failed: ${String(ec2Err)}`,
               progress: 100,
             });
-            return res.status(500).json({ error: "Failed to start EC2 instance." });
+            return res.status(500).json({ error: "Failed to start EC2 instance or solver." });
           }
         }
 

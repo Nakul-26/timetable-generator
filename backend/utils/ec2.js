@@ -32,30 +32,28 @@ export const startEC2 = async () => {
     .promise();
 };
 
-export const waitForEC2 = async (opts = {}) => {
-  const instanceId = process.env.EC2_INSTANCE_ID;
-  if (!instanceId) throw new Error("EC2_INSTANCE_ID is not set in environment");
+export const waitForSolver = async (opts = {}) => {
+  const solverUrl = process.env.SOLVER_URL;
+  if (!solverUrl) throw new Error("SOLVER_URL is not set in environment");
 
-  const intervalMs = opts.intervalMs || 5000;
+  const healthUrl = `${solverUrl.replace(/\/+$/, '')}/health`;
+  const intervalMs = opts.intervalMs || 3000;
   const timeoutMs = opts.timeoutMs || 120000; // default 2 minutes
   const start = Date.now();
 
   while (true) {
-    const res = await ec2
-      .describeInstances({ InstanceIds: [instanceId] })
-      .promise();
-
-    const state = res?.Reservations?.[0]?.Instances?.[0]?.State?.Name;
-
-    console.log("Waiting EC2:", state);
-
-    if (state === "running") {
-      console.log("EC2 is ready");
-      return;
+    try {
+      const res = await fetch(healthUrl);
+      if (res.ok) {
+        console.log("Solver is ready");
+        return;
+      }
+    } catch (err) {
+      console.log("Waiting for solver...");
     }
 
     if (Date.now() - start > timeoutMs) {
-      throw new Error("Timeout waiting for EC2 to become running");
+      throw new Error("Timeout waiting for solver to become ready");
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
