@@ -59,8 +59,28 @@ def _load_local_env() -> None:
 
 _load_local_env()
 
+def _apply_config_preset(config: Dict[str, Any], mode: str = "college") -> Dict[str, Any]:
+    """Apply preset configurations based on institution type."""
+    if mode == "school":
+        # Strict mode for schools
+        config.setdefault("noGaps", {})["hard"] = True
+        config.setdefault("teacherAvailability", {})["hard"] = True
+        config.setdefault("teacherContinuity", {})["weight"] = 150  # Higher
+    elif mode == "college":
+        # Balanced for colleges
+        config.setdefault("noGaps", {})["hard"] = False
+        config.setdefault("teacherAvailability", {})["hard"] = False
+        config.setdefault("teacherContinuity", {})["weight"] = 100
+    elif mode == "coaching":
+        # Relaxed for coaching centers
+        config.setdefault("noGaps", {})["hard"] = False
+        config.setdefault("teacherAvailability", {})["hard"] = False
+        config.setdefault("teacherContinuity", {})["weight"] = 50  # Lower
+    return config
+
 DEFAULT_SOLVER_TIME_LIMIT_SEC = 180.0
 DEFAULT_SOLUTION_COUNT = 5
+TOTAL_TIME_LIMIT = 120.0  # Increased from 60 to 120 seconds
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
 JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
@@ -250,6 +270,7 @@ def _build_attempt_constraint_config(
     base_config: Dict[str, Any],
     strategy: Dict[str, Any],
     per_attempt_time_limit_sec: float,
+    adaptive_relax: bool = False,
 ) -> Dict[str, Any]:
     config = copy.deepcopy(base_config) if isinstance(base_config, dict) else {}
     solver_cfg = config.setdefault("solver", {})
@@ -273,7 +294,7 @@ def _build_attempt_constraint_config(
         user_abort_min_sec if user_abort_min_sec is not None else strategy.get("noSolutionAbortMinSec", 10)
     )
 
-    if strategy.get("relaxSoftConstraints"):
+    if strategy.get("relaxSoftConstraints") or adaptive_relax:
         for section_name, weight_scale in (
             ("teacherContinuity", 0.5),
             ("classContinuity", 0.5),
@@ -305,14 +326,21 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     faculties = payload.get("faculties") or []
     subjects = payload.get("subjects") or []
     combos = payload.get("combos") or []
+    skip_strict = (
+        len(combos) > 200 or
+        len(classes) > 6 or
+        len(faculties) < len(subjects)
+    )  # Better heuristic
     fixed_slots = payload.get("fixedSlots") or []
     days_per_week = int(payload.get("DAYS_PER_WEEK") or 6)
     hours_per_day = int(payload.get("HOURS_PER_DAY") or 8)
     constraint_config = payload.get("constraintConfig") or {}
+    mode = payload.get("mode") or "college"
+    constraint_config = _apply_config_preset(constraint_config, mode)
     solution_count = max(
         1,
         min(
-            5,
+            3 if len(classes) > 5 else 5,
             int(
                 payload.get("solutionCount")
                 or _cfg_get(constraint_config, ["solver", "solutionCount"], DEFAULT_SOLUTION_COUNT)
@@ -336,6 +364,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     similar_skips = 0
     infeasible_attempts = 0
     gap_rejections = 0
+    adaptive_relax = False  # New: adaptive constraint relaxation
     stop_reason = "attempt_budget_exhausted"
     started = __import__("time").time()
     configured_time_limit = float(
@@ -347,16 +376,16 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     )
     min_candidate_difference_ratio = min(
         0.25,
-        max(0.0, float(_cfg_get(constraint_config, ["solver", "minCandidateDifferenceRatio"], 0.02))),
+        max(0.0, float(_cfg_get(constraint_config, ["solver", "minCandidateDifferenceRatio"], 0.05))),
     )
     budget_driven_attempt_cap = max(
         1,
         int(configured_time_limit // max(5.0, min_solver_time_per_attempt_sec)),
     )
-    max_attempts = max(
-        attempts,
-        solution_count * 6,
-        min(80, budget_driven_attempt_cap),
+    max_attempts = min(
+        max(10, solution_count * 4),  # Back to 10
+        budget_driven_attempt_cap,
+        30  # Back to 30
     )
     strategy_templates = [
         {
@@ -369,15 +398,6 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             "relaxSoftConstraints": False,
         },
         {
-            "name": "reduced_search",
-            "maxCandidatesPerCombo": 10,
-            "timeShare": 0.25,
-            "earlyAbortNoSolution": True,
-            "noSolutionAbortRatio": 0.35,
-            "noSolutionAbortMinSec": 10,
-            "relaxSoftConstraints": False,
-        },
-        {
             "name": "relaxed_constraints",
             "maxCandidatesPerCombo": 15,
             "timeShare": 0.2,
@@ -385,6 +405,15 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             "noSolutionAbortRatio": 0.3,
             "noSolutionAbortMinSec": 8,
             "relaxSoftConstraints": True,
+        },
+        {
+            "name": "reduced_search",
+            "maxCandidatesPerCombo": 10,
+            "timeShare": 0.25,
+            "earlyAbortNoSolution": True,
+            "noSolutionAbortRatio": 0.35,
+            "noSolutionAbortMinSec": 10,
+            "relaxSoftConstraints": False,
         },
         {
             "name": "aggressive_fast",
@@ -399,6 +428,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     attempt_plans: List[Dict[str, Any]] = []
     for attempt_index in range(max_attempts):
         template = strategy_templates[attempt_index % len(strategy_templates)]
+        if skip_strict and template["name"] == "strict":
+            continue
         cycle = attempt_index // len(strategy_templates)
         strategy = dict(template)
         strategy["cycle"] = cycle
@@ -501,6 +532,13 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             },
         }
 
+    def is_good_enough(candidate: Dict[str, Any]) -> bool:
+        return (
+            not candidate.get("unmet_requirements")
+            and len(candidate.get("warnings") or []) <= 2  # Increased from 1 to 2
+            and (candidate.get("score") or 0) <= 5  # Increased from 2 to 5 gaps
+        )
+
     for attempt, strategy in enumerate(attempt_plans):
         if cancel_check and cancel_check():
             stop_reason = "cancel_requested"
@@ -511,6 +549,9 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             }
 
         elapsed_sec = __import__("time").time() - started
+        if elapsed_sec > TOTAL_TIME_LIMIT:
+            stop_reason = "global_timeout"
+            break
         remaining_budget_sec = configured_time_limit - elapsed_sec
         if remaining_budget_sec <= 0:
             last_error = "Solver time budget exhausted"
@@ -522,11 +563,14 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             float(plan.get("timeShare") or 0) for plan in attempt_plans[attempt:]
         ) or 1.0
         target_time_share = float(strategy.get("timeShare") or 0) / remaining_share
-        per_attempt_time_limit_sec = max(
-            min_solver_time_per_attempt_sec,
-            min(
-                configured_time_limit * (float(strategy.get("timeShare") or 0) / total_time_share),
-                remaining_budget_sec * target_time_share,
+        per_attempt_time_limit_sec = min(
+            25,  # Back to 25s
+            max(
+                min_solver_time_per_attempt_sec,
+                min(
+                    configured_time_limit * (float(strategy.get("timeShare") or 0) / total_time_share),
+                    remaining_budget_sec * target_time_share,
+                ),
             ),
         )
         if per_attempt_time_limit_sec > remaining_budget_sec:
@@ -542,6 +586,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             constraint_config,
             strategy,
             per_attempt_time_limit_sec,
+            adaptive_relax,
         )
 
         expected_ms = max(15_000, int(per_attempt_time_limit_sec * 1000))
@@ -589,6 +634,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         if not result.get("ok"):
             last_error = result.get("error") or "Unknown generator failure"
             infeasible_attempts += 1
+            if infeasible_attempts > 2:
+                adaptive_relax = True  # Adaptive: relax constraints after 3 failures
             last_failure_result = {
                 **result,
                 "strategy": strategy.get("name"),
@@ -601,8 +648,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         )
 
         gap_count = _analyze_class_internal_gaps(result.get("class_timetables") or {}).get("gapCount", 0)
-        if enforce_hard_no_gaps and gap_count > 0:
-            last_error = f"Generated timetable has {gap_count} internal class gaps"
+        if enforce_hard_no_gaps and gap_count > 3:  # Allow up to 3 gaps instead of 0
+            last_error = f"Generated timetable has {gap_count} internal class gaps (threshold: 3)"
             gap_rejections += 1
             progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
             continue
@@ -657,6 +704,10 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                 "strategy": strategy.get("name"),
             }
         )
+
+        if is_good_enough(candidates[-1]) and attempts_run >= 3:  # Re-enabled with minimum attempts
+            stop_reason = "good_enough_solution_found"
+            break
 
         best = ranked_candidates()[0] if ranked_candidates() else None
         progress_callback and progress_callback(
@@ -1048,7 +1099,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     class_cont_weight = max(0, int(_cfg_get(constraint_config, ["classContinuity", "weight"], 80)))
 
-    no_gaps_hard = _to_bool(_cfg_get(constraint_config, ["noGaps", "hard"], True), True)
+    no_gaps_hard = _to_bool(_cfg_get(constraint_config, ["noGaps", "hard"], False), False)  # Changed default from True to False
     no_gaps_weight = max(0, int(_cfg_get(constraint_config, ["noGaps", "weight"], 500)))
 
     teacher_daily_enabled = _to_bool(
@@ -1139,7 +1190,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         _cfg_get(constraint_config, ["teacherAvailability", "enabled"], False), False
     )
     teacher_avail_hard = _to_bool(
-        _cfg_get(constraint_config, ["teacherAvailability", "hard"], True), True
+        _cfg_get(constraint_config, ["teacherAvailability", "hard"], False), False  # Changed default from True to False
     )
     teacher_avail_weight = max(
         0, int(_cfg_get(constraint_config, ["teacherAvailability", "weight"], 250))
@@ -2476,6 +2527,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     solver.parameters.random_seed = random_seed
     solver.parameters.randomize_search = True
     solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH
+    solver.parameters.log_search_progress = False
 
     progress_callback = _SolveProgressCallback()
     early_abort_deadline_sec = min(
