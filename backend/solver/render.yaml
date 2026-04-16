@@ -16,3 +16,7 @@ services:
         value: timetable_jayanth
       - key: SOLVER_WORKERS
         value: 8
+      - key: AWS_REGION
+        sync: false
+      - key: EC2_INSTANCE_ID
+        sync: false

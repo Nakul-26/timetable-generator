@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request
 from ortools.sat.python import cp_model
 from bson import ObjectId
 from pymongo import MongoClient
+import boto3
 
 # Avoid noisy Proactor transport shutdown tracebacks on Windows when clients disconnect.
 if sys.platform == "win32":
@@ -65,6 +66,27 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
 JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
 TIMETABLE_RESULT_COLLECTION_NAME = os.getenv("TIMETABLE_RESULT_COLLECTION", "timetableresults")
 ACTIVE_JOB_TASKS = set()
+
+
+def _stop_ec2_instance():
+    """Stop the EC2 instance to save costs after job completion."""
+    try:
+        instance_id = os.getenv("EC2_INSTANCE_ID")
+        aws_region = os.getenv("AWS_REGION", "eu-north-1")
+
+        if not instance_id:
+            print("EC2_INSTANCE_ID not set, skipping EC2 stop")
+            return
+
+        print(f"Stopping EC2 instance {instance_id}...")
+
+        ec2 = boto3.client('ec2', region_name=aws_region)
+        ec2.stop_instances(InstanceIds=[instance_id])
+
+        print("EC2 instance stopped successfully")
+
+    except Exception as e:
+        print(f"Failed to stop EC2 instance: {e}")
 
 
 def _job_filter(job_id: str) -> Dict[str, Any]:
@@ -725,6 +747,10 @@ async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
                 else (None if result.get("ok") else (result.get("error") or "Generation failed"))
             ),
         )
+
+        # Stop EC2 instance after job completion to save costs
+        _stop_ec2_instance()
+
     except Exception as exc:
         _set_job_state(
             job_id,
@@ -733,6 +759,9 @@ async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
             progress=min(last_progress, 95),
             error=str(exc) or "Generation failed",
         )
+
+        # Stop EC2 instance even on error to save costs
+        _stop_ec2_instance()
 
 
 def _spawn_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
