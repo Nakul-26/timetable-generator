@@ -191,6 +191,9 @@ protectedRouter.post('/generate', async (req, res) => {
           }
         }
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
         solverRes = await fetch(`${SOLVER_BASE_URL}/jobs`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -206,11 +209,16 @@ protectedRouter.post('/generate', async (req, res) => {
               solutionCount: normalizedSolutionCount,
             },
           }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         solverBody = await solverRes.json().catch(() => null);
       } catch (solverErr) {
+        const isTimeout = solverErr.name === 'AbortError';
         const solverUnavailableMessage =
-          SOLVER_BASE_URL === "http://localhost:8001"
+          isTimeout
+            ? `Solver service timed out at ${SOLVER_BASE_URL}.`
+            : SOLVER_BASE_URL === "http://localhost:8001"
             ? "Solver service is unreachable at http://localhost:8001. Set SOLVER_URL to your deployed Python solver when the backend runs serverlessly."
             : `Solver service is unreachable at ${SOLVER_BASE_URL}.`;
         await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
@@ -219,7 +227,7 @@ protectedRouter.post('/generate', async (req, res) => {
           error: solverUnavailableMessage,
           progress: 100,
         });
-        return res.status(502).json({ error: solverUnavailableMessage });
+        return res.status(isTimeout ? 504 : 502).json({ error: solverUnavailableMessage });
       }
 
       if (!solverRes.ok || solverBody?.ok === false) {
