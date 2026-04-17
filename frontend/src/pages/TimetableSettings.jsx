@@ -187,7 +187,9 @@ function TimetableSettings() {
 
   const updateConfig = (updater) => {
     setSelectedPreset("custom");
-    setConfig((prev) => normalizeConstraintConfig(updater(prev)));
+    const newConfig = normalizeConstraintConfig(updater(config));
+    setConfig(newConfig);
+    saveConstraintConfig(newConfig);
   };
 
   const applyPreset = (presetKey) => {
