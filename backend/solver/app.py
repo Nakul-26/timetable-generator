@@ -662,6 +662,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
     )
     total_time_limit = max(1200.0, configured_time_limit)
+    print(f"Configured time limit: {configured_time_limit} seconds ({configured_time_limit/60:.1f} minutes)")
+    print(f"Total time limit: {total_time_limit} seconds ({total_time_limit/60:.1f} minutes)")
     min_solver_time_per_attempt_sec = max(
         5.0,
         float(_cfg_get(constraint_config, ["solver", "minTimePerAttemptSec"], 15)),
@@ -675,9 +677,9 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         int(configured_time_limit // max(5.0, min_solver_time_per_attempt_sec)),
     )
     max_attempts = min(
-        max(20, solution_count * 4),  # Increased from 15 to 20
+        max(50, solution_count * 8),  # Increased from 20 to 50, multiplier from 4 to 8
         budget_driven_attempt_cap,
-        100  # Increased to 100 for more exploration
+        200  # Increased from 100 to 200
     )
     strategy_templates = [
         {
@@ -733,16 +735,12 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     total_time_share = sum(float(plan.get("timeShare") or 0) for plan in attempt_plans) or 1.0
 
     def is_good_enough(candidate: Dict[str, Any], difficulty: str) -> bool:
-        if difficulty == "very_hard":
-            return (candidate.get("score") or 0) <= 12  # Increased from 8
-        elif difficulty == "hard":
-            return (candidate.get("score") or 0) <= 8  # Increased from 5
-        else:
-            return (
-                not candidate.get("unmet_requirements")
-                and len(candidate.get("warnings") or []) == 0
-                and (candidate.get("score") or 0) == 0
-            )
+        # Require perfect solution: no unmet requirements, no warnings, score 0
+        return (
+            not candidate.get("unmet_requirements")
+            and len(candidate.get("warnings") or []) == 0
+            and (candidate.get("score") or 0) == 0
+        )
 
     for attempt, strategy in enumerate(attempt_plans):
         if cancel_check and cancel_check():
@@ -832,22 +830,25 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
         heartbeat_thread.start()
 
-        try:
-            result = solve_instance(
-                {
-                    "faculties": faculties,
-                    "subjects": subjects,
-                    "classes": classes,
-                    "combos": combos,
-                    "DAYS_PER_WEEK": days_per_week,
-                    "HOURS_PER_DAY": hours_per_day,
-                    "fixedSlots": fixed_slots,
-                    "constraintConfig": attempt_constraint_config,
-                    "random_seed": int(strategy.get("seed") or seed),
-                    "solver_time_limit_sec": per_attempt_time_limit_sec,
-                }
-            )
-        finally:
+    try:
+        result = solve_instance(
+            {
+                "faculties": faculties,
+                "subjects": subjects,
+                "classes": classes,
+                "combos": combos,
+                "DAYS_PER_WEEK": days_per_week,
+                "HOURS_PER_DAY": hours_per_day,
+                "fixedSlots": fixed_slots,
+                "constraintConfig": attempt_constraint_config,
+                "random_seed": int(strategy.get("seed") or seed),
+                "solver_time_limit_sec": per_attempt_time_limit_sec,
+            }
+        )
+    except Exception as e:
+        print(f"Solver crashed in attempt {attempt + 1}: {e}")
+        last_error = f"Solver crashed: {str(e)}"
+        continue
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=0.2)
 
@@ -951,6 +952,9 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             break
 
     best = ranked_candidates()[0] if ranked_candidates() else None
+    elapsed_total = __import__("time").time() - started
+    print(f"Solver completed after {elapsed_total:.1f} seconds. Stop reason: {stop_reason}")
+    print(f"Found {len(candidates)} candidates. Best score: {best.get('score') if best else 'None'}")
     if best:
         progress_callback and progress_callback({"progress": 100, "phase": "completed"})
     return build_selected_result(best)
