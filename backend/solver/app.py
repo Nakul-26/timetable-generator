@@ -661,6 +661,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     configured_time_limit = float(
         _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
     )
+    total_time_limit = max(1200.0, configured_time_limit)
     min_solver_time_per_attempt_sec = max(
         5.0,
         float(_cfg_get(constraint_config, ["solver", "minTimePerAttemptSec"], 15)),
@@ -753,7 +754,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             }
 
         elapsed_sec = __import__("time").time() - started
-        if elapsed_sec > TOTAL_TIME_LIMIT:
+        if elapsed_sec > total_time_limit:
             stop_reason = "global_timeout"
             break
 
