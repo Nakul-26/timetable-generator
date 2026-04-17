@@ -564,52 +564,52 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     if feasibility_result.get("ok"):
         progress_callback and progress_callback({"progress": 50, "phase": "feasibility_found"})
         # For guaranteed solver: return feasibility result immediately if it's good enough
-        if not feasibility_result.get("unmet_requirements") and len(feasibility_result.get("warnings") or []) <= 2:
-            return {
-                "ok": True,
-                "generation_batch_id": f"feasibility_{int(__import__('time').time() * 1000)}",
-                "optionsGenerated": 1,
-                "selected_option_id": "feasibility_solution",
-                "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-                "objectiveValue": feasibility_result.get("objective_value", 0),
-                "class_timetables": feasibility_result.get("class_timetables"),
-                "faculty_timetables": feasibility_result.get("faculty_timetables"),
-                "faculty_daily_hours": feasibility_result.get("faculty_daily_hours"),
-                "classes": feasibility_result.get("classes") or classes,
-                "combos": combos,
-                "config": feasibility_result.get("config") or feasibility_config,
-                "allocations_report": feasibility_result.get("allocations_report"),
-                "unmet_requirements": feasibility_result.get("unmet_requirements") or [],
-                "warnings": feasibility_result.get("warnings") or [],
-                "solver_stats": feasibility_result.get("solver_stats"),
-                "strategy": {"name": "feasibility_relaxed", "phase": "feasibility"},
-                "diagnostics": feasibility_result.get("diagnostics"),
-                "hint": "Feasibility solution found",
-                "reason": "feasibility_success",
-                "preview_stats": feasibility_result.get("preview_stats"),
-                "attemptsTried": 1,
-                "generation_options": [{
-                    "optionId": "feasibility_solution",
-                    "rank": 1,
-                    "label": "Feasibility Solution",
-                    "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-                    "objectiveValue": feasibility_result.get("objective_value", 0),
-                }],
-                "bestClassTimetables": feasibility_result.get("class_timetables"),
-                "bestFacultyTimetables": feasibility_result.get("faculty_timetables"),
-                "bestFacultyDailyHours": feasibility_result.get("faculty_daily_hours"),
-                "bestScore": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-                "batch_stats": {
-                    "attemptsPlanned": 1,
-                    "attemptsTried": 1,
-                    "uniqueCandidatesFound": 1,
-                    "duplicateHashSkips": 0,
-                    "nearDuplicateSkips": 0,
-                    "infeasibleAttempts": 0,
-                    "gapRejections": 0,
-                    "stopReason": "feasibility_success",
-                },
-            }
+        # if not feasibility_result.get("unmet_requirements") and len(feasibility_result.get("warnings") or []) <= 2:
+        #     return {
+        #         "ok": True,
+        #         "generation_batch_id": f"feasibility_{int(__import__('time').time() * 1000)}",
+        #         "optionsGenerated": 1,
+        #         "selected_option_id": "feasibility_solution",
+        #         "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
+        #         "objectiveValue": feasibility_result.get("objective_value", 0),
+        #         "class_timetables": feasibility_result.get("class_timetables"),
+        #         "faculty_timetables": feasibility_result.get("faculty_timetables"),
+        #         "faculty_daily_hours": feasibility_result.get("faculty_daily_hours"),
+        #         "classes": feasibility_result.get("classes") or classes,
+        #         "combos": combos,
+        #         "config": feasibility_result.get("config") or feasibility_config,
+        #         "allocations_report": feasibility_result.get("allocations_report"),
+        #         "unmet_requirements": feasibility_result.get("unmet_requirements") or [],
+        #         "warnings": feasibility_result.get("warnings") or [],
+        #         "solver_stats": feasibility_result.get("solver_stats"),
+        #         "strategy": {"name": "feasibility_relaxed", "phase": "feasibility"},
+        #         "diagnostics": feasibility_result.get("diagnostics"),
+        #         "hint": "Feasibility solution found",
+        #         "reason": "feasibility_success",
+        #         "preview_stats": feasibility_result.get("preview_stats"),
+        #         "attemptsTried": 1,
+        #         "generation_options": [{
+        #             "optionId": "feasibility_solution",
+        #             "rank": 1,
+        #             "label": "Feasibility Solution",
+        #             "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
+        #             "objectiveValue": feasibility_result.get("objective_value", 0),
+        #         }],
+        #         "bestClassTimetables": feasibility_result.get("class_timetables"),
+        #         "bestFacultyTimetables": feasibility_result.get("faculty_timetables"),
+        #         "bestFacultyDailyHours": feasibility_result.get("faculty_daily_hours"),
+        #         "bestScore": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
+        #         "batch_stats": {
+        #             "attemptsPlanned": 1,
+        #             "attemptsTried": 1,
+        #             "uniqueCandidatesFound": 1,
+        #             "duplicateHashSkips": 0,
+        #             "nearDuplicateSkips": 0,
+        #             "infeasibleAttempts": 0,
+        #             "gapRejections": 0,
+        #             "stopReason": "feasibility_success",
+        #         },
+        #     }
         # Add feasibility solution to candidates for optimization
         candidates.append({
             "optionId": "feasibility_solution",
@@ -740,8 +740,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         else:
             return (
                 not candidate.get("unmet_requirements")
-                and len(candidate.get("warnings") or []) <= 2
-                and (candidate.get("score") or 0) <= 2
+                and len(candidate.get("warnings") or []) == 0
+                and (candidate.get("score") or 0) == 0
             )
 
     for attempt, strategy in enumerate(attempt_plans):
