@@ -171,7 +171,7 @@ def get_adaptive_time_limit(difficulty: str, base_time: float) -> float:
     return min(120, base_time)       # Up to 2 mins for unknown/easy
 
 DEFAULT_SOLVER_TIME_LIMIT_SEC = 180.0
-DEFAULT_SOLUTION_COUNT = 5
+DEFAULT_SOLUTION_COUNT = 2
 TOTAL_TIME_LIMIT = 1200.0  # Allow up to 20 minutes as set in frontend
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
@@ -442,6 +442,17 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
 
     candidates: List[Dict[str, Any]] = []  # Initialize candidates before feasibility
 
+    solution_count = max(
+        1,
+        min(
+            3 if len(classes) > 5 else 5,
+            int(
+                payload.get("solutionCount")
+                or _cfg_get(constraint_config, ["solver", "solutionCount"], DEFAULT_SOLUTION_COUNT)
+            ),
+        ),
+    )
+
     def ranked_candidates() -> List[Dict[str, Any]]:
         return sorted(
             candidates,
@@ -559,57 +570,56 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         "fixedSlots": fixed_slots,
         "constraintConfig": feasibility_config,
         "random_seed": 42,  # Fixed seed for feasibility
-        "solver_time_limit_sec": 300,  # 5 mins for feasibility
+        "solver_time_limit_sec": 60,  # 1 min for feasibility
     })
     if feasibility_result.get("ok"):
         progress_callback and progress_callback({"progress": 50, "phase": "feasibility_found"})
-        # For guaranteed solver: return feasibility result immediately if it's good enough
-        # if not feasibility_result.get("unmet_requirements") and len(feasibility_result.get("warnings") or []) <= 2:
-        #     return {
-        #         "ok": True,
-        #         "generation_batch_id": f"feasibility_{int(__import__('time').time() * 1000)}",
-        #         "optionsGenerated": 1,
-        #         "selected_option_id": "feasibility_solution",
-        #         "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-        #         "objectiveValue": feasibility_result.get("objective_value", 0),
-        #         "class_timetables": feasibility_result.get("class_timetables"),
-        #         "faculty_timetables": feasibility_result.get("faculty_timetables"),
-        #         "faculty_daily_hours": feasibility_result.get("faculty_daily_hours"),
-        #         "classes": feasibility_result.get("classes") or classes,
-        #         "combos": combos,
-        #         "config": feasibility_result.get("config") or feasibility_config,
-        #         "allocations_report": feasibility_result.get("allocations_report"),
-        #         "unmet_requirements": feasibility_result.get("unmet_requirements") or [],
-        #         "warnings": feasibility_result.get("warnings") or [],
-        #         "solver_stats": feasibility_result.get("solver_stats"),
-        #         "strategy": {"name": "feasibility_relaxed", "phase": "feasibility"},
-        #         "diagnostics": feasibility_result.get("diagnostics"),
-        #         "hint": "Feasibility solution found",
-        #         "reason": "feasibility_success",
-        #         "preview_stats": feasibility_result.get("preview_stats"),
-        #         "attemptsTried": 1,
-        #         "generation_options": [{
-        #             "optionId": "feasibility_solution",
-        #             "rank": 1,
-        #             "label": "Feasibility Solution",
-        #             "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-        #             "objectiveValue": feasibility_result.get("objective_value", 0),
-        #         }],
-        #         "bestClassTimetables": feasibility_result.get("class_timetables"),
-        #         "bestFacultyTimetables": feasibility_result.get("faculty_timetables"),
-        #         "bestFacultyDailyHours": feasibility_result.get("faculty_daily_hours"),
-        #         "bestScore": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-        #         "batch_stats": {
-        #             "attemptsPlanned": 1,
-        #             "attemptsTried": 1,
-        #             "uniqueCandidatesFound": 1,
-        #             "duplicateHashSkips": 0,
-        #             "nearDuplicateSkips": 0,
-        #             "infeasibleAttempts": 0,
-        #             "gapRejections": 0,
-        #             "stopReason": "feasibility_success",
-        #         },
-        #     }
+        # Return feasibility result immediately if it works
+        return {
+            "ok": True,
+            "generation_batch_id": f"feasibility_{int(__import__('time').time() * 1000)}",
+            "optionsGenerated": 1,
+            "selected_option_id": "feasibility_solution",
+            "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
+            "objectiveValue": feasibility_result.get("objective_value", 0),
+            "class_timetables": feasibility_result.get("class_timetables"),
+            "faculty_timetables": feasibility_result.get("faculty_timetables"),
+            "faculty_daily_hours": feasibility_result.get("faculty_daily_hours"),
+            "classes": feasibility_result.get("classes") or classes,
+            "combos": combos,
+            "config": feasibility_result.get("config") or feasibility_config,
+            "allocations_report": feasibility_result.get("allocations_report"),
+            "unmet_requirements": feasibility_result.get("unmet_requirements") or [],
+            "warnings": feasibility_result.get("warnings") or [],
+            "solver_stats": feasibility_result.get("solver_stats"),
+            "strategy": {"name": "feasibility_relaxed", "phase": "feasibility"},
+            "diagnostics": feasibility_result.get("diagnostics"),
+            "hint": "Feasibility solution found",
+            "reason": "feasibility_success",
+            "preview_stats": feasibility_result.get("preview_stats"),
+            "attemptsTried": 1,
+            "generation_options": [{
+                "optionId": "feasibility_solution",
+                "rank": 1,
+                "label": "Feasibility Solution",
+                "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
+                "objectiveValue": feasibility_result.get("objective_value", 0),
+            }],
+            "bestClassTimetables": feasibility_result.get("class_timetables"),
+            "bestFacultyTimetables": feasibility_result.get("faculty_timetables"),
+            "bestFacultyDailyHours": feasibility_result.get("faculty_daily_hours"),
+            "bestScore": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
+            "batch_stats": {
+                "attemptsPlanned": 1,
+                "attemptsTried": 1,
+                "uniqueCandidatesFound": 1,
+                "duplicateHashSkips": 0,
+                "nearDuplicateSkips": 0,
+                "infeasibleAttempts": 0,
+                "gapRejections": 0,
+                "stopReason": "feasibility_success",
+            },
+        }
         # Add feasibility solution to candidates for optimization
         candidates.append({
             "optionId": "feasibility_solution",
@@ -632,17 +642,6 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             return build_selected_result(ranked_candidates()[0] if ranked_candidates() else None)
     else:
         progress_callback and progress_callback({"progress": 10, "phase": "feasibility_failed"})
-
-    solution_count = max(
-        1,
-        min(
-            3 if len(classes) > 5 else 5,
-            int(
-                payload.get("solutionCount")
-                or _cfg_get(constraint_config, ["solver", "solutionCount"], DEFAULT_SOLUTION_COUNT)
-            ),
-        ),
-    )
     attempts = max(12, int(payload.get("attempts") or 12))
     enforce_hard_no_gaps = False  # Disable gap rejection to avoid over-constraining
 
@@ -676,11 +675,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         1,
         int(configured_time_limit // max(5.0, min_solver_time_per_attempt_sec)),
     )
-    max_attempts = min(
-        max(50, solution_count * 8),  # Increased from 20 to 50, multiplier from 4 to 8
-        budget_driven_attempt_cap,
-        200  # Increased from 100 to 200
-    )
+    max_attempts = 10
     strategy_templates = [
         {
             "name": "strict",
@@ -756,18 +751,20 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
             stop_reason = "global_timeout"
             break
 
-        # Adaptive difficulty analysis and constraint adjustment
-        difficulty = analyze_difficulty(
-            infeasible_attempts,
-            attempts_run,
-            len(candidates),
-            elapsed_sec
-        )
-        adaptive_config = adapt_constraints(
-            constraint_config,
-            difficulty,
-            attempt
-        )
+        # Adaptive difficulty analysis and constraint adjustment - DISABLED for fast version
+        # difficulty = analyze_difficulty(
+        #     infeasible_attempts,
+        #     attempts_run,
+        #     len(candidates),
+        #     elapsed_sec
+        # )
+        # adaptive_config = adapt_constraints(
+        #     constraint_config,
+        #     difficulty,
+        #     attempt
+        # )
+        difficulty = "unknown"
+        adaptive_config = constraint_config
 
         remaining_budget_sec = configured_time_limit - elapsed_sec
         if remaining_budget_sec <= 0:
@@ -1323,7 +1320,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     teacher_cont_enabled = _to_bool(
-        _cfg_get(constraint_config, ["teacherContinuity", "enabled"], True), True
+        _cfg_get(constraint_config, ["teacherContinuity", "enabled"], False), False
     )
     teacher_cont_max = max(
         1, int(_cfg_get(constraint_config, ["teacherContinuity", "maxConsecutive"], 3))
@@ -1331,7 +1328,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     teacher_cont_weight = max(0, int(_cfg_get(constraint_config, ["teacherContinuity", "weight"], 100)))
 
     class_cont_enabled = _to_bool(
-        _cfg_get(constraint_config, ["classContinuity", "enabled"], True), True
+        _cfg_get(constraint_config, ["classContinuity", "enabled"], False), False
     )
     class_cont_max = max(
         1, int(_cfg_get(constraint_config, ["classContinuity", "maxConsecutive"], 3))
@@ -1360,7 +1357,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     subject_cluster_enabled = _to_bool(
-        _cfg_get(constraint_config, ["subjectClustering", "enabled"], True), True
+        _cfg_get(constraint_config, ["subjectClustering", "enabled"], False), False
     )
     subject_cluster_max = max(1, int(_cfg_get(constraint_config, ["subjectClustering", "maxPerDay"], 3)))
     subject_cluster_weight = max(0, int(_cfg_get(constraint_config, ["subjectClustering", "weight"], 50)))
@@ -1391,7 +1388,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     front_loading_enabled = _to_bool(
-        _cfg_get(constraint_config, ["frontLoading", "enabled"], True), True
+        _cfg_get(constraint_config, ["frontLoading", "enabled"], False), False
     )
     front_loading_weight = max(0, int(_cfg_get(constraint_config, ["frontLoading", "weight"], 400)))
     front_loading_transition_weight = max(
