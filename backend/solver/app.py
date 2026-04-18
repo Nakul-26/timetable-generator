@@ -830,25 +830,32 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
         heartbeat_thread.start()
 
-    try:
-        result = solve_instance(
-            {
-                "faculties": faculties,
-                "subjects": subjects,
-                "classes": classes,
-                "combos": combos,
-                "DAYS_PER_WEEK": days_per_week,
-                "HOURS_PER_DAY": hours_per_day,
-                "fixedSlots": fixed_slots,
-                "constraintConfig": attempt_constraint_config,
-                "random_seed": int(strategy.get("seed") or seed),
-                "solver_time_limit_sec": per_attempt_time_limit_sec,
+        try:
+            result = solve_instance(
+                {
+                    "faculties": faculties,
+                    "subjects": subjects,
+                    "classes": classes,
+                    "combos": combos,
+                    "DAYS_PER_WEEK": days_per_week,
+                    "HOURS_PER_DAY": hours_per_day,
+                    "fixedSlots": fixed_slots,
+                    "constraintConfig": attempt_constraint_config,
+                    "random_seed": int(strategy.get("seed") or seed),
+                    "solver_time_limit_sec": per_attempt_time_limit_sec,
+                }
+            )
+        except Exception as exc:
+            last_error = f"Solver crashed: {str(exc) or exc.__class__.__name__}"
+            infeasible_attempts += 1
+            last_failure_result = {
+                "ok": False,
+                "error": last_error,
+                "strategy": strategy.get("name"),
             }
-        )
-    except Exception as e:
-        print(f"Solver crashed in attempt {attempt + 1}: {e}")
-        last_error = f"Solver crashed: {str(e)}"
-        continue
+            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
+            continue
+        finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=0.2)
 
