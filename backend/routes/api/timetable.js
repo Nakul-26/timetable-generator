@@ -258,93 +258,55 @@ protectedRouter.post('/generate', async (req, res) => {
         },
       });
 
-      let solverRes;
-      let solverBody = null;
-      // If an EC2 instance id is provided and we're in production, ensure the instance is running before calling the solver
-      if (process.env.EC2_INSTANCE_ID && process.env.NODE_ENV === 'production') {
+      // IMPORTANT (Vercel/serverless): avoid keeping the event loop alive with long-running
+      // fire-and-forget requests. Default to "pull" mode on Vercel: solver polls MongoDB
+      // for pending jobs and starts them itself.
+      const solverStartMode = String(
+        process.env.SOLVER_JOB_START_MODE || (process.env.VERCEL ? "pull" : "push")
+      ).toLowerCase();
+
+      if (solverStartMode === "push") {
+        // If an EC2 instance id is provided and we're in production, ensure the instance is running before calling the solver
+        if (process.env.EC2_INSTANCE_ID && process.env.NODE_ENV === 'production') {
+          try {
+            await startEC2();
+            await waitForEC2();
+            await waitForSolver();
+          } catch (ec2Err) {
+            console.error("[POST /generate] EC2/Solver control failed:", ec2Err);
+            await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
+              status: "failed",
+              phase: "error",
+              error: `EC2/Solver control failed: ${String(ec2Err)}`,
+              progress: 100,
+            });
+            return res.status(500).json({ error: "Failed to start EC2 instance or solver." });
+          }
+        }
+
+        const requestBody = {
+          jobId: String(job._id),
+          payload: job.payload,
+        };
+
+        // Best-effort push with a short timeout; do not block the response.
         try {
-          await startEC2();
-          await waitForEC2();
-          await waitForSolver();
-        } catch (ec2Err) {
-          console.error("[POST /generate] EC2/Solver control failed:", ec2Err);
-          await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
-            status: "failed",
-            phase: "error",
-            error: `EC2/Solver control failed: ${String(ec2Err)}`,
-            progress: 100,
-          });
-          return res.status(500).json({ error: "Failed to start EC2 instance or solver." });
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+          fetch(`${SOLVER_BASE_URL}/jobs`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          })
+            .then(() => {})
+            .catch(() => {})
+            .finally(() => clearTimeout(timeoutId));
+        } catch {
+          // ignore
         }
       }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      const requestBody = {
-        jobId: String(job._id),
-        payload: {
-          collegeId: req.collegeId,
-          ...generatorData,
-          fixedSlots,
-          DAYS_PER_WEEK: daysPerWeek,
-          HOURS_PER_DAY: hoursPerDay,
-          constraintConfig: mergedConstraintConfig,
-          solutionCount: normalizedSolutionCount,
-        },
-      };
-
-      // DEBUG: Log payload being sent
-      console.log("=== BACKEND SENDING PAYLOAD SUMMARY ===");
-      console.log(`jobId: ${requestBody.jobId}`);
-      console.log(`classes: ${requestBody.payload.classes?.length || 0}`);
-      console.log(`subjects: ${requestBody.payload.subjects?.length || 0}`);
-      console.log(`faculties: ${requestBody.payload.faculties?.length || 0}`);
-      console.log(`combos: ${requestBody.payload.combos?.length || 0}`);
-      console.log(`fixedSlots: ${requestBody.payload.fixedSlots?.length || 0}`);
-      console.log(`DAYS_PER_WEEK: ${requestBody.payload.DAYS_PER_WEEK}`);
-      console.log(`HOURS_PER_DAY: ${requestBody.payload.HOURS_PER_DAY}`);
-      console.log("Full payload saved to backend_payload.json");
-      console.log("=== BACKEND SENDING PAYLOAD SUMMARY END ===");
-
-      console.log(`Sending request to: ${SOLVER_BASE_URL}/jobs`);
-
-      // Fire-and-forget: Send to solver without waiting for response
-      fetch(`${SOLVER_BASE_URL}/jobs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      }).then(async (solverRes) => {
-        clearTimeout(timeoutId);
-        console.log('Solver response status:', solverRes.status);
-        const solverBody = await solverRes.json().catch(() => null);
-        console.log('Solver response body:', solverBody);
-        if (!solverRes.ok || solverBody?.ok === false) {
-          await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
-            status: "failed",
-            phase: "error",
-            error: solverBody?.error || `Solver job start failed (${solverRes.status})`,
-            progress: 100,
-          });
-        }
-      }).catch(async (solverErr) => {
-        clearTimeout(timeoutId);
-        console.error("[POST /generate] Solver request failed:", solverErr);
-        const isTimeout = solverErr.name === 'AbortError';
-        const solverUnavailableMessage =
-          isTimeout
-            ? `Solver service timed out at ${SOLVER_BASE_URL}.`
-            : SOLVER_BASE_URL === "http://127.0.0.1:8001"
-            ? "Solver service is unreachable at http://127.0.0.1:8001. Set SOLVER_URL to your deployed Python solver when the backend runs serverlessly."
-            : `Solver service is unreachable at ${SOLVER_BASE_URL}.`;
-        await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
-          status: "failed",
-          phase: "error",
-          error: solverUnavailableMessage,
-          progress: 100,
-        });
-      });
 
       // Return immediately without waiting for solver
       return res.json({ taskId: String(job._id) });

@@ -179,6 +179,10 @@ JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
 TIMETABLE_RESULT_COLLECTION_NAME = os.getenv("TIMETABLE_RESULT_COLLECTION", "timetableresults")
 ACTIVE_JOB_TASKS = set()
 
+# Polling-based job pickup (backend can just create a pending job and return).
+SOLVER_PULL_INTERVAL_SEC = float(os.getenv("SOLVER_PULL_INTERVAL_SEC", "5"))
+DEBUG_DUMP_PAYLOADS = os.getenv("DEBUG_DUMP_PAYLOADS", "0").strip().lower() in ("1", "true", "yes", "on")
+
 
 def _stop_ec2_instance():
     """Stop the EC2 instance to save costs after job completion."""
@@ -239,6 +243,51 @@ async def _resume_pending_jobs():
                 print(f"Cannot resume job {job_id}: no payload found")
     except Exception as exc:
         print(f"Error resuming jobs: {exc}")
+
+
+async def _poll_for_pending_jobs() -> None:
+    """Continuously poll MongoDB for new pending jobs and start them.
+
+    This avoids requiring a serverless backend (e.g., Vercel) to call the solver.
+    """
+    while True:
+        try:
+            client, jobs = _get_jobs_collection()
+            try:
+                pending_jobs = list(jobs.find({"status": "pending"}, {"payload": 1}).limit(10))
+            finally:
+                client.close()
+
+            for job in pending_jobs:
+                job_id = str(job.get("_id"))
+                payload = job.get("payload") or (job.get("input") or {}).get("payload")
+                if not payload:
+                    print(f"Skipping pending job {job_id}: no payload")
+                    continue
+
+                # Atomically claim the job to avoid duplicate spawns.
+                try:
+                    client2, jobs2 = _get_jobs_collection()
+                    try:
+                        claimed = jobs2.update_one(
+                            {"_id": job.get("_id"), "status": "pending"},
+                            {"$set": {"status": "running", "phase": "start", "progress": 0}},
+                        )
+                    finally:
+                        client2.close()
+
+                    if getattr(claimed, "modified_count", 0) != 1:
+                        continue
+                except Exception as exc:
+                    print(f"Failed to claim pending job {job_id}: {exc}")
+                    continue
+
+                print(f"Picked up pending job {job_id}")
+                _spawn_generation_job(job_id, payload)
+        except Exception as exc:
+            print(f"Error polling pending jobs: {exc}")
+
+        await asyncio.sleep(max(1.0, SOLVER_PULL_INTERVAL_SEC))
 
 
 def _set_job_state(job_id: str, **fields: Any) -> None:
@@ -453,12 +502,16 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     print(f"DAYS_PER_WEEK: {payload.get('DAYS_PER_WEEK')}")
     print(f"HOURS_PER_DAY: {payload.get('HOURS_PER_DAY')}")
     print(f"constraintConfig keys: {list(payload.get('constraintConfig', {}).keys())}")
-    print("Full payload saved to generation_payload.json")
+    if DEBUG_DUMP_PAYLOADS:
+        print("Full payload saved to generation_payload.json")
     print("=== GENERATION PAYLOAD SUMMARY END ===")
 
-    # DEBUG: Save full payload to file
-    with open("generation_payload.json", "w") as f:
-        json.dump(payload, f, indent=2)
+    if DEBUG_DUMP_PAYLOADS:
+        try:
+            with open("generation_payload.json", "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+        except Exception as exc:
+            print(f"Failed to dump generation payload: {exc}")
 
     classes = payload.get("classes") or []
     faculties = payload.get("faculties") or []
@@ -1265,6 +1318,8 @@ async def _install_loop_handler():
     loop.set_exception_handler(_solver_loop_exception_handler)
     # Resume any pending or running jobs on startup
     await _resume_pending_jobs()
+    # Also keep picking up new pending jobs.
+    asyncio.create_task(_poll_for_pending_jobs())
 
 
 @app.get("/health")
@@ -1289,12 +1344,16 @@ async def start_job(request: Request) -> Dict[str, Any]:
     print(f"fixedSlots: {len(payload_data.get('fixedSlots', []))}")
     print(f"DAYS_PER_WEEK: {payload_data.get('DAYS_PER_WEEK')}")
     print(f"HOURS_PER_DAY: {payload_data.get('HOURS_PER_DAY')}")
-    print("Full payload saved to received_payload.json")
+    if DEBUG_DUMP_PAYLOADS:
+        print("Full payload saved to received_payload.json")
     print("=== RECEIVED PAYLOAD SUMMARY END ===")
 
-    # DEBUG: Save to file
-    with open("received_payload.json", "w") as f:
-        json.dump(body, f, indent=2)
+    if DEBUG_DUMP_PAYLOADS:
+        try:
+            with open("received_payload.json", "w", encoding="utf-8") as f:
+                json.dump(body, f, indent=2)
+        except Exception as exc:
+            print(f"Failed to dump received payload: {exc}")
 
     # DEBUG: Quick counts (already in summary)
     # payload_data = body.get("payload", {})

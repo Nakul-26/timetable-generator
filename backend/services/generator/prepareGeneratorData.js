@@ -25,7 +25,8 @@ export async function prepareGeneratorData(collegeId) {
   ] = await Promise.all([
     Faculty.find({ collegeId }).lean(),
     Subject.find({ collegeId }).lean(),
-    ClassModel.find({ collegeId }).populate("faculties").lean(),
+    // Avoid populate() for serverless performance; we only need faculty ids.
+    ClassModel.find({ collegeId }).lean(),
     ClassSubject.find({ collegeId }).lean(),
     TeacherSubjectCombination.find({ collegeId }).lean(),
     ElectiveSubjectSetting.find({ collegeId }).lean(),
@@ -82,9 +83,12 @@ export async function prepareGeneratorData(collegeId) {
 
   classes.forEach(c => {
     (c.faculties || []).forEach(f => {
-      const key = `${String(c._id)}|${String(f._id)}`;
+      const teacherId = String(f?._id || f);
+      const key = `${String(c._id)}|${teacherId}`;
       if (explicitClassTeacherKeys.has(key)) return;
-      classTeachers.push({ classId: c._id, teacherId: f._id });
+      if (teacherId) {
+        classTeachers.push({ classId: c._id, teacherId });
+      }
     });
   });
 
