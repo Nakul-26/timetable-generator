@@ -144,7 +144,7 @@ def _solver_base_url() -> str:
 def _call_local_solve(payload: Dict[str, Any]) -> Dict[str, Any]:
     req = urllib.request.Request(
         f"{_solver_base_url()}/solve",
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(payload, default=_json_default).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -182,6 +182,24 @@ ACTIVE_JOB_TASKS = set()
 # Polling-based job pickup (backend can just create a pending job and return).
 SOLVER_PULL_INTERVAL_SEC = float(os.getenv("SOLVER_PULL_INTERVAL_SEC", "5"))
 DEBUG_DUMP_PAYLOADS = os.getenv("DEBUG_DUMP_PAYLOADS", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _json_default(value: Any) -> Any:
+    """Best-effort JSON serializer for debugging/HTTP payloads."""
+    if isinstance(value, ObjectId):
+        return str(value)
+
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        try:
+            return iso()
+        except Exception:
+            pass
+
+    if isinstance(value, (set, tuple)):
+        return list(value)
+
+    return str(value)
 
 
 def _stop_ec2_instance():
@@ -509,7 +527,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     if DEBUG_DUMP_PAYLOADS:
         try:
             with open("generation_payload.json", "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
+                json.dump(payload, f, indent=2, default=_json_default)
         except Exception as exc:
             print(f"Failed to dump generation payload: {exc}")
 
@@ -649,7 +667,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                     feasibility_config[section][key] = max(1, feasibility_config[section][key] // 2)
 
     progress_callback and progress_callback({"progress": 10, "phase": "feasibility_start"})
-    feasibility_result = _call_local_solve({
+    feasibility_result = solve_instance({
         "faculties": faculties,
         "subjects": subjects,
         "classes": classes,
@@ -1351,7 +1369,7 @@ async def start_job(request: Request) -> Dict[str, Any]:
     if DEBUG_DUMP_PAYLOADS:
         try:
             with open("received_payload.json", "w", encoding="utf-8") as f:
-                json.dump(body, f, indent=2)
+                json.dump(body, f, indent=2, default=_json_default)
         except Exception as exc:
             print(f"Failed to dump received payload: {exc}")
 
