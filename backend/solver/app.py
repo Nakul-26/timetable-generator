@@ -222,6 +222,25 @@ def _get_timetable_results_collection():
     return client, client[MONGO_DB_NAME][TIMETABLE_RESULT_COLLECTION_NAME]
 
 
+async def _resume_pending_jobs():
+    """Resume any jobs that were pending or running when the solver restarted."""
+    try:
+        client, jobs = _get_jobs_collection()
+        pending_jobs = list(jobs.find({
+            "status": {"$in": ["pending", "running"]}
+        }))
+        for job in pending_jobs:
+            job_id = str(job["_id"])
+            payload = job.get("payload") or (job.get("input") or {}).get("payload")
+            if payload:
+                print(f"Resuming job {job_id}")
+                _spawn_generation_job(job_id, payload)
+            else:
+                print(f"Cannot resume job {job_id}: no payload found")
+    except Exception as exc:
+        print(f"Error resuming jobs: {exc}")
+
+
 def _set_job_state(job_id: str, **fields: Any) -> None:
     client, jobs = _get_jobs_collection()
     try:
@@ -424,6 +443,23 @@ def _build_attempt_constraint_config(
 
 
 def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cancel_check=None) -> Dict[str, Any]:
+    # DEBUG: Log payload summary at start of generation
+    print("=== GENERATION PAYLOAD SUMMARY ===")
+    print(f"classes: {len(payload.get('classes', []))}")
+    print(f"subjects: {len(payload.get('subjects', []))}")
+    print(f"faculties: {len(payload.get('faculties', []))}")
+    print(f"combos: {len(payload.get('combos', []))}")
+    print(f"fixedSlots: {len(payload.get('fixedSlots', []))}")
+    print(f"DAYS_PER_WEEK: {payload.get('DAYS_PER_WEEK')}")
+    print(f"HOURS_PER_DAY: {payload.get('HOURS_PER_DAY')}")
+    print(f"constraintConfig keys: {list(payload.get('constraintConfig', {}).keys())}")
+    print("Full payload saved to generation_payload.json")
+    print("=== GENERATION PAYLOAD SUMMARY END ===")
+
+    # DEBUG: Save full payload to file
+    with open("generation_payload.json", "w") as f:
+        json.dump(payload, f, indent=2)
+
     classes = payload.get("classes") or []
     faculties = payload.get("faculties") or []
     subjects = payload.get("subjects") or []
@@ -1227,6 +1263,8 @@ class _SolveProgressCallback(cp_model.CpSolverSolutionCallback):
 async def _install_loop_handler():
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(_solver_loop_exception_handler)
+    # Resume any pending or running jobs on startup
+    await _resume_pending_jobs()
 
 
 @app.get("/health")
@@ -1236,7 +1274,35 @@ def health() -> Dict[str, str]:
 
 @app.post("/jobs")
 async def start_job(request: Request) -> Dict[str, Any]:
+    print("=== /jobs endpoint called ===")
     body = await request.json()
+    print("=== Body received ===")
+
+    # DEBUG: Log received payload
+    print("=== RECEIVED PAYLOAD SUMMARY ===")
+    payload_data = body.get("payload", {})
+    print(f"jobId: {body.get('jobId')}")
+    print(f"classes: {len(payload_data.get('classes', []))}")
+    print(f"subjects: {len(payload_data.get('subjects', []))}")
+    print(f"faculties: {len(payload_data.get('faculties', []))}")
+    print(f"combos: {len(payload_data.get('combos', []))}")
+    print(f"fixedSlots: {len(payload_data.get('fixedSlots', []))}")
+    print(f"DAYS_PER_WEEK: {payload_data.get('DAYS_PER_WEEK')}")
+    print(f"HOURS_PER_DAY: {payload_data.get('HOURS_PER_DAY')}")
+    print("Full payload saved to received_payload.json")
+    print("=== RECEIVED PAYLOAD SUMMARY END ===")
+
+    # DEBUG: Save to file
+    with open("received_payload.json", "w") as f:
+        json.dump(body, f, indent=2)
+
+    # DEBUG: Quick counts (already in summary)
+    # payload_data = body.get("payload", {})
+    # print("classes:", len(payload_data.get("classes", [])))
+    # print("subjects:", len(payload_data.get("subjects", [])))
+    # print("faculties:", len(payload_data.get("faculties", [])))
+    # print("combos:", len(payload_data.get("combos", [])))
+
     job_id = str(body.get("jobId") or "").strip()
     payload = body.get("payload") or {}
     if not job_id:

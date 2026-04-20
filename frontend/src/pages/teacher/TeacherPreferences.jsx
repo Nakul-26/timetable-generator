@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import API from "../../api/axios";
-import { loadConstraintConfig } from "../constraintConfig";
+import {
+  DEFAULT_CONSTRAINT_CONFIG,
+  loadConstraintConfig,
+  normalizeConstraintConfig,
+} from "../constraintConfig";
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -32,7 +36,31 @@ const TeacherPreferences = () => {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const constraintConfig = useMemo(() => loadConstraintConfig(), []);
+  const [constraintConfig, setConstraintConfig] = useState(() =>
+    normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG)
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await API.get("/timetable-settings");
+        const serverConfig = res?.data?.settings?.constraintConfig;
+        if (cancelled) return;
+        if (serverConfig && typeof serverConfig === "object") {
+          setConstraintConfig(normalizeConstraintConfig(serverConfig));
+        }
+      } catch {
+        if (cancelled) return;
+        setConstraintConfig(loadConstraintConfig());
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const daysPerWeek = Math.max(1, Number(constraintConfig?.schedule?.daysPerWeek) || 6);
 
   const selectedTeacher = useMemo(

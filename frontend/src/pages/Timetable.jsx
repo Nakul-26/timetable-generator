@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Link } from "react-router-dom";
 import api from "../api/axios";
 import axios from "../api/axios";
-import { loadConstraintConfig } from "./constraintConfig";
+import { DEFAULT_CONSTRAINT_CONFIG, loadConstraintConfig, normalizeConstraintConfig } from "./constraintConfig";
 import { getComboSubjectDisplayName } from "./subjectDisplay";
 
 const HEALTH_BLOCK_STORAGE_KEY = "timetable.blockGenerateOnHealthErrors";
+const ACTIVE_GENERATION_TASK_KEY = "timetable.activeGenerationTaskId";
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 const GENERATION_STATUS_POLL_MS = Math.max(
   1000,
@@ -31,16 +32,13 @@ function Timetable() {
   const [solverDeadlineAt, setSolverDeadlineAt] = useState(null);
   const [solverRemainingSec, setSolverRemainingSec] = useState(null);
   const progressRef = useRef(0);
+  const settingsHydratedRef = useRef(false);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthReport, setHealthReport] = useState(null);
   const [healthSeverityFilter, setHealthSeverityFilter] = useState("all");
   const [blockGenerateOnHealthErrors, setBlockGenerateOnHealthErrors] = useState(() => {
-    try {
-      const raw = window.localStorage.getItem(HEALTH_BLOCK_STORAGE_KEY);
-      return raw ? raw === "true" : false;
-    } catch {
-      return false;
-    }
+    // Default to false; we will hydrate from DB settings.
+    return false;
   });
 
   // Master data
@@ -61,7 +59,7 @@ function Timetable() {
   const [fixedSlots, setFixedSlots] = useState({});
   const [fixedClassId, setFixedClassId] = useState("");
   const [showFixedClasses, setShowFixedClasses] = useState(false);
-  const [constraintConfig, setConstraintConfig] = useState(() => loadConstraintConfig());
+  const [constraintConfig, setConstraintConfig] = useState(() => normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG));
   const DAYS_PER_WEEK = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
   const HOURS_PER_DAY = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
 
@@ -78,6 +76,113 @@ function Timetable() {
     () => new Map(combos.map((c) => [String(c._id), c])),
     [combos]
   );
+
+  // Hydrate settings from DB once when the page loads.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await api.get("/timetable-settings");
+        const settings = res?.data?.settings || null;
+        if (cancelled || !settings) return;
+
+        if (typeof settings.blockGenerateOnHealthErrors === "boolean") {
+          setBlockGenerateOnHealthErrors(settings.blockGenerateOnHealthErrors);
+        }
+        if (settings.constraintConfig && typeof settings.constraintConfig === "object") {
+          setConstraintConfig(normalizeConstraintConfig(settings.constraintConfig));
+        }
+        if (settings.fixedSlots && typeof settings.fixedSlots === "object") {
+          setFixedSlots(settings.fixedSlots);
+        }
+      } catch {
+        // Fallback: keep existing behavior for local dev/offline.
+        try {
+          const raw = window.localStorage.getItem(HEALTH_BLOCK_STORAGE_KEY);
+          if (raw === "true" || raw === "false") {
+            setBlockGenerateOnHealthErrors(raw === "true");
+          }
+          setConstraintConfig(loadConstraintConfig());
+        } catch {
+          /* ignore */
+        }
+      } finally {
+        settingsHydratedRef.current = true;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist settings to DB (debounced) so navigation/device changes keep the same config.
+  const settingsSaveTimerRef = useRef(null);
+  useEffect(() => {
+    if (!settingsHydratedRef.current) return;
+
+    if (settingsSaveTimerRef.current) {
+      window.clearTimeout(settingsSaveTimerRef.current);
+    }
+
+    settingsSaveTimerRef.current = window.setTimeout(() => {
+      api.put("/timetable-settings", {
+        constraintConfig,
+        blockGenerateOnHealthErrors,
+        fixedSlots,
+      }).catch(() => {
+        // Ignore save failures; the app should remain usable.
+      });
+    }, 500);
+
+    return () => {
+      if (settingsSaveTimerRef.current) {
+        window.clearTimeout(settingsSaveTimerRef.current);
+      }
+    };
+  }, [blockGenerateOnHealthErrors, constraintConfig, fixedSlots]);
+
+  // Resume an in-progress generation when returning to this page.
+  useEffect(() => {
+    if (taskId) return;
+    try {
+      const savedTaskId = window.localStorage.getItem(ACTIVE_GENERATION_TASK_KEY);
+      if (!savedTaskId) return;
+      setTaskId(savedTaskId);
+      setLoading(true);
+      setError("");
+      setProgressPhase("queued");
+    } catch {
+      /* ignore */
+    }
+  }, [taskId]);
+
+  // If we restored a taskId, verify it exists; otherwise clear the saved id.
+  useEffect(() => {
+    if (!taskId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await api.get(`/generation-status/${taskId}`);
+      } catch (err) {
+        if (cancelled) return;
+        const status = Number(err?.response?.status || 0);
+        if (status === 404) {
+          try {
+            window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
   const requiredHoursByClassSubject = useMemo(() => {
     const byClass = new Map();
     for (const item of classSubjects) {
@@ -326,25 +431,37 @@ function Timetable() {
   }, [fetchAll, fetchLatest]);
 
   useEffect(() => {
-    const refreshConfig = () => setConstraintConfig(loadConstraintConfig());
-    window.addEventListener("storage", refreshConfig);
-    window.addEventListener("focus", refreshConfig);
+    let cancelled = false;
+
+    const refreshSettingsFromServer = async () => {
+      try {
+        const res = await api.get("/timetable-settings");
+        const settings = res?.data?.settings || null;
+        if (cancelled || !settings) return;
+        if (typeof settings.blockGenerateOnHealthErrors === "boolean") {
+          setBlockGenerateOnHealthErrors(settings.blockGenerateOnHealthErrors);
+        }
+        if (settings.constraintConfig && typeof settings.constraintConfig === "object") {
+          setConstraintConfig(normalizeConstraintConfig(settings.constraintConfig));
+        }
+        if (settings.fixedSlots && typeof settings.fixedSlots === "object") {
+          setFixedSlots(settings.fixedSlots);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const onFocus = () => {
+      refreshSettingsFromServer();
+    };
+
+    window.addEventListener("focus", onFocus);
     return () => {
-      window.removeEventListener("storage", refreshConfig);
-      window.removeEventListener("focus", refreshConfig);
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        HEALTH_BLOCK_STORAGE_KEY,
-        blockGenerateOnHealthErrors ? "true" : "false"
-      );
-    } catch {
-      // ignore localStorage failures
-    }
-  }, [blockGenerateOnHealthErrors]);
 
   useEffect(() => {
     if (!fixedClassId && classes.length > 0) {
@@ -496,10 +613,16 @@ function Timetable() {
   useEffect(() => {
     if (!taskId) return;
 
+    let consecutiveFailures = 0;
+
     const poll = setInterval(async () => {
       try {
         const res = await api.get(`/generation-status/${taskId}`);
-        const { status, progress, phase, result, error, partialData } = res.data;
+        consecutiveFailures = 0;
+        const { status, progress, phase, result, error, partialData } = res.data || {};
+        if (!status) {
+          throw new Error("Invalid generation status response");
+        }
         const isRunning = status === "running" || status === "pending";
         const isFailure = status === "failed" || status === "cancelled" || status === "error";
 
@@ -547,16 +670,20 @@ function Timetable() {
           }
           setSolverDeadlineAt(null);
           setTaskId(null);
+          try {
+            window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
+          } catch {
+            /* ignore */
+          }
           clearInterval(poll);
         }
       } catch {
-        setError("Failed to poll generation status.");
-        setLoading(false);
-        setTaskId(null);
-        setProgressTarget(0);
-        setSolverDeadlineAt(null);
-        setProgressPhase("error");
-        clearInterval(poll);
+        consecutiveFailures += 1;
+        setProgressPhase("reconnecting");
+        // Backend may restart during development. Keep polling so the job can continue in the solver.
+        if (consecutiveFailures >= 3) {
+          setError("Temporarily lost connection to the server. Retrying...");
+        }
       }
     }, GENERATION_STATUS_POLL_MS);
 
@@ -595,6 +722,8 @@ function Timetable() {
     return payload;
   };
 
+
+
   /* ===================== ACTIONS ===================== */
 
   const generateTimetable = async (solutionCountOverride = null) => {
@@ -610,8 +739,7 @@ function Timetable() {
     setSolverRemainingSec(null);
 
     try {
-      const latestConstraintConfig = loadConstraintConfig();
-      setConstraintConfig(latestConstraintConfig);
+      const latestConstraintConfig = constraintConfig;
       const latestHealthReport = await requestHealthCheck(latestConstraintConfig);
       setHealthReport(latestHealthReport);
       if (
@@ -638,15 +766,24 @@ function Timetable() {
       setSolverDeadlineAt(Date.now() + solverBudgetSec * 1000);
 
       const payload = transformFixedSlots(fixedSlots);
-      const classElectiveGroups =
-        JSON.parse(localStorage.getItem("classElectiveGroups")) || [];
-      const res = await api.post("/generate", {
+      console.log("Starting generation with payload:", {
         fixedSlots: payload,
-        classElectiveGroups,
         constraintConfig: latestConstraintConfig,
         solutionCount,
       });
-      setTaskId(res.data.taskId);
+      
+      const res = await api.post("/generate", {
+        fixedSlots: payload,
+        constraintConfig: latestConstraintConfig,
+        solutionCount,
+      });
+      const nextTaskId = res.data.taskId;
+      setTaskId(nextTaskId);
+      try {
+        window.localStorage.setItem(ACTIVE_GENERATION_TASK_KEY, String(nextTaskId));
+      } catch {
+        /* ignore */
+      }
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to start generation.");
       setLoading(false);
@@ -656,24 +793,29 @@ function Timetable() {
     }
   };
 
+
+
   const runHealthCheck = useCallback(async () => {
     setHealthLoading(true);
     setError("");
     try {
-      const latestConstraintConfig = loadConstraintConfig();
-      setConstraintConfig(latestConstraintConfig);
-      setHealthReport(await requestHealthCheck(latestConstraintConfig));
+      setHealthReport(await requestHealthCheck(constraintConfig));
     } catch {
       setError("Failed to run health check.");
     } finally {
       setHealthLoading(false);
     }
-  }, [requestHealthCheck]);
+  }, [constraintConfig, requestHealthCheck]);
 
   const stopGeneration = async () => {
     if (!taskId) return;
     try {
       await api.post(`/stop-generator/${taskId}`);
+      try {
+        window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
+      } catch {
+        /* ignore */
+      }
     } catch {
       /* ignore */
     }
@@ -1172,6 +1314,8 @@ function Timetable() {
     switch (progressPhase) {
       case "queued":
         return "Preparing generation...";
+      case "reconnecting":
+        return "Reconnecting... generation is still running.";
       case "start":
       case "running":
         return "Generating timetable options...";

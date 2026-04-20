@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import api from '../../api/axios';
-import { loadConstraintConfig } from '../constraintConfig';
+import { DEFAULT_CONSTRAINT_CONFIG, loadConstraintConfig, normalizeConstraintConfig } from '../constraintConfig';
 import { getComboSubjectDisplayName } from '../subjectDisplay';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -54,9 +54,31 @@ function SlotCard({ id, disabledDrag, className, hourLabel, comboIds, comboIdToD
 const ManualTimetable = () => {
   const [searchParams] = useSearchParams();
   const sourceTimetableId = searchParams.get('sourceTimetableId');
-  const constraintConfig = useMemo(() => loadConstraintConfig(), []);
+  const [constraintConfig, setConstraintConfig] = useState(() => normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG));
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const hoverRef = useRef('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await api.get('/timetable-settings');
+        const serverConfig = res?.data?.settings?.constraintConfig;
+        if (cancelled) return;
+        if (serverConfig && typeof serverConfig === 'object') {
+          setConstraintConfig(normalizeConstraintConfig(serverConfig));
+        }
+      } catch {
+        if (cancelled) return;
+        setConstraintConfig(loadConstraintConfig());
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [classes, setClasses] = useState([]);
   const [subjectIdToDetails, setSubjectIdToDetails] = useState({});
@@ -148,12 +170,13 @@ const ManualTimetable = () => {
     const fetchAndInitialize = async () => {
       try {
         setIsLoading(true);
-        const [classesRes, facultiesRes, subjectsRes, combosRes, classSubjectRes, sourceRes] = await Promise.all([
+        const [classesRes, facultiesRes, subjectsRes, combosRes, classSubjectRes, electiveGroupsRes, sourceRes] = await Promise.all([
           api.get('/classes'),
           api.get('/faculties'),
           api.get('/subjects'),
           api.get('/teacher-subject-combos'),
           api.get('/class-subjects'),
+          api.get('/elective-groups'),
           sourceTimetableId ? api.get(`/timetable/${sourceTimetableId}`) : Promise.resolve({ data: null }),
         ]);
 
@@ -189,7 +212,7 @@ const ManualTimetable = () => {
         setComboIdToDetails(comboDetails);
 
         const currentTimetableId = `manual-${Date.now()}`;
-        const electiveGroups = JSON.parse(localStorage.getItem('classElectiveGroups')) || [];
+        const electiveGroups = Array.isArray(electiveGroupsRes?.data) ? electiveGroupsRes.data : [];
         setTimetableId(currentTimetableId);
         setSourceTimetableMeta(sourceRes.data || null);
         setEditableTimetableName(sourceRes.data?.name || '');

@@ -356,7 +356,7 @@ function ManageSubject() {
               <th>Combined Classes</th>
               <th>Assigned Classes</th>
               <th>Assigned Faculties</th>
-              <th>Elective</th> {/* New table header */}
+              <th>Elective</th>{/* New table header */}
               <th>Actions</th>
             </tr>
           </thead>

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 // import { fileURLTo__dirname } from 'url';
+import fs from 'fs';
 import Faculty from '../../models/Faculty.js';
 import Subject from '../../models/Subject.js';
 import ClassModel from '../../models/Class.js';
@@ -7,6 +8,7 @@ import ClassSubject from '../../models/ClassSubject.js';
 import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import TimetableResult from '../../models/TimetableResult.js';
 import GenerationJob from '../../models/GenerationJob.js';
+import TimetableUserSettings from '../../models/TimetableUserSettings.js';
 import ElectiveSubjectSetting from '../../models/ElectiveSubjectSetting.js';
 import runGenerate from '../../models/lib/runGenerator.js';
 // Removed: import converter from '../../models/lib/convertNewCollegeInputToGeneratorData.js';
@@ -19,7 +21,8 @@ import { exportTimetableExcel } from "../../services/export/timetableExport.serv
 import { buildSubjectMap, collectSubjectIdsFromEncodedSubjectId, getComboSubjectDisplayName } from "../../utils/subjectDisplay.js";
 import { startEC2, waitForEC2, waitForSolver } from '../../utils/ec2.js';
 
-const SOLVER_BASE_URL = String(process.env.SOLVER_URL || 'http://localhost:8001').replace(/\/+$/, '');
+const SOLVER_BASE_URL = String(process.env.SOLVER_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
+console.log("Using SOLVER_BASE_URL:", SOLVER_BASE_URL);
 if (!SOLVER_BASE_URL) {
   throw new Error("SOLVER_URL is not defined");
 }
@@ -43,6 +46,70 @@ const serializeJobStatus = (job) => {
 
 const protectedRouter = Router();
 protectedRouter.use(auth);
+
+// --- Timetable Settings (per-user, per-college) ---
+protectedRouter.get('/timetable-settings', async (req, res) => {
+  try {
+    const doc = await TimetableUserSettings.findOne({
+      collegeId: req.collegeId,
+      userId: req.user?._id,
+    }).lean();
+
+    res.json({
+      ok: true,
+      settings: doc
+        ? {
+            constraintConfig: doc.constraintConfig ?? null,
+            blockGenerateOnHealthErrors: Boolean(doc.blockGenerateOnHealthErrors),
+            fixedSlots: doc.fixedSlots ?? null,
+            updatedAt: doc.updatedAt,
+          }
+        : {
+            constraintConfig: null,
+            blockGenerateOnHealthErrors: false,
+            fixedSlots: null,
+            updatedAt: null,
+          },
+    });
+  } catch (e) {
+    console.error('[GET /timetable-settings] Error:', e);
+    res.status(500).json({ ok: false, error: 'Internal Server Error' });
+  }
+});
+
+protectedRouter.put('/timetable-settings', async (req, res) => {
+  try {
+    const { constraintConfig = null, blockGenerateOnHealthErrors = false, fixedSlots = null } =
+      req.body || {};
+
+    const updated = await TimetableUserSettings.findOneAndUpdate(
+      { collegeId: req.collegeId, userId: req.user?._id },
+      {
+        $set: {
+          collegeId: req.collegeId,
+          userId: req.user?._id,
+          constraintConfig,
+          blockGenerateOnHealthErrors: Boolean(blockGenerateOnHealthErrors),
+          fixedSlots,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    res.json({
+      ok: true,
+      settings: {
+        constraintConfig: updated.constraintConfig ?? null,
+        blockGenerateOnHealthErrors: Boolean(updated.blockGenerateOnHealthErrors),
+        fixedSlots: updated.fixedSlots ?? null,
+        updatedAt: updated.updatedAt,
+      },
+    });
+  } catch (e) {
+    console.error('[PUT /timetable-settings] Error:', e);
+    res.status(500).json({ ok: false, error: 'Internal Server Error' });
+  }
+});
 
 // --- Timetable ---
 protectedRouter.post('/process-new-input', async (req, res) => {
@@ -136,6 +203,13 @@ protectedRouter.post('/process-new-input', async (req, res) => {
 
 protectedRouter.post('/generate', async (req, res) => {
     try {
+
+      console.log("[POST /generate] Received generation request with body:", {
+        fixedSlots: req.body.fixedSlots,
+        constraintConfig: req.body.constraintConfig,
+        solutionCount: req.body.solutionCount,
+      } , "111111111111111111111111111111111111111111111111111111111111111");
+
       const { fixedSlots, constraintConfig = {}, solutionCount } = req.body;
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
@@ -147,6 +221,11 @@ protectedRouter.post('/generate', async (req, res) => {
           generatorData.faculties || []
         ),
         generatorData.faculties || []
+      );
+
+      console.log("[POST /generate] Merged constraint config:", mergedConstraintConfig,
+
+        "22222222222222222222222222222222222222222222222222222222222222"
       );
 
       const normalizedSolutionCount = Math.max(
@@ -168,58 +247,96 @@ protectedRouter.post('/generate', async (req, res) => {
             hoursPerDay,
           },
         },
+        payload: {
+          collegeId: req.collegeId,
+          ...generatorData,
+          fixedSlots,
+          DAYS_PER_WEEK: daysPerWeek,
+          HOURS_PER_DAY: hoursPerDay,
+          constraintConfig: mergedConstraintConfig,
+          solutionCount: normalizedSolutionCount,
+        },
       });
 
       let solverRes;
       let solverBody = null;
-      try {
-        // If an EC2 instance id is provided and we're in production, ensure the instance is running before calling the solver
-        if (process.env.EC2_INSTANCE_ID && process.env.NODE_ENV === 'production') {
-          try {
-            await startEC2();
-            await waitForEC2();
-            await waitForSolver();
-          } catch (ec2Err) {
-            console.error("[POST /generate] EC2/Solver control failed:", ec2Err);
-            await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
-              status: "failed",
-              phase: "error",
-              error: `EC2/Solver control failed: ${String(ec2Err)}`,
-              progress: 100,
-            });
-            return res.status(500).json({ error: "Failed to start EC2 instance or solver." });
-          }
+      // If an EC2 instance id is provided and we're in production, ensure the instance is running before calling the solver
+      if (process.env.EC2_INSTANCE_ID && process.env.NODE_ENV === 'production') {
+        try {
+          await startEC2();
+          await waitForEC2();
+          await waitForSolver();
+        } catch (ec2Err) {
+          console.error("[POST /generate] EC2/Solver control failed:", ec2Err);
+          await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
+            status: "failed",
+            phase: "error",
+            error: `EC2/Solver control failed: ${String(ec2Err)}`,
+            progress: 100,
+          });
+          return res.status(500).json({ error: "Failed to start EC2 instance or solver." });
         }
+      }
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-        solverRes = await fetch(`${SOLVER_BASE_URL}/jobs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jobId: String(job._id),
-            payload: {
-              collegeId: req.collegeId,
-              ...generatorData,
-              fixedSlots,
-              DAYS_PER_WEEK: daysPerWeek,
-              HOURS_PER_DAY: hoursPerDay,
-              constraintConfig: mergedConstraintConfig,
-              solutionCount: normalizedSolutionCount,
-            },
-          }),
-          signal: controller.signal,
-        });
+      const requestBody = {
+        jobId: String(job._id),
+        payload: {
+          collegeId: req.collegeId,
+          ...generatorData,
+          fixedSlots,
+          DAYS_PER_WEEK: daysPerWeek,
+          HOURS_PER_DAY: hoursPerDay,
+          constraintConfig: mergedConstraintConfig,
+          solutionCount: normalizedSolutionCount,
+        },
+      };
+
+      // DEBUG: Log payload being sent
+      console.log("=== BACKEND SENDING PAYLOAD SUMMARY ===");
+      console.log(`jobId: ${requestBody.jobId}`);
+      console.log(`classes: ${requestBody.payload.classes?.length || 0}`);
+      console.log(`subjects: ${requestBody.payload.subjects?.length || 0}`);
+      console.log(`faculties: ${requestBody.payload.faculties?.length || 0}`);
+      console.log(`combos: ${requestBody.payload.combos?.length || 0}`);
+      console.log(`fixedSlots: ${requestBody.payload.fixedSlots?.length || 0}`);
+      console.log(`DAYS_PER_WEEK: ${requestBody.payload.DAYS_PER_WEEK}`);
+      console.log(`HOURS_PER_DAY: ${requestBody.payload.HOURS_PER_DAY}`);
+      console.log("Full payload saved to backend_payload.json");
+      console.log("=== BACKEND SENDING PAYLOAD SUMMARY END ===");
+
+      console.log(`Sending request to: ${SOLVER_BASE_URL}/jobs`);
+
+      // Fire-and-forget: Send to solver without waiting for response
+      fetch(`${SOLVER_BASE_URL}/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      }).then(async (solverRes) => {
         clearTimeout(timeoutId);
-        solverBody = await solverRes.json().catch(() => null);
-      } catch (solverErr) {
+        console.log('Solver response status:', solverRes.status);
+        const solverBody = await solverRes.json().catch(() => null);
+        console.log('Solver response body:', solverBody);
+        if (!solverRes.ok || solverBody?.ok === false) {
+          await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
+            status: "failed",
+            phase: "error",
+            error: solverBody?.error || `Solver job start failed (${solverRes.status})`,
+            progress: 100,
+          });
+        }
+      }).catch(async (solverErr) => {
+        clearTimeout(timeoutId);
+        console.error("[POST /generate] Solver request failed:", solverErr);
         const isTimeout = solverErr.name === 'AbortError';
         const solverUnavailableMessage =
           isTimeout
             ? `Solver service timed out at ${SOLVER_BASE_URL}.`
-            : SOLVER_BASE_URL === "http://localhost:8001"
-            ? "Solver service is unreachable at http://localhost:8001. Set SOLVER_URL to your deployed Python solver when the backend runs serverlessly."
+            : SOLVER_BASE_URL === "http://127.0.0.1:8001"
+            ? "Solver service is unreachable at http://127.0.0.1:8001. Set SOLVER_URL to your deployed Python solver when the backend runs serverlessly."
             : `Solver service is unreachable at ${SOLVER_BASE_URL}.`;
         await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
           status: "failed",
@@ -227,23 +344,13 @@ protectedRouter.post('/generate', async (req, res) => {
           error: solverUnavailableMessage,
           progress: 100,
         });
-        return res.status(isTimeout ? 504 : 502).json({ error: solverUnavailableMessage });
-      }
+      });
 
-      if (!solverRes.ok || solverBody?.ok === false) {
-        await GenerationJob.findOneAndUpdate({ _id: job._id, collegeId: req.collegeId }, {
-          status: "failed",
-          phase: "error",
-          error: solverBody?.error || `Solver job start failed (${solverRes.status})`,
-          progress: 100,
-        });
-        return res.status(502).json({ error: "Failed to start solver job." });
-      }
-
-      res.json({ taskId: String(job._id) });
+      // Return immediately without waiting for solver
+      return res.json({ taskId: String(job._id) });
     } catch (e) {
-      console.error("Error in /generate:", e)
-      res.status(500).json({ error: "Internal Server Error" });
+      console.error("Error in /generate:", e);
+      return res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
@@ -289,6 +396,39 @@ protectedRouter.get('/elective-settings/:classId', async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+
+    protectedRouter.get('/elective-groups', async (req, res) => {
+      try {
+        const settings = await ElectiveSubjectSetting.find({ collegeId: req.collegeId }).lean();
+
+        const groups = [];
+        const seen = new Set();
+
+        for (const setting of settings || []) {
+          const classId = String(setting?.class || "");
+
+          const requirementsRaw = setting?.teacherCategoryRequirements;
+          const requirements = requirementsRaw instanceof Map
+            ? Object.fromEntries(requirementsRaw.entries())
+            : (requirementsRaw || {});
+
+          const subjects = Object.keys(requirements || {}).map(String).filter(Boolean);
+          if (!classId || subjects.length === 0) continue;
+
+          subjects.sort();
+          const key = `${classId}|${subjects.join(',')}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          groups.push({ classId, subjects });
+        }
+
+        res.json(groups);
+      } catch (error) {
+        console.error('Error fetching elective groups:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    });
 
 protectedRouter.post('/elective-settings', async (req, res) => {
     try {

@@ -36,6 +36,10 @@ const GenerationJobSchema = new Schema(
       type: Object,
       default: null,
     },
+    payload: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
     partial_data: {
       type: Object,
       default: null,

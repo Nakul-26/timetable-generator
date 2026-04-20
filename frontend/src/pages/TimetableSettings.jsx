@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import api from "../api/axios";
 import {
   DEFAULT_CONSTRAINT_CONFIG,
   loadConstraintConfig,
   normalizeConstraintConfig,
-  saveConstraintConfig,
 } from "./constraintConfig";
 
 const STRENGTH_FACTORS = {
@@ -90,25 +90,70 @@ function parseJsonOrDefault(text, fallback) {
 }
 
 function TimetableSettings() {
-  const [config, setConfig] = useState(() => loadConstraintConfig());
+  const [config, setConfig] = useState(() => normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG));
   const [savedAt, setSavedAt] = useState("");
   const [jsonMode, setJsonMode] = useState(false);
   const [showPolicySettings, setShowPolicySettings] = useState(true);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState("custom");
   const [jsonText, setJsonText] = useState(() =>
-    JSON.stringify(loadConstraintConfig(), null, 2)
+    JSON.stringify(normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG), null, 2)
   );
   const [jsonError, setJsonError] = useState("");
   const [availabilityMapText, setAvailabilityMapText] = useState(() =>
-    JSON.stringify(loadConstraintConfig().teacherAvailability?.unavailableSlotsByTeacher || {}, null, 2)
+    JSON.stringify(normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG).teacherAvailability?.unavailableSlotsByTeacher || {}, null, 2)
   );
   const [globalAvailabilityText, setGlobalAvailabilityText] = useState(() =>
-    JSON.stringify(loadConstraintConfig().teacherAvailability?.globallyUnavailableSlots || [], null, 2)
+    JSON.stringify(normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG).teacherAvailability?.globallyUnavailableSlots || [], null, 2)
   );
   const [teacherBoundaryOverridesText, setTeacherBoundaryOverridesText] = useState(() =>
-    JSON.stringify(loadConstraintConfig().teacherBoundaryPreference?.teacherOverrides || {}, null, 2)
+    JSON.stringify(normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG).teacherBoundaryPreference?.teacherOverrides || {}, null, 2)
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await api.get("/timetable-settings");
+        const serverConfig = res?.data?.settings?.constraintConfig;
+        if (cancelled) return;
+        if (serverConfig && typeof serverConfig === "object") {
+          const normalized = normalizeConstraintConfig(serverConfig);
+          setConfig(normalized);
+          setJsonText(JSON.stringify(normalized, null, 2));
+          setAvailabilityMapText(
+            JSON.stringify(normalized.teacherAvailability?.unavailableSlotsByTeacher || {}, null, 2)
+          );
+          setGlobalAvailabilityText(
+            JSON.stringify(normalized.teacherAvailability?.globallyUnavailableSlots || [], null, 2)
+          );
+          setTeacherBoundaryOverridesText(
+            JSON.stringify(normalized.teacherBoundaryPreference?.teacherOverrides || {}, null, 2)
+          );
+        }
+      } catch {
+        // Fallback: if DB settings cannot be loaded, use localStorage (legacy).
+        const fallback = loadConstraintConfig();
+        if (cancelled) return;
+        setConfig(fallback);
+        setJsonText(JSON.stringify(fallback, null, 2));
+        setAvailabilityMapText(
+          JSON.stringify(fallback.teacherAvailability?.unavailableSlotsByTeacher || {}, null, 2)
+        );
+        setGlobalAvailabilityText(
+          JSON.stringify(fallback.teacherAvailability?.globallyUnavailableSlots || [], null, 2)
+        );
+        setTeacherBoundaryOverridesText(
+          JSON.stringify(fallback.teacherBoundaryPreference?.teacherOverrides || {}, null, 2)
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const strengths = useMemo(
     () => ({
@@ -189,7 +234,9 @@ function TimetableSettings() {
     setSelectedPreset("custom");
     const newConfig = normalizeConstraintConfig(updater(config));
     setConfig(newConfig);
-    saveConstraintConfig(newConfig);
+    api.put("/timetable-settings", { constraintConfig: newConfig }).catch(() => {
+      /* ignore */
+    });
   };
 
   const applyPreset = (presetKey) => {
@@ -224,7 +271,6 @@ function TimetableSettings() {
 
   const save = () => {
     const normalized = normalizeConstraintConfig(config);
-    saveConstraintConfig(normalized);
     setConfig(normalized);
     setJsonText(JSON.stringify(normalized, null, 2));
     setAvailabilityMapText(
@@ -236,6 +282,9 @@ function TimetableSettings() {
     setTeacherBoundaryOverridesText(
       JSON.stringify(normalized.teacherBoundaryPreference.teacherOverrides || {}, null, 2)
     );
+    api.put("/timetable-settings", { constraintConfig: normalized }).catch(() => {
+      /* ignore */
+    });
     setSavedAt(new Date().toLocaleString());
   };
 
@@ -254,6 +303,9 @@ function TimetableSettings() {
       JSON.stringify(defaults.teacherBoundaryPreference.teacherOverrides || {}, null, 2)
     );
     setJsonError("");
+    api.put("/timetable-settings", { constraintConfig: defaults }).catch(() => {
+      /* ignore */
+    });
   };
 
   const applyJson = () => {
