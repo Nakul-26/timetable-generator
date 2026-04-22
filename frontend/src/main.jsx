@@ -7,7 +7,15 @@ import { DataProvider } from './context/DataContext.jsx';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  },
+});
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import api from "../api/axios";
 import axios from "../api/axios";
 import { DEFAULT_CONSTRAINT_CONFIG, loadConstraintConfig, normalizeConstraintConfig } from "./constraintConfig";
@@ -13,6 +14,14 @@ const GENERATION_STATUS_POLL_MS = Math.max(
   Number(import.meta.env.VITE_GENERATION_STATUS_POLL_MS) || 3000
 );
 const HEALTH_ERROR_PREVIEW_LIMIT = 3;
+const TERMINAL_GENERATION_STATUSES = new Set(["completed", "failed", "cancelled", "error"]);
+const ACTIVE_GENERATION_STATUSES = new Set(["pending", "running"]);
+
+const isTerminalGenerationStatus = (status) =>
+  TERMINAL_GENERATION_STATUSES.has(String(status || "").toLowerCase());
+
+const isActiveGenerationStatus = (status) =>
+  ACTIVE_GENERATION_STATUSES.has(String(status || "").toLowerCase());
 
 function Timetable() {
   const [loading, setLoading] = useState(false);
@@ -26,6 +35,7 @@ function Timetable() {
 
   // Async generation
   const [taskId, setTaskId] = useState(null);
+  const [cancelRequestedLocally, setCancelRequestedLocally] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressTarget, setProgressTarget] = useState(0);
   const [progressPhase, setProgressPhase] = useState("idle");
@@ -146,6 +156,7 @@ function Timetable() {
   // Resume an in-progress generation when returning to this page.
   useEffect(() => {
     if (taskId) return;
+    setCancelRequestedLocally(false);
     try {
       const savedTaskId = window.localStorage.getItem(ACTIVE_GENERATION_TASK_KEY);
       if (!savedTaskId) return;
@@ -156,32 +167,6 @@ function Timetable() {
     } catch {
       /* ignore */
     }
-  }, [taskId]);
-
-  // If we restored a taskId, verify it exists; otherwise clear the saved id.
-  useEffect(() => {
-    if (!taskId) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        await api.get(`/generation-status/${taskId}`);
-      } catch (err) {
-        if (cancelled) return;
-        const status = Number(err?.response?.status || 0);
-        if (status === 404) {
-          try {
-            window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [taskId]);
   const requiredHoursByClassSubject = useMemo(() => {
     const byClass = new Map();
@@ -610,85 +595,128 @@ function Timetable() {
 
   /* ===================== POLLING ===================== */
 
+  const generationStatusQuery = useQuery({
+    queryKey: ["generation-status", taskId],
+    queryFn: async () => {
+      const res = await api.get(`/generation-status/${taskId}`);
+      return res.data || null;
+    },
+    enabled: Boolean(taskId),
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    retry: 2,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      const cancelRequested = query.state.data?.cancelRequested || cancelRequestedLocally;
+      return taskId && !cancelRequested && !isTerminalGenerationStatus(status)
+        ? GENERATION_STATUS_POLL_MS
+        : false;
+    },
+  });
+
   useEffect(() => {
-    if (!taskId) return;
+    if (!taskId || !generationStatusQuery.error) return;
 
-    let consecutiveFailures = 0;
-
-    const poll = setInterval(async () => {
+    const status = Number(generationStatusQuery.error?.response?.status || 0);
+    if (status === 404) {
+      setLoading(false);
+      setTaskId(null);
+      setProgressPhase("idle");
+      setSolverDeadlineAt(null);
+      setSolverRemainingSec(null);
       try {
-        const res = await api.get(`/generation-status/${taskId}`);
-        consecutiveFailures = 0;
-        const { status, progress, phase, result, error, partialData } = res.data || {};
-        if (!status) {
-          throw new Error("Invalid generation status response");
-        }
-        const isRunning = status === "running" || status === "pending";
-        const isFailure = status === "failed" || status === "cancelled" || status === "error";
-
-        if (isRunning) {
-          const nextPhase = phase || "running";
-          setProgressPhase(nextPhase);
-          setProgressTarget((prev) => Math.max(prev, Number(progress ?? 0)));
-          if (partialData) {
-            applyTimetableState(partialData, selectedOptionId);
-          }
-        } else {
-          setProgressTarget((prev) =>
-            Math.max(prev, Number(status === "completed" ? 100 : progress ?? 0))
-          );
-          setProgressPhase(phase || status || "completed");
-          if (isFailure) {
-            const failureMessage = error || result?.error || partialData?.error || "Generation failed";
-            const derivedHealthReport =
-              healthReport ||
-              result?.health_report ||
-              partialData?.health_report ||
-              null;
-            setError(buildGenerationFailureMessage(failureMessage, derivedHealthReport));
-          }
-
-          if (result || partialData) {
-            const normalized = applyTimetableState(result || partialData, selectedOptionId);
-            if (normalized?.ok === false && normalized?.error) {
-              const derivedHealthReport =
-                healthReport ||
-                normalized?.health_report ||
-                result?.health_report ||
-                partialData?.health_report ||
-                null;
-              setError(buildGenerationFailureMessage(normalized.error, derivedHealthReport));
-            }
-          } else if (partialData) {
-            applyTimetableState(partialData, selectedOptionId);
-          }
-
-          if (status === "completed") {
-            window.setTimeout(() => setLoading(false), 500);
-          } else {
-            setLoading(false);
-          }
-          setSolverDeadlineAt(null);
-          setTaskId(null);
-          try {
-            window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
-          } catch {
-            /* ignore */
-          }
-          clearInterval(poll);
-        }
+        window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
       } catch {
-        consecutiveFailures += 1;
-        setProgressPhase("reconnecting");
-        // Backend may restart during development. Keep polling so the job can continue in the solver.
-        if (consecutiveFailures >= 3) {
-          setError("Temporarily lost connection to the server. Retrying...");
-        }
+        /* ignore */
       }
-    }, GENERATION_STATUS_POLL_MS);
+      return;
+    }
 
-    return () => clearInterval(poll);
-  }, [applyTimetableState, buildGenerationFailureMessage, healthReport, selectedOptionId, taskId]);
+    setProgressPhase("reconnecting");
+    if ((generationStatusQuery.failureCount || 0) >= 2) {
+      setError("Temporarily lost connection to the server. Retrying...");
+    }
+  }, [generationStatusQuery.error, generationStatusQuery.failureCount, taskId]);
+
+  useEffect(() => {
+    if (!taskId || !generationStatusQuery.data) return;
+
+    const {
+      status,
+      progress: nextProgress,
+      phase,
+      result,
+      error: jobError,
+      partialData,
+      cancelRequested,
+    } = generationStatusQuery.data;
+
+    if (!status) return;
+
+    if (generationStatusQuery.isFetched) {
+      setError("");
+    }
+
+    if (isActiveGenerationStatus(status)) {
+      const nextPhase = cancelRequested ? "cancel_requested" : (phase || "running");
+      setProgressPhase(nextPhase);
+      setProgressTarget((prev) => Math.max(prev, Number(nextProgress ?? 0)));
+      if (partialData) {
+        applyTimetableState(partialData, selectedOptionId);
+      }
+      return;
+    }
+
+    setProgressTarget((prev) =>
+      Math.max(prev, Number(status === "completed" ? 100 : nextProgress ?? 0))
+    );
+    setProgressPhase(cancelRequested && status !== "completed" ? "cancel_requested" : (phase || status || "completed"));
+
+    if (status === "failed" || status === "cancelled" || status === "error") {
+      const failureMessage = jobError || result?.error || partialData?.error || "Generation failed";
+      const derivedHealthReport =
+        healthReport ||
+        result?.health_report ||
+        partialData?.health_report ||
+        null;
+      setError(buildGenerationFailureMessage(failureMessage, derivedHealthReport));
+    }
+
+    if (result || partialData) {
+      const normalized = applyTimetableState(result || partialData, selectedOptionId);
+      if (normalized?.ok === false && normalized?.error) {
+        const derivedHealthReport =
+          healthReport ||
+          normalized?.health_report ||
+          result?.health_report ||
+          partialData?.health_report ||
+          null;
+        setError(buildGenerationFailureMessage(normalized.error, derivedHealthReport));
+      }
+    }
+
+    if (status === "completed") {
+      window.setTimeout(() => setLoading(false), 500);
+    } else {
+      setLoading(false);
+    }
+    setSolverDeadlineAt(null);
+    setTaskId(null);
+    try {
+      window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [
+    applyTimetableState,
+    buildGenerationFailureMessage,
+    generationStatusQuery.data,
+    generationStatusQuery.isFetched,
+    healthReport,
+    selectedOptionId,
+    taskId,
+  ]);
 
   /* ===================== FIXED SLOTS ===================== */
 
@@ -779,6 +807,7 @@ function Timetable() {
       });
       const nextTaskId = res.data.taskId;
       setTaskId(nextTaskId);
+      setCancelRequestedLocally(false);
       try {
         window.localStorage.setItem(ACTIVE_GENERATION_TASK_KEY, String(nextTaskId));
       } catch {
@@ -811,11 +840,8 @@ function Timetable() {
     if (!taskId) return;
     try {
       await api.post(`/stop-generator/${taskId}`);
-      try {
-        window.localStorage.removeItem(ACTIVE_GENERATION_TASK_KEY);
-      } catch {
-        /* ignore */
-      }
+      setCancelRequestedLocally(true);
+      setProgressPhase("cancel_requested");
     } catch {
       /* ignore */
     }
@@ -1314,6 +1340,8 @@ function Timetable() {
     switch (progressPhase) {
       case "queued":
         return "Preparing generation...";
+      case "cancel_requested":
+        return "Cancel requested. Waiting for solver to stop...";
       case "reconnecting":
         return "Reconnecting... generation is still running.";
       case "start":
@@ -1331,6 +1359,28 @@ function Timetable() {
         return loading ? "Generating..." : "";
     }
   };
+
+  const currentGenerationStatus = taskId
+    ? (generationStatusQuery.data?.status || "pending")
+    : null;
+  const currentGenerationPhase =
+    taskId && (generationStatusQuery.data?.cancelRequested || cancelRequestedLocally) && currentGenerationStatus !== "completed"
+      ? "cancel_requested"
+      : (generationStatusQuery.data?.phase || progressPhase || "idle");
+  const canCancelGeneration =
+    Boolean(taskId) &&
+    !generationStatusQuery.data?.cancelRequested &&
+    !cancelRequestedLocally &&
+    !isTerminalGenerationStatus(currentGenerationStatus);
+  const showGenerationCard =
+    Boolean(taskId) ||
+    (loading && progressPhase !== "idle") ||
+    progressPhase === "reconnecting";
+
+  const formatGenerationStatusLabel = (value) =>
+    String(value || "unknown")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (match) => match.toUpperCase());
 
   const formatCountdown = (totalSec) => {
     const safe = Math.max(0, Number(totalSec) || 0);
@@ -1355,6 +1405,43 @@ function Timetable() {
           )}
         </div>
       )}
+
+      {showGenerationCard ? (
+        <div className="tt-job-card">
+          <div className="tt-job-card-head">
+            <div>
+              <h3>Generation Job</h3>
+              <p className="tt-subtext">
+                Track the active solver run. This continues even if you navigate away and come back.
+              </p>
+            </div>
+            <div className="tt-job-actions">
+              {taskId ? <span className="tt-job-badge">Task {String(taskId).slice(-8)}</span> : null}
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={stopGeneration}
+                disabled={!canCancelGeneration}
+              >
+                {generationStatusQuery.data?.cancelRequested ? "Cancel Requested" : "Stop Generation"}
+              </button>
+            </div>
+          </div>
+          <div className="filters-container">
+            <span>Status: {formatGenerationStatusLabel(currentGenerationStatus)}</span>
+            <span>Phase: {formatGenerationStatusLabel(currentGenerationPhase)}</span>
+            <span>Progress: {Math.round(progress)}%</span>
+            {solverRemainingSec != null ? (
+              <span>Time Left: {formatCountdown(solverRemainingSec)}</span>
+            ) : null}
+          </div>
+          {generationStatusQuery.data?.updatedAt ? (
+            <p className="tt-subtext">
+              Last update: {new Date(generationStatusQuery.data.updatedAt).toLocaleString()}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="actions-bar">
         <button className="secondary-btn" onClick={runHealthCheck} disabled={loading || healthLoading}>

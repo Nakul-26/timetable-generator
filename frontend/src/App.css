@@ -735,6 +735,43 @@ h2 {
   width: 100%;
 }
 
+.tt-job-card {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid rgba(255, 140, 66, 0.18);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fffaf6 0%, #fff 100%);
+}
+
+.tt-job-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tt-job-card-head h3 {
+  margin: 0 0 4px;
+}
+
+.tt-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tt-job-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #fff1e7;
+  color: #9a4a12;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
 .tt-inline-toggle {
   background: #fff;
   border: 1px solid rgba(255,140,66,0.12);
