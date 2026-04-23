@@ -63,6 +63,27 @@ function isNoTeacherCombo(combo) {
   return String(combo?.subject?.type || combo?.subject_type || combo?.type || "").toLowerCase() === "no_teacher";
 }
 
+function getComboSubjectId(combo) {
+  return String(combo?.subject?._id || combo?.subject || combo?.subject_id || "");
+}
+
+function getComboSubjectType(combo) {
+  return String(combo?.subject?.type || combo?.subjectType || combo?.subject_type || combo?.type || "theory").toLowerCase();
+}
+
+function getComboFacultyIds(combo) {
+  if (Array.isArray(combo?.faculty_ids) && combo.faculty_ids.length > 0) {
+    return combo.faculty_ids.map((id) => String(id));
+  }
+  if (combo?.faculty_id) {
+    return [String(combo.faculty_id)];
+  }
+  if (combo?.faculty?._id || combo?.faculty) {
+    return [String(combo.faculty?._id || combo.faculty)];
+  }
+  return [];
+}
+
 router.post("/initialize", async (req, res) => {
   try {
     const {
@@ -122,41 +143,53 @@ router.post("/valid-options", async (req, res) => {
 
       const relevantGroup = electiveGroups.find(g => g.classId === classId && g.subjects.includes(subjectIdsInSlot[0]));
 
-      if (relevantGroup) {
-        const potentialSubjectIds = relevantGroup.subjects.filter(s => !subjectIdsInSlot.includes(s));
-        for (const combo of combos) {
-          const subjId = String(combo.subject?._id || combo.subject || combo.subject_id || "");
-          const facultyIds = Array.isArray(combo.faculty_ids) && combo.faculty_ids.length > 0
-            ? combo.faculty_ids.map((id) => String(id))
-            : [String(combo.faculty?._id || combo.faculty || combo.faculty_id || "")].filter(Boolean);
-          if (!potentialSubjectIds.includes(subjId)) continue;
+      const isLabCoTeachingSlot =
+        combosDetailsInSlot.length > 0 &&
+        subjectIdsInSlot.length > 0 &&
+        subjectIdsInSlot.every((subjectId) => String(subjectId) === String(subjectIdsInSlot[0])) &&
+        combosDetailsInSlot.every((combo) => getComboSubjectType(combo) === "lab");
 
-          const teacherBlocked = facultyIds.some((facultyId) => {
-            const teacherCheck = checkTeacherConstraints(
-              teacherTimetable,
-              facultyId,
+      const potentialSubjectIds = relevantGroup
+        ? relevantGroup.subjects.filter(s => !subjectIdsInSlot.includes(s))
+        : [];
+
+      for (const combo of combos) {
+        const subjId = getComboSubjectId(combo);
+        const facultyIds = getComboFacultyIds(combo);
+        const isValidElectiveOption = potentialSubjectIds.includes(subjId);
+        const isValidLabCoTeacherOption =
+          isLabCoTeachingSlot &&
+          subjId === String(subjectIdsInSlot[0]) &&
+          getComboSubjectType(combo) === "lab" &&
+          !combosInSlot.map(String).includes(String(combo._id));
+
+        if (!isValidElectiveOption && !isValidLabCoTeacherOption) continue;
+
+        const teacherBlocked = facultyIds.some((facultyId) => {
+          const teacherCheck = checkTeacherConstraints(
+            teacherTimetable,
+            facultyId,
+            day,
+            hour,
+            teacherAvailability
+          );
+          return !teacherCheck.ok;
+        });
+
+        if (!teacherBlocked) {
+          validCombos.push({
+            ...combo,
+            preferenceWarnings: getTeacherPreferenceWarnings(
+              facultyIds,
+              teacherPreferences,
               day,
               hour,
-              teacherAvailability
-            );
-            return !teacherCheck.ok;
+              Number(config?.hours) || 8
+            ),
+            placementWarnings: isNoTeacherCombo(combo) && hour < Math.max(0, (Number(config?.hours) || 8) - 2)
+              ? ["Recommended for later periods"]
+              : [],
           });
-
-          if (!teacherBlocked) {
-            validCombos.push({
-              ...combo,
-              preferenceWarnings: getTeacherPreferenceWarnings(
-                facultyIds,
-                teacherPreferences,
-                day,
-                hour,
-                Number(config?.hours) || 8
-              ),
-              placementWarnings: isNoTeacherCombo(combo) && hour < Math.max(0, (Number(config?.hours) || 8) - 2)
-                ? ["Recommended for later periods"]
-                : [],
-            });
-          }
         }
       }
     } else {
@@ -191,26 +224,14 @@ router.post("/valid-options", async (req, res) => {
         faculty: isNoTeacherCombo(c) ? "No Teacher" : (c.faculty?.name || "Unknown Teacher"),
         subject: c.subject.name,
         subjectId: c.subject?._id || c.subject || c.subject_id || "",
-        facultyIds: Array.isArray(c.faculty_ids)
-          ? c.faculty_ids
-          : c.faculty_id
-            ? [c.faculty_id]
-            : c.faculty
-              ? [c.faculty?._id || c.faculty]
-              : [],
+        facultyIds: getComboFacultyIds(c),
         warnings:
           [
             ...(
               Array.isArray(c.preferenceWarnings) && c.preferenceWarnings.length > 0
                 ? c.preferenceWarnings
                 : getTeacherPreferenceWarnings(
-                Array.isArray(c.faculty_ids)
-                  ? c.faculty_ids
-                  : c.faculty_id
-                    ? [c.faculty_id]
-                    : c.faculty
-                      ? [c.faculty?._id || c.faculty]
-                      : [],
+                getComboFacultyIds(c),
                 teacherPreferences,
                 day,
                 hour,

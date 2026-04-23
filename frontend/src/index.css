@@ -11,3 +11,23 @@ html {
 body {
   margin: 0;
 }
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.loading-message {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(56, 93, 166, 0.12);
+  color: #16325c;
+  border: 1px solid rgba(56, 93, 166, 0.2);
+  font-weight: 600;
+}

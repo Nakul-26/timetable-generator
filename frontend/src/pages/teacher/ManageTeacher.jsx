@@ -10,6 +10,7 @@ const ManageTeacher = () => {
   const [excelMessage, setExcelMessage] = useState("");
   const [excelError, setExcelError] = useState("");
   const [uploadingExcel, setUploadingExcel] = useState(false);
+  const [mutationMessage, setMutationMessage] = useState("");
   const fileInputRef = useRef(null);
 
   // Edit form states
@@ -181,11 +182,14 @@ const ManageTeacher = () => {
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this teacher?")) return;
+    setMutationMessage("Deleting teacher. Please wait...");
     try {
       await API.delete(`/faculties/${id}`);
       refetchData(['faculties']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
     }
   };
 
@@ -197,6 +201,7 @@ const ManageTeacher = () => {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    setMutationMessage("Saving teacher changes. Please wait...");
     try {
       const updatedTeacher = { name: editName, id: editFacultyId };
       await API.put(`/faculties/${editId}`, updatedTeacher);
@@ -207,6 +212,8 @@ const ManageTeacher = () => {
       refetchData(['faculties']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
     }
   };
 
@@ -248,6 +255,8 @@ const ManageTeacher = () => {
         onChange={handleExcelUpload}
       />
 
+      {uploadingExcel ? <div className="success-message">Uploading teachers from Excel. Please wait...</div> : null}
+      {mutationMessage ? <div className="loading-message">{mutationMessage}</div> : null}
       {excelMessage ? <div className="success-message">{excelMessage}</div> : null}
       {excelError ? <div className="error-message">{excelError}</div> : null}
 
@@ -341,12 +350,14 @@ const ManageTeacher = () => {
                         <button
                           onClick={handleEditSubmit}
                           className="primary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
-                          Save
+                          {mutationMessage ? "Working..." : "Save"}
                         </button>
                         <button
                           onClick={() => setEditId(null)}
                           className="secondary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
                           Cancel
                         </button>
@@ -356,14 +367,16 @@ const ManageTeacher = () => {
                         <button
                           onClick={() => handleEdit(teacher)}
                           className="primary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDelete(teacher._id)}
                           className="danger-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
-                          Delete
+                          {mutationMessage ? "Working..." : "Delete"}
                         </button>
                       </div>
                     )}

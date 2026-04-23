@@ -782,7 +782,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         1,
         int(configured_time_limit // max(5.0, min_solver_time_per_attempt_sec)),
     )
-    max_attempts = 10
+    max_attempts = max(12, budget_driven_attempt_cap)
     strategy_templates = [
         {
             "name": "strict",

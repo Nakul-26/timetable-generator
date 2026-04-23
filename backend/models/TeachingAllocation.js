@@ -27,6 +27,12 @@ const TeachingAllocationSchema = new Schema(
       ref: "Faculty",
       default: null,
     },
+    teachers: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "Faculty",
+      },
+    ],
     hoursPerWeek: {
       type: Number,
       required: true,

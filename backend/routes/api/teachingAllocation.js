@@ -19,6 +19,7 @@ protectedRouter.get("/teaching-allocations", async (req, res) => {
       .populate("classIds", "name id sem section")
       .populate("subject", "name id type")
       .populate("teacher", "name id")
+      .populate("teachers", "name id")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -29,6 +30,11 @@ protectedRouter.get("/teaching-allocations", async (req, res) => {
         class: Array.isArray(item.classIds) && item.classIds.length === 1 ? item.classIds[0] : null,
         subject: item.subject,
         teacher: item.teacher,
+        teachers: Array.isArray(item.teachers) && item.teachers.length > 0
+          ? item.teachers
+          : item.teacher
+            ? [item.teacher]
+            : [],
         hoursPerWeek: item.hoursPerWeek,
         combinedClassGroupId: item.combinedClassGroupId || null,
         isCombined: Array.isArray(item.classIds) && item.classIds.length > 1,
@@ -51,8 +57,13 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
         : [];
     const classIds = [...new Set(classIdsRaw.map(toId).filter(Boolean))];
     const subjectId = toId(req.body.subjectId);
-    const teacherId = toId(req.body.teacherId);
-    const normalizedTeacherId = teacherId || null;
+    const teacherIdsRaw = Array.isArray(req.body.teacherIds)
+      ? req.body.teacherIds
+      : req.body.teacherId
+        ? [req.body.teacherId]
+        : [];
+    const teacherIds = [...new Set(teacherIdsRaw.map(toId).filter(Boolean))];
+    const normalizedTeacherId = teacherIds[0] || null;
     const hoursPerWeek = Number(req.body.hoursPerWeek);
     const combinedClassGroupIdRaw = String(req.body.combinedClassGroupId || "").trim();
     const combinedClassGroupId = combinedClassGroupIdRaw || null;
@@ -65,30 +76,39 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       return res.status(400).json({ error: "combinedClassGroupId is required for combined classes." });
     }
 
-    const [classes, subject, teacher] = await Promise.all([
+    const [, subject] = await Promise.all([
       validateOwnershipMany(ClassModel, classIds, req.collegeId, "classIds"),
       validateOwnership(Subject, subjectId, req.collegeId, "Subject"),
-      normalizedTeacherId
-        ? validateOwnership(Faculty, normalizedTeacherId, req.collegeId, "Faculty")
-        : Promise.resolve(null),
+      teacherIds.length > 0
+        ? validateOwnershipMany(Faculty, teacherIds, req.collegeId, "teacherIds")
+        : Promise.resolve([]),
     ]);
 
     const subjectType = String(subject.type || "").toLowerCase();
     const requiresTeacher = subjectType !== "no_teacher";
+    const isLab = subjectType === "lab";
 
-    if (!requiresTeacher && normalizedTeacherId) {
+    if (!requiresTeacher && teacherIds.length > 0) {
       return res.status(400).json({ error: "No-teacher subjects must not have a teacher assigned." });
     }
 
-    if (requiresTeacher && !normalizedTeacherId) {
-      return res.status(400).json({ error: "teacherId is required for non no-teacher subjects." });
+    if (requiresTeacher && teacherIds.length === 0) {
+      return res.status(400).json({ error: "teacherIds is required for non no-teacher subjects." });
+    }
+
+    if (teacherIds.length > 1 && !isLab) {
+      return res.status(400).json({ error: "Multiple teachers in one combo are allowed only for lab subjects." });
     }
 
     if (requiresTeacher) {
-      await TeacherSubjectCombination.findOneAndUpdate(
-        { faculty: normalizedTeacherId, subject: subjectId, collegeId: req.collegeId },
-        { $setOnInsert: { faculty: normalizedTeacherId, subject: subjectId, collegeId: req.collegeId } },
-        { new: true, upsert: true }
+      await Promise.all(
+        teacherIds.map((teacherId) =>
+          TeacherSubjectCombination.findOneAndUpdate(
+            { faculty: teacherId, subject: subjectId, collegeId: req.collegeId },
+            { $setOnInsert: { faculty: teacherId, subject: subjectId, collegeId: req.collegeId } },
+            { new: true, upsert: true }
+          )
+        )
       );
     }
 
@@ -101,7 +121,7 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       if (requiresTeacher) {
         await ClassModel.findOneAndUpdate({ _id: classId, collegeId: req.collegeId }, {
           $addToSet: {
-            faculties: normalizedTeacherId,
+            faculties: { $each: teacherIds },
           },
         });
       }
@@ -112,6 +132,7 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       classIds,
       subject: subjectId,
       teacher: normalizedTeacherId,
+      teachers: teacherIds,
       hoursPerWeek,
       combinedClassGroupId,
     });
@@ -120,6 +141,7 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       .populate("classIds", "name id sem section")
       .populate("subject", "name id type")
       .populate("teacher", "name id")
+      .populate("teachers", "name id")
       .lean();
 
     res.status(201).json({

@@ -11,6 +11,7 @@ function ManageClass() {
   const [excelMessage, setExcelMessage] = useState("");
   const [excelError, setExcelError] = useState("");
   const [uploadingExcel, setUploadingExcel] = useState(false);
+  const [mutationMessage, setMutationMessage] = useState("");
   const fileInputRef = useRef(null);
 
   // State for the assignment modal
@@ -193,11 +194,14 @@ function ManageClass() {
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this class?")) return;
+    setMutationMessage("Deleting class. Please wait...");
     try {
       await api.delete(`/classes/${id}`);
       refetchData(['classes']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
     }
   };
 
@@ -212,6 +216,7 @@ function ManageClass() {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    setMutationMessage("Saving class changes. Please wait...");
     try {
       const updatedData = {
         name: editName,
@@ -225,6 +230,8 @@ function ManageClass() {
       refetchData(['classes']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
     }
   };
 
@@ -267,6 +274,8 @@ function ManageClass() {
         onChange={handleExcelUpload}
       />
 
+      {uploadingExcel ? <div className="success-message">Uploading classes from Excel. Please wait...</div> : null}
+      {mutationMessage ? <div className="loading-message">{mutationMessage}</div> : null}
       {excelMessage ? <div className="success-message">{excelMessage}</div> : null}
       {excelError ? <div className="error-message">{excelError}</div> : null}
 
@@ -395,35 +404,38 @@ function ManageClass() {
                   <td className="actions-cell">
                     {editId === classItem._id ? (
                       <div className="actions-buttons">
-                        <button onClick={handleEditSubmit} className="primary-btn">
-                          Save
+                        <button onClick={handleEditSubmit} className="primary-btn" disabled={Boolean(mutationMessage)}>
+                          {mutationMessage ? "Working..." : "Save"}
                         </button>
                         <button
                           onClick={() => setEditId(null)}
                           className="secondary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
                           Cancel
                         </button>
                       </div>
                     ) : (
                       <div className="actions-buttons">
-                        {/* <button
+                        <button
                           onClick={() => handleOpenModal(classItem)}
                           className="secondary-btn"
                         >
                           Assignments
-                        </button> */}
+                        </button>
                         <button
                           onClick={() => handleEdit(classItem)}
                           className="primary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDelete(classItem._id)}
                           className="danger-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
-                          Delete
+                          {mutationMessage ? "Working..." : "Delete"}
                         </button>
                       </div>
                     )}

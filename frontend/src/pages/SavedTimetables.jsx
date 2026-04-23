@@ -6,6 +6,7 @@ const SavedTimetables = () => {
     const [timetables, setTimetables] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [actionMessage, setActionMessage] = useState('');
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -35,12 +36,14 @@ const SavedTimetables = () => {
     }
 
     const handleViewClick = (id) => {
+        setActionMessage('Opening timetable editor. Please wait...');
         navigate(`/timetable/${id}`);
     };
 
     return (
         <div className="manage-container">
             <h2>Saved Timetables</h2>
+            {actionMessage ? <div className="loading-message" style={{ marginBottom: 12 }}>{actionMessage}</div> : null}
             {timetables.length === 0 ? (
                 <p>No saved timetables found.</p>
             ) : (
@@ -73,7 +76,10 @@ const SavedTimetables = () => {
                                     {(tt.source === 'generator' || tt.status === 'generated') && (
                                         <button
                                             className="secondary-btn"
-                                            onClick={() => navigate(`/manual-timetable?sourceTimetableId=${tt._id}`)}
+                                            onClick={() => {
+                                                setActionMessage('Opening timetable editor. Please wait...');
+                                                navigate(`/manual-timetable?sourceTimetableId=${tt._id}`);
+                                            }}
                                             style={{ marginLeft: '8px' }}
                                         >
                                             Edit

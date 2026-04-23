@@ -16,6 +16,23 @@ import {
 /* ---------------- Slot Utilities ---------------- */
 /* ------------------------------------------------ */
 
+function isLabCombo(combo) {
+  return String(combo?.subjectType || combo?.subject?.type || combo?.subject_type || combo?.type || "").toLowerCase() === "lab";
+}
+
+async function slotHasSubject({ state, classId, day, hour, subjectId, excludeComboId = null }) {
+  const comboIds = state.classTimetable?.[classId]?.[day]?.[hour] || [];
+  if (!Array.isArray(comboIds) || comboIds.length === 0) return false;
+
+  const combos = await resolveCombosFromState(
+    state,
+    excludeComboId
+      ? comboIds.filter((id) => String(id) !== String(excludeComboId))
+      : comboIds
+  );
+  return combos.some((combo) => String(combo.subjectId) === String(subjectId));
+}
+
 export async function clearSlot({ classId, day, hour, state }) {
   const {
     classTimetable,
@@ -120,6 +137,7 @@ export async function placeCombo({
     ? combo.classIds
     : [String(classId)];
   let isReplacement = false;
+  let isAdditivePlacement = false;
 
   for (const targetClassId of targetClassIds) {
     if (lockedSlots?.[targetClassId]?.[day]?.[hour]) {
@@ -141,13 +159,24 @@ export async function placeCombo({
       allSubjects.every(s => group.subjects.includes(s)) &&
       allSubjects.length <= group.subjects.length;
 
-    if (!validElective) {
+    const validLabCoTeaching =
+      subjectId &&
+      isLabCombo(combo) &&
+      existing.length > 0 &&
+      existing.every((existingCombo) =>
+        String(existingCombo.subjectId) === String(subjectId) &&
+        isLabCombo(existingCombo)
+      );
+
+    isAdditivePlacement = validElective || validLabCoTeaching;
+
+    if (!isAdditivePlacement) {
       if (combosInSlot.length === 1) {
         isReplacement = true;
         await clearSlot({ classId, day, hour, state: newState });
       } else {
         throw new Error(
-          "Invalid placement: slot full or not part of elective group."
+          "Invalid placement: slot full, not part of an elective group, or not a same-subject lab co-teacher."
         );
       }
     }
@@ -155,7 +184,7 @@ export async function placeCombo({
 
   const remainingHours = computeRemainingHours(classObj, subjectHoursAssigned);
 
-  if (!isReplacement) {
+  if (!isReplacement && !isAdditivePlacement) {
     const c1 = checkClassConstraints(
       classTimetable,
       classObj,
@@ -176,16 +205,18 @@ export async function placeCombo({
       throw new Error("Combined class not found");
     }
     const targetRemainingHours = computeRemainingHours(targetClassObj, subjectHoursAssigned);
-    const c1 = checkClassConstraints(
-      classTimetable,
-      targetClassObj,
-      day,
-      hour,
-      subjectId,
-      targetRemainingHours,
-      { allowHourOverflow: true }
-    );
-    if (!c1.ok) throw new Error(c1.error);
+    if (!isAdditivePlacement) {
+      const c1 = checkClassConstraints(
+        classTimetable,
+        targetClassObj,
+        day,
+        hour,
+        subjectId,
+        targetRemainingHours,
+        { allowHourOverflow: true }
+      );
+      if (!c1.ok) throw new Error(c1.error);
+    }
   }
 
   for (const facultyId of combo.facultyIds) {
@@ -219,8 +250,23 @@ export async function placeCombo({
     teacherTimetable[facultyId][day][hour] = comboId;
   }
   for (const targetClassId of targetClassIds) {
-    subjectHoursAssigned[targetClassId][subjectId] =
-      (subjectHoursAssigned[targetClassId][subjectId] || 0) + 1;
+    if (!subjectHoursAssigned[targetClassId]) {
+      subjectHoursAssigned[targetClassId] = {};
+    }
+
+    const alreadyCountedInSlot = isAdditivePlacement && await slotHasSubject({
+      state: newState,
+      classId: targetClassId,
+      day,
+      hour,
+      subjectId,
+      excludeComboId: comboId,
+    });
+
+    if (!alreadyCountedInSlot) {
+      subjectHoursAssigned[targetClassId][subjectId] =
+        (subjectHoursAssigned[targetClassId][subjectId] || 0) + 1;
+    }
   }
 
   return newState;

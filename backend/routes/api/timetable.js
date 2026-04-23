@@ -29,6 +29,18 @@ if (!SOLVER_BASE_URL) {
 
 const serializeJobStatus = (job) => {
   if (!job) return null;
+  const timeLimitSec = Math.max(
+    0,
+    Number(job?.input?.constraintConfig?.solver?.timeLimitSec) ||
+      Number(job?.payload?.constraintConfig?.solver?.timeLimitSec) ||
+      0
+  );
+  const deadlineAt = timeLimitSec > 0 && job.createdAt
+    ? new Date(new Date(job.createdAt).getTime() + timeLimitSec * 1000)
+    : null;
+  const remainingSec = deadlineAt
+    ? Math.max(0, Math.ceil((deadlineAt.getTime() - Date.now()) / 1000))
+    : null;
   return {
     taskId: String(job._id),
     status: job.status,
@@ -38,8 +50,68 @@ const serializeJobStatus = (job) => {
     result: job.result || null,
     error: job.error || null,
     cancelRequested: Boolean(job.cancel_requested),
+    timeLimitSec,
+    deadlineAt,
+    remainingSec,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+  };
+};
+
+const filterGeneratorDataForSolver = (generatorData) => {
+  const classes = Array.isArray(generatorData?.classes) ? generatorData.classes : [];
+  const combos = Array.isArray(generatorData?.combos) ? generatorData.combos : [];
+
+  const activeClasses = classes.filter((cls) => {
+    const assigned = Array.isArray(cls?.assigned_teacher_subject_combos)
+      ? cls.assigned_teacher_subject_combos.filter(Boolean)
+      : [];
+    return assigned.length > 0;
+  });
+
+  const skippedClasses = classes.filter((cls) => {
+    const assigned = Array.isArray(cls?.assigned_teacher_subject_combos)
+      ? cls.assigned_teacher_subject_combos.filter(Boolean)
+      : [];
+    return assigned.length === 0;
+  });
+
+  const activeClassIds = new Set(activeClasses.map((cls) => String(cls._id)));
+  const activeComboIds = new Set();
+  const activeCombos = [];
+
+  for (const combo of combos) {
+    const classIds = Array.isArray(combo?.class_ids)
+      ? combo.class_ids.map((classId) => String(classId)).filter((classId) => activeClassIds.has(classId))
+      : [];
+
+    if (classIds.length === 0) continue;
+
+    const comboId = String(combo?._id || "");
+    if (comboId) activeComboIds.add(comboId);
+    activeCombos.push({
+      ...combo,
+      class_ids: classIds,
+    });
+  }
+
+  const filteredClasses = activeClasses.map((cls) => {
+    const assigned = Array.isArray(cls?.assigned_teacher_subject_combos)
+      ? cls.assigned_teacher_subject_combos
+          .map((id) => String(id))
+          .filter((id) => activeComboIds.has(id))
+      : [];
+    return {
+      ...cls,
+      assigned_teacher_subject_combos: assigned,
+    };
+  });
+
+  return {
+    ...generatorData,
+    classes: filteredClasses,
+    combos: activeCombos,
+    skippedClasses,
   };
 };
 
@@ -215,18 +287,29 @@ protectedRouter.post('/generate', async (req, res) => {
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
   
       const generatorData = await prepareGeneratorData(req.collegeId);
+      const filteredGeneratorData = filterGeneratorDataForSolver(generatorData);
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
-          generatorData.faculties || []
+          filteredGeneratorData.faculties || []
         ),
-        generatorData.faculties || []
+        filteredGeneratorData.faculties || []
       );
 
       console.log("[POST /generate] Merged constraint config:", mergedConstraintConfig,
 
         "22222222222222222222222222222222222222222222222222222222222222"
       );
+
+      if (filteredGeneratorData.skippedClasses.length > 0) {
+        console.warn(
+          "[POST /generate] Skipping classes without assigned teacher-subject combos:",
+          filteredGeneratorData.skippedClasses.map((cls) => ({
+            classId: String(cls._id),
+            className: cls.name || String(cls._id),
+          }))
+        );
+      }
 
       const normalizedSolutionCount = Math.max(
         1,
@@ -242,6 +325,10 @@ protectedRouter.post('/generate', async (req, res) => {
         input: {
           fixedSlots: fixedSlots || [],
           constraintConfig: mergedConstraintConfig,
+          skippedClasses: filteredGeneratorData.skippedClasses.map((cls) => ({
+            classId: String(cls._id),
+            className: cls.name || String(cls._id),
+          })),
           schedule: {
             daysPerWeek,
             hoursPerDay,
@@ -249,7 +336,7 @@ protectedRouter.post('/generate', async (req, res) => {
         },
         payload: {
           collegeId: req.collegeId,
-          ...generatorData,
+          ...filteredGeneratorData,
           fixedSlots,
           DAYS_PER_WEEK: daysPerWeek,
           HOURS_PER_DAY: hoursPerDay,

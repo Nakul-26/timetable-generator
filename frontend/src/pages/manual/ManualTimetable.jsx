@@ -508,6 +508,7 @@ const ManualTimetable = () => {
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={resetDragPreview}>
       <div className="manage-container manual-page">
+        {isSaving ? <div className="loading-message" style={{ marginBottom: 12 }}>Saving timetable. Please wait...</div> : null}
         <div className="manual-header">
           <h1>{isEditingGeneratedTimetable ? 'Edit Generated Timetable' : 'Manual Timetable Generator'}</h1>
           {sourceTimetableMeta && (isEditingGeneratedTimetable ? (

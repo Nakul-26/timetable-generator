@@ -465,7 +465,7 @@ function Timetable() {
   }, [progress]);
 
   useEffect(() => {
-    if (!loading || !solverDeadlineAt) {
+    if (!solverDeadlineAt || (!loading && !taskId)) {
       setSolverRemainingSec(null);
       return;
     }
@@ -478,7 +478,7 @@ function Timetable() {
     updateRemaining();
     const timerId = window.setInterval(updateRemaining, 1000);
     return () => window.clearInterval(timerId);
-  }, [loading, solverDeadlineAt]);
+  }, [loading, solverDeadlineAt, taskId]);
 
   useEffect(() => {
     if (!loading) {
@@ -650,9 +650,17 @@ function Timetable() {
       error: jobError,
       partialData,
       cancelRequested,
+      deadlineAt,
     } = generationStatusQuery.data;
 
     if (!status) return;
+
+    if (deadlineAt) {
+      const nextDeadline = new Date(deadlineAt).getTime();
+      if (Number.isFinite(nextDeadline) && nextDeadline > 0) {
+        setSolverDeadlineAt(nextDeadline);
+      }
+    }
 
     if (generationStatusQuery.isFetched) {
       setError("");
@@ -847,19 +855,6 @@ function Timetable() {
     }
   };
 
-  const deleteAllTimetables = async () => {
-    setLoading(true);
-    try {
-      await api.delete("/timetables");
-      setTimetable(null);
-      setTimetableOptions([]);
-      setSelectedOptionId("");
-    } catch {
-      setError("Failed to delete timetables.");
-    }
-    setLoading(false);
-  };
-
   const handleSelectOption = (optionId) => {
     const option = timetableOptions.find((item) => String(item.optionId) === String(optionId));
     if (!option) return;
@@ -911,16 +906,8 @@ function Timetable() {
     }
   };
     
-          const regenerateTimetable = async () => {
-            try {
-              await generateTimetable();
-            } catch {
-              setError("Failed to regenerate timetable.");
-            }
-          };
-        
-          /* ===================== HELPERS ===================== */
-        
+  /* ===================== HELPERS ===================== */
+
   const getClassName = id => {
     const cls = classById.get(String(id));
     if (!cls) return id;
@@ -1376,6 +1363,13 @@ function Timetable() {
     Boolean(taskId) ||
     (loading && progressPhase !== "idle") ||
     progressPhase === "reconnecting";
+  const visibleProgress = Math.max(0, Math.min(100, Number(progress || 0)));
+  const visibleRemainingSec =
+    solverRemainingSec != null
+      ? solverRemainingSec
+      : generationStatusQuery.data?.remainingSec != null
+        ? Number(generationStatusQuery.data.remainingSec)
+        : null;
 
   const formatGenerationStatusLabel = (value) =>
     String(value || "unknown")
@@ -1394,17 +1388,6 @@ function Timetable() {
   return (
     <div className="manage-container">
       <h2>Timetable Generator</h2>
-
-      {loading && (
-        <div className="tt-progress-wrap">
-          <progress value={progress} max="100" className="tt-progress-bar" />
-          <span>{Math.round(progress)}%</span>
-          <span>{getProgressMessage()}</span>
-          {solverRemainingSec != null && (
-            <span>Time Left: {formatCountdown(solverRemainingSec)}</span>
-          )}
-        </div>
-      )}
 
       {showGenerationCard ? (
         <div className="tt-job-card">
@@ -1430,10 +1413,18 @@ function Timetable() {
           <div className="filters-container">
             <span>Status: {formatGenerationStatusLabel(currentGenerationStatus)}</span>
             <span>Phase: {formatGenerationStatusLabel(currentGenerationPhase)}</span>
-            <span>Progress: {Math.round(progress)}%</span>
-            {solverRemainingSec != null ? (
-              <span>Time Left: {formatCountdown(solverRemainingSec)}</span>
+            <span>Progress: {Math.round(visibleProgress)}%</span>
+            {visibleRemainingSec != null ? (
+              <span>Time Left: {formatCountdown(visibleRemainingSec)}</span>
             ) : null}
+          </div>
+          <div className="tt-progress-wrap">
+            <progress value={visibleProgress} max="100" className="tt-progress-bar" />
+            <span>{Math.round(visibleProgress)}%</span>
+            <span>{getProgressMessage()}</span>
+            {visibleRemainingSec != null && (
+              <span>Time Left: {formatCountdown(visibleRemainingSec)}</span>
+            )}
           </div>
           {generationStatusQuery.data?.updatedAt ? (
             <p className="tt-subtext">

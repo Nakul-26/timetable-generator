@@ -10,12 +10,19 @@ const ManageClassSubject = () => {
     const [addHours, setAddHours] = useState("");
     const [filterClass, setFilterClass] = useState(null);
     const [filterSubject, setFilterSubject] = useState(null);
+    const [savingBulk, setSavingBulk] = useState(false);
+    const [bulkMessage, setBulkMessage] = useState("");
+    const [bulkError, setBulkError] = useState("");
+    const [mutationMessage, setMutationMessage] = useState("");
 
     const handleAdd = async (e) => {
         e.preventDefault();
         if (addClasses.length === 0 || addSubjects.length === 0 || !addHours) {
             return;
         }
+        setSavingBulk(true);
+        setBulkMessage("");
+        setBulkError("");
         try {
             const promises = [];
             addClasses.forEach(classItem => {
@@ -35,18 +42,24 @@ const ManageClassSubject = () => {
             setAddClasses([]);
             setAddSubjects([]);
             setAddHours("");
+            setBulkMessage(`Assignments saved. Added ${promises.length} class-subject link(s).`);
         } catch (err) {
-            console.log(`Error: ${err.message}`);
+            setBulkError(err?.response?.data?.error || err?.message || "Failed to save class-subject assignments.");
+        } finally {
+            setSavingBulk(false);
         }
     };
 
     const handleDelete = async (assignmentId) => {
         if (!window.confirm("Are you sure you want to delete this assignment?")) return;
+        setMutationMessage("Deleting class-subject assignment. Please wait...");
         try {
             await api.delete(`/class-subjects/${assignmentId}`);
             refetchData(['class-subjects']);
         } catch (err) {
             console.log(`Error: ${err.message}`);
+        } finally {
+            setMutationMessage("");
         }
     };
 
@@ -86,7 +99,13 @@ const ManageClassSubject = () => {
                     onChange={(e) => setAddHours(e.target.value)}
                     placeholder="Hours per week"
                 />
-                <button type="submit" className="primary-btn">Add</button>
+                <button type="submit" className="primary-btn" disabled={savingBulk}>
+                    {savingBulk ? "Saving..." : "Add"}
+                </button>
+                {savingBulk ? <div className="success-message">Saving class-subject assignments. Please wait...</div> : null}
+                {mutationMessage ? <div className="loading-message">{mutationMessage}</div> : null}
+                {bulkMessage ? <div className="success-message">{bulkMessage}</div> : null}
+                {bulkError ? <div className="error-message">{bulkError}</div> : null}
                 {error && <div className="error-message">{error}</div>}
             </form>
 
@@ -127,7 +146,9 @@ const ManageClassSubject = () => {
                                 <td>{assignment.subject?.name}</td>
                                 <td>{assignment.hoursPerWeek}</td>
                                 <td>
-                                    <button onClick={() => handleDelete(assignment._id)} className="danger-btn">Delete</button>
+                                    <button onClick={() => handleDelete(assignment._id)} className="danger-btn" disabled={Boolean(mutationMessage)}>
+                                        {mutationMessage ? "Working..." : "Delete"}
+                                    </button>
                                 </td>
                             </tr>
                         ))}

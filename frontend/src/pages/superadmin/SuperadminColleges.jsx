@@ -6,6 +6,7 @@ const SuperadminColleges = () => {
   const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionMessage, setActionMessage] = useState("");
 
   useEffect(() => {
     fetchColleges();
@@ -38,12 +39,15 @@ const SuperadminColleges = () => {
             const code = window.prompt('College code') || '';
             const collegeId = window.prompt('College ID (unique)') || '';
             try {
+              setActionMessage("Creating college. Please wait...");
               await axios.post('/superadmin/colleges', { name, code, collegeId });
               fetchColleges();
             } catch (err) { alert(err?.response?.data?.error || 'Create failed'); }
+            finally { setActionMessage(""); }
           }}>New college</button>
         </div>
       </div>
+      {actionMessage ? <div className="loading-message" style={{ marginBottom: 12 }}>{actionMessage}</div> : null}
       <div className="colleges-list">
         <h2>Colleges</h2>
         {colleges.length === 0 ? (
@@ -62,14 +66,21 @@ const SuperadminColleges = () => {
                     const code = window.prompt('New code', college.code) || college.code;
                     const cid = window.prompt('New collegeId', college.collegeId) || college.collegeId;
                     try {
+                      setActionMessage("Updating college. Please wait...");
                       await axios.put(`/superadmin/colleges/${college._id}`, { name, code, collegeId: cid });
                       fetchColleges();
                     } catch (err) { alert(err?.response?.data?.error || 'Update failed'); }
+                    finally { setActionMessage(""); }
                   }}>Edit</button>
                   <button className="btn btn-delete" onClick={async () => {
                     if (!confirm('Delete this college? This cannot be undone.')) return;
-                    try { await axios.delete(`/superadmin/colleges/${college._id}`); fetchColleges(); }
+                    try {
+                      setActionMessage("Deleting college. Please wait...");
+                      await axios.delete(`/superadmin/colleges/${college._id}`);
+                      fetchColleges();
+                    }
                     catch (err) { alert(err?.response?.data?.error || 'Delete failed'); }
+                    finally { setActionMessage(""); }
                   }}>Delete</button>
                 </div>
               </div>

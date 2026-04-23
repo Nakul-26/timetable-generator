@@ -9,12 +9,19 @@ const ManageClassFaculty = () => {
     const [addFaculties, setAddFaculties] = useState([]);
     const [filterClass, setFilterClass] = useState(null);
     const [filterFaculty, setFilterFaculty] = useState(null);
+    const [savingBulk, setSavingBulk] = useState(false);
+    const [bulkMessage, setBulkMessage] = useState("");
+    const [bulkError, setBulkError] = useState("");
+    const [mutationMessage, setMutationMessage] = useState("");
 
     const handleAdd = async (e) => {
         e.preventDefault();
         if (addClasses.length === 0 || !addFaculties || addFaculties.length === 0) {
             return;
         }
+        setSavingBulk(true);
+        setBulkMessage("");
+        setBulkError("");
         try {
             const addPromises = [];
             addClasses.forEach(classItem => {
@@ -28,18 +35,24 @@ const ManageClassFaculty = () => {
             setAddClasses([]);
             setAddFaculties([]);
             refetchData(['classes']);
+            setBulkMessage(`Assignments saved. Added ${addPromises.length} class-faculty link(s).`);
         } catch (err) {
-            console.log(`Error: ${err.message}`);
+            setBulkError(err?.response?.data?.error || err?.message || "Failed to save class-faculty assignments.");
+        } finally {
+            setSavingBulk(false);
         }
     };
 
     const handleDelete = async (classId, facultyId) => {
         if (!window.confirm("Are you sure you want to delete this assignment?")) return;
+        setMutationMessage("Deleting class-faculty assignment. Please wait...");
         try {
             await api.delete(`/classes/${classId}/faculties/${facultyId}`);
             refetchData(['classes']);
         } catch (err) {
             console.log(`Error: ${err.message}`);
+        } finally {
+            setMutationMessage("");
         }
     };
 
@@ -74,7 +87,13 @@ const ManageClassFaculty = () => {
                     placeholder="Select Faculties"
                     isMulti
                 />
-                <button type="submit" className="primary-btn">Add</button>
+                <button type="submit" className="primary-btn" disabled={savingBulk}>
+                    {savingBulk ? "Saving..." : "Add"}
+                </button>
+                {savingBulk ? <div className="success-message">Saving class-faculty assignments. Please wait...</div> : null}
+                {mutationMessage ? <div className="loading-message">{mutationMessage}</div> : null}
+                {bulkMessage ? <div className="success-message">{bulkMessage}</div> : null}
+                {bulkError ? <div className="error-message">{bulkError}</div> : null}
                 {error && <div className="error-message">{error}</div>}
             </form>
 
@@ -113,7 +132,9 @@ const ManageClassFaculty = () => {
                                 <td>{c.name}</td>
                                 <td>{f.name}</td>
                                 <td>
-                                    <button onClick={() => handleDelete(c._id, f._id)} className="danger-btn">Delete</button>
+                                    <button onClick={() => handleDelete(c._id, f._id)} className="danger-btn" disabled={Boolean(mutationMessage)}>
+                                        {mutationMessage ? "Working..." : "Delete"}
+                                    </button>
                                 </td>
                             </tr>
                         ))}

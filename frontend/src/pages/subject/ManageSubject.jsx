@@ -5,11 +5,12 @@ import DataContext from "../../context/DataContext";
 import * as XLSX from "xlsx";
 
 function ManageSubject() {
-  const { subjects, classes, faculties, assignments, combos, loading, error, refetchData } = useContext(DataContext);
+  const { subjects, classes, assignments, combos, loading, error, refetchData } = useContext(DataContext);
   const [editId, setEditId] = useState(null);
   const [excelMessage, setExcelMessage] = useState("");
   const [excelError, setExcelError] = useState("");
   const [uploadingExcel, setUploadingExcel] = useState(false);
+  const [mutationMessage, setMutationMessage] = useState("");
   const fileInputRef = useRef(null);
 
   // Edit states
@@ -227,11 +228,14 @@ function ManageSubject() {
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this subject?")) return;
+    setMutationMessage("Deleting subject. Please wait...");
     try {
       await axios.delete(`/subjects/${id}`);
       refetchData(['subjects']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
     }
   };
 
@@ -256,6 +260,7 @@ function ManageSubject() {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    setMutationMessage("Saving subject changes. Please wait...");
     try {
       const updatedSubject = {
         name: editName,
@@ -275,6 +280,8 @@ function ManageSubject() {
       refetchData();
     } catch (err) {
       console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
     }
   };
 
@@ -309,6 +316,8 @@ function ManageSubject() {
         onChange={handleExcelUpload}
       />
 
+      {uploadingExcel ? <div className="success-message">Uploading subjects from Excel. Please wait...</div> : null}
+      {mutationMessage ? <div className="loading-message">{mutationMessage}</div> : null}
       {excelMessage ? <div className="success-message">{excelMessage}</div> : null}
       {excelError ? <div className="error-message">{excelError}</div> : null}
 
@@ -467,12 +476,14 @@ function ManageSubject() {
                         <button
                           onClick={handleEditSubmit}
                           className="primary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
-                          Save
+                          {mutationMessage ? "Working..." : "Save"}
                         </button>
                         <button
                           onClick={() => setEditId(null)}
                           className="secondary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
                           Cancel
                         </button>
@@ -482,14 +493,16 @@ function ManageSubject() {
                         <button
                           onClick={() => handleEdit(subject)}
                           className="primary-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDelete(subject._id)}
                           className="danger-btn"
+                          disabled={Boolean(mutationMessage)}
                         >
-                          Delete
+                          {mutationMessage ? "Working..." : "Delete"}
                         </button>
                       </div>
                     )}

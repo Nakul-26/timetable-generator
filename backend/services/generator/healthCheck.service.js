@@ -128,6 +128,20 @@ export function buildConstraintHealthReport({
 
   for (const cls of classes) {
     const classId = String(cls._id);
+    const assignedComboIds = new Set(
+      Array.isArray(cls.assigned_teacher_subject_combos)
+        ? cls.assigned_teacher_subject_combos.map((id) => String(id)).filter(Boolean)
+        : []
+    );
+    if (assignedComboIds.size === 0) {
+      warnings.push({
+        severity: "warning",
+        type: "class_has_no_teacher_subject_combos",
+        message: `Class "${cls.name || classId}" has no teacher-subject combos assigned. It will be skipped during generation.`,
+      });
+      continue;
+    }
+
     const days = Math.max(1, toInt(cls.days_per_week, schedule.daysPerWeek));
     const classCapacity = days * usableSlotsPerDay;
     totalClassCapacity += classCapacity;

@@ -17,6 +17,7 @@ const ManageTeachingAllocations = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [calculating, setCalculating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [calcSummary, setCalcSummary] = useState(null);
 
@@ -29,6 +30,10 @@ const ManageTeachingAllocations = () => {
       const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
       return String(subject?.type || "").toLowerCase() === "no_teacher";
     });
+  const getSubjectType = (subjectId) => {
+    const subject = subjects.find((s) => String(s._id) === String(subjectId));
+    return String(subject?.type || "").toLowerCase();
+  };
 
   const fetchAllocations = async () => {
     setLoading(true);
@@ -57,6 +62,7 @@ const ManageTeachingAllocations = () => {
       const teacherMatch =
         !filterTeacherId ||
         String(item?.teacher?._id) === String(filterTeacherId) ||
+        (item?.teachers || []).some((teacher) => String(teacher?._id) === String(filterTeacherId)) ||
         (!item?.teacher && filterTeacherId === "__none__");
       return classMatch && subjectMatch && teacherMatch;
     });
@@ -118,14 +124,20 @@ const ManageTeachingAllocations = () => {
       const requests = [];
       for (const subject of selectedSubjects) {
         const subjectData = subjects.find((s) => String(s._id) === String(subject.value));
-        const isNoTeacher = String(subjectData?.type || "").toLowerCase() === "no_teacher";
-        const teachersToUse = isNoTeacher ? [null] : selectedTeachers;
-        for (const teacher of teachersToUse) {
+        const subjectType = String(subjectData?.type || "").toLowerCase();
+        const isNoTeacher = subjectType === "no_teacher";
+        const isLab = subjectType === "lab";
+        const teacherGroups = isNoTeacher
+          ? [[]]
+          : isLab
+            ? [selectedTeachers]
+            : selectedTeachers.map((teacher) => [teacher]);
+        for (const teacherGroup of teacherGroups) {
           requests.push(
             api.post("/teaching-allocations", {
               classIds: selectedClasses.map((item) => item.value),
               subjectId: subject.value,
-              teacherId: teacher?.value || null,
+              teacherIds: teacherGroup.map((teacher) => teacher.value),
               hoursPerWeek: Number(hoursPerWeek),
               combinedClassGroupId: selectedClasses.length > 1 ? combinedClassGroupId : null,
             })
@@ -154,6 +166,8 @@ const ManageTeachingAllocations = () => {
 
   const handleDelete = async (item) => {
     if (!window.confirm("Delete this class-subject-teacher allocation?")) return;
+    setDeleting(true);
+    setError("");
     try {
       await api.delete("/teaching-allocations", {
         data: {
@@ -163,6 +177,8 @@ const ManageTeachingAllocations = () => {
       await fetchAllocations();
     } catch (e) {
       setError(e?.response?.data?.error || "Failed to delete allocation.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -202,6 +218,21 @@ const ManageTeachingAllocations = () => {
           {calcSummary.message} Total generated combos: {calcSummary.totalGeneratedCombos}.
         </div>
       ) : null}
+      {calculating ? (
+        <div className="success-message" style={{ marginBottom: 12 }}>
+          Calculating combinations from existing mappings. Please wait...
+        </div>
+      ) : null}
+      {submitting ? (
+        <div className="success-message" style={{ marginBottom: 12 }}>
+          Saving class-subject-teacher combinations. Please wait...
+        </div>
+      ) : null}
+      {deleting ? (
+        <div className="loading-message" style={{ marginBottom: 12 }}>
+          Deleting allocation. Please wait...
+        </div>
+      ) : null}
 
       <form onSubmit={handleAdd} className="add-form cst-combo-form">
         <h3>Add Class - Subject - Teacher Combo</h3>
@@ -238,6 +269,9 @@ const ManageTeachingAllocations = () => {
               isMulti
               isDisabled={allSelectedSubjectsNoTeacher}
             />
+            {!allSelectedSubjectsNoTeacher && selectedSubjects.some((subjectOption) => getSubjectType(subjectOption.value) === "lab") ? (
+              <small>For lab subjects, selected teachers are saved as one co-teaching combo.</small>
+            ) : null}
           </div>
 
           <div className="form-group cst-field cst-hours-field">
@@ -357,14 +391,18 @@ const ManageTeachingAllocations = () => {
                     : item?.class?.name}
                 </td>
                 <td>{item?.subject?.name}</td>
-                <td>{item?.teacher?.name || "No Teacher"}</td>
+                <td>
+                  {(item?.teachers || []).length > 0
+                    ? item.teachers.map((teacher) => teacher?.name).filter(Boolean).join(" + ")
+                    : item?.teacher?.name || "No Teacher"}
+                </td>
                 <td>{item?.hoursPerWeek ?? 0}</td>
                 <td>{item?.combinedClassGroupId || "—"}</td>
                 <td>{item?.subject?.type === "no_teacher" ? "No Teacher" : item?.isLab ? "Lab" : "Theory"}</td>
                 <td>{item?.status || "active"}</td>
                 <td>
-                  <button className="danger-btn" onClick={() => handleDelete(item)}>
-                    Delete
+                  <button className="danger-btn" onClick={() => handleDelete(item)} disabled={deleting || calculating || submitting}>
+                    {deleting ? "Working..." : "Delete"}
                   </button>
                 </td>
               </tr>

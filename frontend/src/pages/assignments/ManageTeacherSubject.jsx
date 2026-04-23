@@ -12,14 +12,21 @@ const ManageTeacherSubject = () => {
     const [filterFaculty, setFilterFaculty] = useState(null);
     const [filterSubject, setFilterSubject] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [savingBulk, setSavingBulk] = useState(false);
+    const [bulkMessage, setBulkMessage] = useState("");
+    const [bulkError, setBulkError] = useState("");
+    const [mutationMessage, setMutationMessage] = useState("");
 
     const handleDelete = async (id) => {
         if (!window.confirm("Are you sure you want to delete this combination?")) return;
+        setMutationMessage("Deleting teacher-subject combination. Please wait...");
         try {
             await API.delete(`/teacher-subject-combos/${id}`);
             refetchData(['teacher-subject-combos']);
         } catch (err) {
             console.log(`Error: ${err.message}`);
+        } finally {
+            setMutationMessage("");
         }
     };
 
@@ -28,6 +35,9 @@ const ManageTeacherSubject = () => {
         if (!selectedSubject || !selectedTeachers || selectedTeachers.length === 0) {
             return;
         }
+        setSavingBulk(true);
+        setBulkMessage("");
+        setBulkError("");
         try {
             const newCombos = selectedTeachers.map(teacher => ({
                 faculty: teacher.value,
@@ -41,8 +51,11 @@ const ManageTeacherSubject = () => {
             refetchData(['teacher-subject-combos']);
             setSelectedTeachers([]);
             setSelectedSubject(null);
+            setBulkMessage(`Combinations saved. Added ${promises.length} teacher-subject combo(s).`);
         } catch (err) {
-            console.log(`Error: ${err.message}`);
+            setBulkError(err?.response?.data?.error || err?.message || "Failed to save teacher-subject combinations.");
+        } finally {
+            setSavingBulk(false);
         }
     };
 
@@ -79,7 +92,13 @@ const ManageTeacherSubject = () => {
                     onChange={setSelectedSubject}
                     placeholder="Select Subject"
                 />
-                <button type="submit" className="primary-btn">Add Combination</button>
+                <button type="submit" className="primary-btn" disabled={savingBulk}>
+                    {savingBulk ? "Saving..." : "Add Combination"}
+                </button>
+                {savingBulk ? <div className="success-message">Saving teacher-subject combinations. Please wait...</div> : null}
+                {mutationMessage ? <div className="loading-message">{mutationMessage}</div> : null}
+                {bulkMessage ? <div className="success-message">{bulkMessage}</div> : null}
+                {bulkError ? <div className="error-message">{bulkError}</div> : null}
             </form>
 
             <h3>Filter Combinations</h3>
@@ -124,8 +143,8 @@ const ManageTeacherSubject = () => {
                                 <td>{combo.faculty?.name}</td>
                                 <td>{combo.subject?.name}</td>
                                 <td>
-                                    <button onClick={() => handleDelete(combo._id)} className="danger-btn">
-                                        Delete
+                                    <button onClick={() => handleDelete(combo._id)} className="danger-btn" disabled={Boolean(mutationMessage)}>
+                                        {mutationMessage ? "Working..." : "Delete"}
                                     </button>
                                 </td>
                             </tr>

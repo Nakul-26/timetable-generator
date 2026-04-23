@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import FacultyManager from '../src/pages/teacher/ManageTeacher';
 import TeacherAvailability from './pages/teacher/TeacherAvailability';
@@ -79,6 +79,25 @@ import './App.css';
 // );
 
 function App() {
+  useEffect(() => {
+    const preventNumberInputScroll = (event) => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLInputElement &&
+        activeElement.type === "number"
+      ) {
+        event.preventDefault();
+        activeElement.blur();
+      }
+    };
+
+    window.addEventListener("wheel", preventNumberInputScroll, { passive: false });
+
+    return () => {
+      window.removeEventListener("wheel", preventNumberInputScroll);
+    };
+  }, []);
+
   return (
     <div className="app-container">
       <Navbar />

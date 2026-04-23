@@ -80,22 +80,30 @@ export function convertNewCollegeInput({
     const explicitAllocations = [];
     for (const combo of teacherSubjectCombos) {
         const subjectIdStr = String(combo.subjectId);
+        const teacherIds = Array.isArray(combo.teacherIds) && combo.teacherIds.length > 0
+            ? combo.teacherIds.map(String)
+            : combo.teacherId
+                ? [String(combo.teacherId)]
+                : [];
         if (Array.isArray(combo.classIds) && combo.classIds.length > 0) {
             explicitAllocations.push({
-                teacherId: combo.teacherId ? String(combo.teacherId) : null,
+                teacherId: teacherIds[0] || null,
+                teacherIds,
                 subjectId: subjectIdStr,
                 classIds: combo.classIds.map(String),
                 hoursPerWeek: Number(combo.hoursPerWeek || 0),
                 combinedClassGroupId: combo.combinedClassGroupId || null,
             });
         }
-        if (!combo.teacherId) {
+        if (teacherIds.length === 0) {
             continue;
         }
         if (!teachersByCategory.has(subjectIdStr)) {
             teachersByCategory.set(subjectIdStr, []);
         }
-        teachersByCategory.get(subjectIdStr).push(String(combo.teacherId));
+        teacherIds.forEach((teacherId) => {
+            teachersByCategory.get(subjectIdStr).push(String(teacherId));
+        });
     }
 
     const subjectsPerClass = {}, teachersPerClass = {}, hoursPerClassSubject = {};
@@ -179,12 +187,13 @@ export function convertNewCollegeInput({
         const hoursRequired = Number(allocation.hoursPerWeek || 0);
         if (hoursRequired <= 0) continue;
         classIds.forEach((classId) => explicitCoveredClassSubjectKeys.add(`${classId}|${subjectId}`));
-        const key = `${allocation.teacherId}|${subjectId}|${classIds.join(",")}|${allocation.combinedClassGroupId || ""}`;
+        const facultyIds = [...new Set((allocation.teacherIds || []).map(String))].sort();
+        const key = `${facultyIds.join("+")}|${subjectId}|${classIds.join(",")}|${allocation.combinedClassGroupId || ""}`;
         if (explicitAllocationKeys.has(key)) continue;
         explicitAllocationKeys.add(key);
         combos.push({
             _id: "C" + comboIndex++,
-            faculty_ids: allocation.teacherId ? [String(allocation.teacherId)] : [],
+            faculty_ids: facultyIds,
             subject_id: subjectId,
             subject: buildComboSubject(subjectId),
             class_ids: classIds,
@@ -193,8 +202,8 @@ export function convertNewCollegeInput({
             hours_per_class: Object.fromEntries(classIds.map((classId) => [classId, hoursRequired])),
             combo_name: allocation.combinedClassGroupId
                 ? `GROUP_${allocation.combinedClassGroupId}`
-                : allocation.teacherId
-                    ? `T${allocation.teacherId}_S${subjectId}_C${classIds.join("_")}`
+                : facultyIds.length > 0
+                    ? `T${facultyIds.join("_")}_S${subjectId}_C${classIds.join("_")}`
                     : `NT_S${subjectId}_C${classIds.join("_")}`
         });
     }

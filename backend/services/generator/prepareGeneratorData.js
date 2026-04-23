@@ -41,9 +41,14 @@ export async function prepareGeneratorData(collegeId) {
 
   teachingAllocations.forEach((allocation) => {
     const classIds = (allocation.classIds || []).map((classId) => String(classId));
-    const teacherId = allocation.teacher ? String(allocation.teacher) : null;
+    const teacherIds = Array.isArray(allocation.teachers) && allocation.teachers.length > 0
+      ? allocation.teachers.map((teacherId) => String(teacherId))
+      : allocation.teacher
+        ? [String(allocation.teacher)]
+        : [];
     teacherSubjectCombos.push({
-      teacherId,
+      teacherId: teacherIds[0] || null,
+      teacherIds,
       subjectId: allocation.subject,
       classIds,
       hoursPerWeek: allocation.hoursPerWeek,
@@ -57,7 +62,7 @@ export async function prepareGeneratorData(collegeId) {
         subjectId: allocation.subject,
         hoursPerWeek: allocation.hoursPerWeek,
       });
-      if (teacherId) {
+      for (const teacherId of teacherIds) {
         explicitClassTeacherKeys.add(`${classId}|${teacherId}`);
         classTeachers.push({ classId, teacherId });
       }

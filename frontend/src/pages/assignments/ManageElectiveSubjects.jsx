@@ -9,6 +9,8 @@ const ManageElectiveSubjects = () => {
     const [subjectsForClass, setSubjectsForClass] = useState([]);
     // New state structure: { subjectId: { required_subject_id: count } }
     const [electiveSettings, setElectiveSettings] = useState({});
+    const [saving, setSaving] = useState(false);
+    const [statusMessage, setStatusMessage] = useState("");
 
     // Memoize the count of teachers who can teach each subject (for validation)
     const teacherCountPerSubject = useMemo(() => {
@@ -106,6 +108,8 @@ const ManageElectiveSubjects = () => {
         }
 
         try {
+            setSaving(true);
+            setStatusMessage("Saving elective settings. Please wait...");
             await api.post('/elective-settings', {
                 classId: selectedClass,
                 settings: settingsToSave
@@ -114,6 +118,9 @@ const ManageElectiveSubjects = () => {
         } catch (error) {
             console.error('Error saving elective settings:', error);
             alert('Failed to save settings.');
+        } finally {
+            setSaving(false);
+            setStatusMessage("");
         }
     };
 
@@ -208,13 +215,14 @@ const ManageElectiveSubjects = () => {
                                 })}
                             </div>
                             <div className="elective-save-row">
-                                <button onClick={handleSave} className="primary-btn">
-                                    Save Settings
+                                <button onClick={handleSave} className="primary-btn" disabled={saving}>
+                                    {saving ? "Saving..." : "Save Settings"}
                                 </button>
-                                <button onClick={handleCancel} className="secondary-btn">
+                                <button onClick={handleCancel} className="secondary-btn" disabled={saving}>
                                     Cancel
                                 </button>
                             </div>
+                            {statusMessage ? <div className="loading-message">{statusMessage}</div> : null}
                         </>
                     )}
                 </div>
