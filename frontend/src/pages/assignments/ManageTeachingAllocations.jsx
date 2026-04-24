@@ -3,6 +3,19 @@ import Select from "react-select";
 import api from "../../api/axios";
 import DataContext from "../../context/DataContext";
 
+const resolveSelectedHours = (selectedSubjectItems, subjects) => {
+  if (!selectedSubjectItems.length) return "";
+  const values = selectedSubjectItems
+    .map((item) => {
+      const subject = subjects.find((s) => String(s._id) === String(item.value));
+      const parsed = Number(subject?.classesPerWeek);
+      return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+    });
+  if (values.some((value) => value === null)) return "";
+  const uniqueValues = [...new Set(values)];
+  return uniqueValues.length === 1 ? String(uniqueValues[0]) : "";
+};
+
 const ManageTeachingAllocations = () => {
   const { classes, subjects, faculties } = useContext(DataContext);
 
@@ -34,6 +47,10 @@ const ManageTeachingAllocations = () => {
     const subject = subjects.find((s) => String(s._id) === String(subjectId));
     return String(subject?.type || "").toLowerCase();
   };
+
+  useEffect(() => {
+    setHoursPerWeek(resolveSelectedHours(selectedSubjects, subjects));
+  }, [selectedSubjects, subjects]);
 
   const fetchAllocations = async () => {
     setLoading(true);
@@ -100,10 +117,9 @@ const ManageTeachingAllocations = () => {
     if (
       selectedClasses.length === 0 ||
       selectedSubjects.length === 0 ||
-      (!allSelectedSubjectsNoTeacher && selectedTeachers.length === 0) ||
-      Number(hoursPerWeek) < 1
+      (!allSelectedSubjectsNoTeacher && selectedTeachers.length === 0)
     ) {
-      setError("Please select at least one class, subject, and valid hours/week. Teachers are optional only for no-teacher subjects.");
+      setError("Please select at least one class and subject. Teachers are optional only for no-teacher subjects.");
       return;
     }
     if (!allSelectedSubjectsNoTeacher && selectedSubjects.some((subjectOption) => {
@@ -138,7 +154,7 @@ const ManageTeachingAllocations = () => {
               classIds: selectedClasses.map((item) => item.value),
               subjectId: subject.value,
               teacherIds: teacherGroup.map((teacher) => teacher.value),
-              hoursPerWeek: Number(hoursPerWeek),
+              hoursPerWeek: hoursPerWeek === "" ? undefined : Number(hoursPerWeek),
               combinedClassGroupId: selectedClasses.length > 1 ? combinedClassGroupId : null,
             })
           );
@@ -283,7 +299,6 @@ const ManageTeachingAllocations = () => {
               placeholder="Hours per week"
               value={hoursPerWeek}
               onChange={(e) => setHoursPerWeek(e.target.value)}
-              required
             />
           </div>
 

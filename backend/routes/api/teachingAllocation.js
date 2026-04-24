@@ -12,6 +12,10 @@ const protectedRouter = Router();
 protectedRouter.use(auth);
 
 const toId = (value) => String(value || "").trim();
+const toPositiveNumber = (value) => {
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) && parsedValue >= 1 ? parsedValue : null;
+};
 
 protectedRouter.get("/teaching-allocations", async (req, res) => {
   try {
@@ -64,12 +68,13 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
         : [];
     const teacherIds = [...new Set(teacherIdsRaw.map(toId).filter(Boolean))];
     const normalizedTeacherId = teacherIds[0] || null;
-    const hoursPerWeek = Number(req.body.hoursPerWeek);
+    const hasRequestedHours = req.body.hoursPerWeek !== undefined && req.body.hoursPerWeek !== null && req.body.hoursPerWeek !== "";
+    const requestedHours = hasRequestedHours ? toPositiveNumber(req.body.hoursPerWeek) : null;
     const combinedClassGroupIdRaw = String(req.body.combinedClassGroupId || "").trim();
     const combinedClassGroupId = combinedClassGroupIdRaw || null;
 
-    if (classIds.length === 0 || !subjectId || !Number.isFinite(hoursPerWeek) || hoursPerWeek < 1) {
-      return res.status(400).json({ error: "classIds, subjectId and valid hoursPerWeek are required." });
+    if (classIds.length === 0 || !subjectId) {
+      return res.status(400).json({ error: "classIds and subjectId are required." });
     }
 
     if (classIds.length > 1 && !combinedClassGroupId) {
@@ -87,6 +92,15 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     const subjectType = String(subject.type || "").toLowerCase();
     const requiresTeacher = subjectType !== "no_teacher";
     const isLab = subjectType === "lab";
+    if (hasRequestedHours && !requestedHours) {
+      return res.status(400).json({ error: "hoursPerWeek must be a positive number." });
+    }
+    const subjectDefaultHours = toPositiveNumber(subject.classesPerWeek);
+    const hoursPerWeek = requestedHours ?? subjectDefaultHours;
+
+    if (!hoursPerWeek) {
+      return res.status(400).json({ error: "classIds, subjectId and valid hoursPerWeek are required unless the subject has a default classesPerWeek value." });
+    }
 
     if (!requiresTeacher && teacherIds.length > 0) {
       return res.status(400).json({ error: "No-teacher subjects must not have a teacher assigned." });

@@ -30,6 +30,11 @@ const SubjectSchema = new Schema(
       enum: ["theory", "lab", "no_teacher"],
       required: true,
     },
+    classesPerWeek: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
     combined_classes: {
       type: [String], // keep as String if you are using class codes
       default: [],

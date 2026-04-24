@@ -125,6 +125,12 @@ async function callCpSatSolver({
         class_timetables: {},
         faculty_timetables: {},
         classes: classes || [],
+        reason: data?.reason || null,
+        hint: data?.hint || null,
+        diagnostics: data?.diagnostics || null,
+        solver_stats: data?.solver_stats || null,
+        unmet_requirements: data?.unmet_requirements || [],
+        warnings: data?.warnings || [],
         config: constraintConfig || {},
       };
     }
@@ -136,9 +142,14 @@ async function callCpSatSolver({
         class_timetables: data.class_timetables || {},
         faculty_timetables: data.faculty_timetables || {},
         classes: data.classes || classes || [],
+        reason: data.reason || null,
+        hint: data.hint || null,
+        diagnostics: data.diagnostics || null,
+        solver_stats: data.solver_stats || null,
         unmet_requirements: data.unmet_requirements || [],
         warnings: data.warnings || [],
         config: data.config || constraintConfig || {},
+        preview_stats: data.preview_stats || null,
       };
     }
 
@@ -170,6 +181,12 @@ async function callCpSatSolver({
       class_timetables: {},
       faculty_timetables: {},
       classes: classes || [],
+      reason: err?.reason || null,
+      hint: err?.hint || null,
+      diagnostics: err?.diagnostics || null,
+      solver_stats: err?.solver_stats || null,
+      unmet_requirements: err?.unmet_requirements || [],
+      warnings: err?.warnings || [],
       config: constraintConfig || {},
     };
   } finally {

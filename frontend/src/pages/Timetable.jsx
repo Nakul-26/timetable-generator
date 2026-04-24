@@ -570,19 +570,61 @@ function Timetable() {
 
   const buildGenerationFailureMessage = useCallback((message, report = null) => {
     const baseMessage = String(message || "Generation failed").trim();
-    const normalized = baseMessage.toLowerCase();
-    const looksInfeasible =
-      normalized.includes("infeasible") ||
-      normalized.includes("no valid timetable found") ||
-      normalized.includes("no solution");
-
-    if (!looksInfeasible) return baseMessage;
-
     const healthSummary = summarizeHealthIssues(report);
-    if (!healthSummary) return baseMessage;
-
-    return `${baseMessage}. ${healthSummary}`;
+    return healthSummary ? `${baseMessage}. ${healthSummary}` : baseMessage;
   }, [summarizeHealthIssues]);
+
+  const formatFailureDetails = useCallback((data) => {
+    if (!data || typeof data !== "object") return "";
+
+    const parts = [];
+    const reason = String(data.reason || "").trim();
+    const hint = String(data.hint || "").trim();
+
+    if (reason) {
+      parts.push(`Reason: ${reason}`);
+    }
+    if (hint) {
+      parts.push(`Hint: ${hint}`);
+    }
+
+    const unmet = Array.isArray(data.unmet_requirements)
+      ? data.unmet_requirements
+          .map((item) => {
+            const label = item?.label || item?.name || item?.subject || item?.class || item?.message;
+            const detail = item?.detail || item?.reason || item?.type;
+            if (label && detail) return `${label} (${detail})`;
+            return label || detail || null;
+          })
+          .filter(Boolean)
+          .slice(0, 4)
+      : [];
+
+    if (unmet.length > 0) {
+      parts.push(`Unmet requirements: ${unmet.join("; ")}`);
+    }
+
+    const diagnostics = data.diagnostics;
+    if (diagnostics && typeof diagnostics === "object") {
+      const diagParts = [];
+      if (Array.isArray(diagnostics.blockers) && diagnostics.blockers.length > 0) {
+        diagParts.push(`Blockers: ${diagnostics.blockers.slice(0, 3).join("; ")}`);
+      }
+      if (Array.isArray(diagnostics.issues) && diagnostics.issues.length > 0) {
+        diagParts.push(`Issues: ${diagnostics.issues.slice(0, 3).join("; ")}`);
+      }
+      if (diagnostics.summary && typeof diagnostics.summary === "string") {
+        diagParts.push(diagnostics.summary);
+      }
+      if (diagParts.length > 0) {
+        parts.push(...diagParts);
+      }
+    } else if (Array.isArray(diagnostics) && diagnostics.length > 0) {
+      parts.push(`Diagnostics: ${diagnostics.slice(0, 3).join("; ")}`);
+    }
+
+    return parts.join(" | ");
+  }, []);
 
   const requestHealthCheck = useCallback(async (latestConstraintConfig) => {
     const payload = transformFixedSlots(fixedSlots);
@@ -688,7 +730,9 @@ function Timetable() {
         result?.health_report ||
         partialData?.health_report ||
         null;
-      setError(buildGenerationFailureMessage(failureMessage, derivedHealthReport));
+      const failureDetails = formatFailureDetails(result || partialData);
+      const nextMessage = buildGenerationFailureMessage(failureMessage, derivedHealthReport);
+      setError(failureDetails ? `${nextMessage}. ${failureDetails}` : nextMessage);
     }
 
     if (result || partialData) {
@@ -700,7 +744,9 @@ function Timetable() {
           result?.health_report ||
           partialData?.health_report ||
           null;
-        setError(buildGenerationFailureMessage(normalized.error, derivedHealthReport));
+        const failureDetails = formatFailureDetails(normalized);
+        const nextMessage = buildGenerationFailureMessage(normalized.error, derivedHealthReport);
+        setError(failureDetails ? `${nextMessage}. ${failureDetails}` : nextMessage);
       }
     }
 
@@ -722,6 +768,7 @@ function Timetable() {
     generationStatusQuery.data,
     generationStatusQuery.isFetched,
     healthReport,
+    formatFailureDetails,
     selectedOptionId,
     taskId,
   ]);

@@ -18,6 +18,7 @@ function ManageSubject() {
   const [editCode, setEditCode] = useState("");
   const [editSem, setEditSem] = useState("");
   const [editType, setEditType] = useState("");
+  const [editClassesPerWeek, setEditClassesPerWeek] = useState("");
   const [editCombinedClasses, setEditCombinedClasses] = useState([]);
   const [editIsElective, setEditIsElective] = useState(false); // New state for isElective
 
@@ -64,11 +65,18 @@ function ManageSubject() {
     return "";
   };
 
+  const parseOptionalPositiveNumber = (value) => {
+    if (value === "") return undefined;
+    if (value === undefined || value === null) return undefined;
+    const parsedValue = Number(value);
+    return Number.isFinite(parsedValue) && parsedValue >= 1 ? parsedValue : null;
+  };
+
   const handleDownloadTemplate = () => {
     clearExcelStatus();
     const rows = [
-      ["name", "id", "sem", "type", "isElective", "combinedClasses"],
-      ["", "", "", "theory", "false", ""]
+      ["name", "id", "sem", "type", "classesPerWeek", "isElective", "combinedClasses"],
+      ["", "", "", "theory", "", "false", ""]
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
@@ -100,6 +108,7 @@ function ManageSubject() {
         id: subject.id || "",
         sem: subject.sem || "",
         type: subject.type || "theory",
+        classesPerWeek: subject.classesPerWeek ?? "",
         isElective: Boolean(subject.isElective),
         combinedClasses: combinedClassNames,
         assignedClasses: assignedClassNames,
@@ -147,14 +156,21 @@ function ManageSubject() {
         const typeRaw = getCellValue(row, ["type", "Type"]) || "theory";
         const normalizedType = typeRaw.toLowerCase();
         const type = ["lab", "no_teacher"].includes(normalizedType) ? normalizedType : "theory";
+        const classesPerWeekRaw = getCellValue(row, ["classesPerWeek", "classes_per_week", "Classes per Week", "hoursPerWeek", "weeklyClasses"]);
         const isElectiveRaw = getCellValue(row, ["isElective", "elective", "Elective"]);
         const combinedClassesRaw = getCellValue(row, ["combinedClasses", "combined_classes", "Combined Classes"]);
+        const parsedClassesPerWeek = parseOptionalPositiveNumber(classesPerWeekRaw);
+
+        if (parsedClassesPerWeek === null) {
+          throw new Error(`Invalid classesPerWeek value for subject "${name || id}".`);
+        }
 
         return {
           name,
           id,
           sem,
           type,
+          classesPerWeek: parsedClassesPerWeek,
           isElective: parseBoolean(isElectiveRaw),
           combined_classes: parseCombinedClasses(combinedClassesRaw)
         };
@@ -191,6 +207,7 @@ function ManageSubject() {
             name: row.name,
             sem: row.sem,
             type: row.type,
+            classesPerWeek: row.classesPerWeek,
             combined_classes: row.combined_classes,
             isElective: row.isElective
           });
@@ -201,6 +218,7 @@ function ManageSubject() {
             id: row.id,
             sem: row.sem,
             type: row.type,
+            classesPerWeek: row.classesPerWeek,
             combined_classes: row.combined_classes,
             isElective: row.isElective
           });
@@ -245,6 +263,7 @@ function ManageSubject() {
     setEditCode(subject.id);
     setEditSem(subject.sem);
     setEditType(subject.type);
+    setEditClassesPerWeek(subject.classesPerWeek ?? "");
     setEditCombinedClasses(subject.combined_classes || []);
     setEditIsElective(subject.isElective || false); // Initialize new state
   };
@@ -260,6 +279,17 @@ function ManageSubject() {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    const classesPerWeekValue =
+      editClassesPerWeek === ""
+        ? null
+        : parseOptionalPositiveNumber(editClassesPerWeek);
+    if (classesPerWeekValue === null && editClassesPerWeek !== "") {
+      setMutationMessage("");
+      setExcelError("");
+      setExcelMessage("");
+      alert("Classes per week must be a positive number.");
+      return;
+    }
     setMutationMessage("Saving subject changes. Please wait...");
     try {
       const updatedSubject = {
@@ -267,6 +297,7 @@ function ManageSubject() {
         id: editCode,
         sem: editSem,
         type: editType,
+        classesPerWeek: classesPerWeekValue,
         combined_classes: editCombinedClasses,
         isElective: editIsElective, // Include new state in payload
       };
@@ -276,6 +307,7 @@ function ManageSubject() {
       setEditCode("");
       setEditSem("");
       setEditType("theory");
+      setEditClassesPerWeek("");
       setEditCombinedClasses([]);
       refetchData();
     } catch (err) {
@@ -362,6 +394,7 @@ function ManageSubject() {
               <th>Code</th>
               <th>Semester/Class</th>
               <th>Subject Type</th>
+              <th>Classes/Week</th>
               <th>Combined Classes</th>
               <th>Assigned Classes</th>
               <th>Assigned Faculties</th>
@@ -419,6 +452,19 @@ function ManageSubject() {
                       </select>
                     ) : (
                       subject.type
+                    )}
+                  </td>
+                  <td>
+                    {editId === subject._id ? (
+                      <input
+                        type="number"
+                        min="1"
+                        value={editClassesPerWeek}
+                        onChange={(e) => setEditClassesPerWeek(e.target.value)}
+                        placeholder="Optional"
+                      />
+                    ) : (
+                      subject.classesPerWeek ?? "—"
                     )}
                   </td>
                   <td>

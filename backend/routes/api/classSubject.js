@@ -5,6 +5,10 @@ import Subject from '../../models/Subject.js';
 import auth from '../../middleware/auth.js';
 import { validateOwnership } from '../../utils/validateTenantRefs.js';
 
+const toPositiveNumber = (value) => {
+    const parsedValue = Number(value);
+    return Number.isFinite(parsedValue) && parsedValue >= 1 ? parsedValue : null;
+};
 
 const protectedRouter = Router();
 protectedRouter.use(auth);
@@ -25,11 +29,23 @@ protectedRouter.get('/class-subjects', async (req, res) => {
 protectedRouter.post('/class-subjects', async (req, res) => {
     try {
         const { classId, subjectId, hoursPerWeek } = req.body;
-        await Promise.all([
+        const [classDoc, subjectDoc] = await Promise.all([
             validateOwnership(ClassModel, classId, req.collegeId, "Class"),
             validateOwnership(Subject, subjectId, req.collegeId, "Subject"),
         ]);
-        const assignment = new ClassSubject({ collegeId: req.collegeId, class: classId, subject: subjectId, hoursPerWeek });
+        const hasRequestedHours = hoursPerWeek !== undefined && hoursPerWeek !== null && hoursPerWeek !== "";
+        const requestedHours = hasRequestedHours ? toPositiveNumber(hoursPerWeek) : null;
+        if (hasRequestedHours && !requestedHours) {
+            return res.status(400).json({ error: "hoursPerWeek must be a positive number." });
+        }
+        const subjectDefaultHours = toPositiveNumber(subjectDoc?.classesPerWeek);
+        const effectiveHours = requestedHours ?? subjectDefaultHours;
+
+        if (!effectiveHours) {
+            return res.status(400).json({ error: "hoursPerWeek is required unless the subject has a default classesPerWeek value." });
+        }
+
+        const assignment = new ClassSubject({ collegeId: req.collegeId, class: classDoc._id, subject: subjectDoc._id, hoursPerWeek: effectiveHours });
         await assignment.save();
         res.json(assignment);
     } catch (e) {

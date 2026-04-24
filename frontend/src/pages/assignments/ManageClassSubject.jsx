@@ -1,7 +1,20 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import api from "../../api/axios";
 import Select from 'react-select';
 import DataContext from "../../context/DataContext";
+
+const resolveSelectedHours = (selectedSubjectItems, subjects) => {
+    if (!selectedSubjectItems.length) return "";
+    const values = selectedSubjectItems
+        .map((item) => {
+            const subject = subjects.find((s) => String(s._id) === String(item.value));
+            const parsed = Number(subject?.classesPerWeek);
+            return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+        });
+    if (values.some((value) => value === null)) return "";
+    const uniqueValues = [...new Set(values)];
+    return uniqueValues.length === 1 ? String(uniqueValues[0]) : "";
+};
 
 const ManageClassSubject = () => {
     const { assignments, classes, subjects, loading, error, refetchData } = useContext(DataContext);
@@ -15,9 +28,14 @@ const ManageClassSubject = () => {
     const [bulkError, setBulkError] = useState("");
     const [mutationMessage, setMutationMessage] = useState("");
 
+    useEffect(() => {
+        const defaultHours = resolveSelectedHours(addSubjects, subjects);
+        setAddHours(defaultHours);
+    }, [addSubjects, subjects]);
+
     const handleAdd = async (e) => {
         e.preventDefault();
-        if (addClasses.length === 0 || addSubjects.length === 0 || !addHours) {
+        if (addClasses.length === 0 || addSubjects.length === 0) {
             return;
         }
         setSavingBulk(true);
@@ -31,7 +49,7 @@ const ManageClassSubject = () => {
                         api.post('/class-subjects', {
                             classId: classItem.value,
                             subjectId: subject.value,
-                            hoursPerWeek: addHours
+                            hoursPerWeek: addHours === "" ? undefined : Number(addHours)
                         })
                     );
                 });
@@ -94,6 +112,7 @@ const ManageClassSubject = () => {
                 />
                 <input
                     type="number"
+                    min="1"
                     className="hours-input"
                     value={addHours}
                     onChange={(e) => setAddHours(e.target.value)}

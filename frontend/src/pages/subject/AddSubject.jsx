@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useContext } from "react";
 import axios from "../../api/axios";
 import DataContext from "../../context/DataContext";
 
@@ -11,11 +11,12 @@ function AddSubject() {
   const [code, setCode] = useState("");
   const [sem, setSem] = useState("");
   const [type, setType] = useState("theory");
+  const [classesPerWeek, setClassesPerWeek] = useState("");
   const [combinedClasses, setCombinedClasses] = useState([]);
   const [isElective, setIsElective] = useState(false);
 
   const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
+    const { name, value, checked } = e.target;
     if (name === "name") setName(value);
     if (name === "code") setCode(value);
     if (name === "sem") setSem(value);
@@ -35,6 +36,12 @@ function AddSubject() {
     if (!code.trim()) return "Subject code is required.";
     if (!sem.trim()) return "Semester/Class is required.";
     if (!type.trim()) return "subject type are required";
+    if (classesPerWeek !== "") {
+      const parsedClassesPerWeek = Number(classesPerWeek);
+      if (!Number.isFinite(parsedClassesPerWeek) || parsedClassesPerWeek < 1) {
+        return "Classes per week must be at least 1.";
+      }
+    }
     return "";
   };
 
@@ -54,6 +61,7 @@ function AddSubject() {
         id: code,
         sem,
         type: type,
+        classesPerWeek: classesPerWeek === "" ? undefined : Number(classesPerWeek),
         combined_classes: combinedClasses,
         isElective,
       });
@@ -62,10 +70,11 @@ function AddSubject() {
       setCode("");
       setSem("");
       setType("theory");
+      setClassesPerWeek("");
       setCombinedClasses([]);
       setIsElective(false);
       refetchData();
-    } catch (err) {
+    } catch {
       setError("Failed to add subject.");
     }
     setLoading(false);
@@ -107,6 +116,19 @@ function AddSubject() {
             onChange={handleChange}
             required
           />
+        </div>
+
+        <div className="form-group">
+          <label>Classes per Week</label>
+          <input
+            type="number"
+            name="classesPerWeek"
+            min="1"
+            placeholder="Optional default"
+            value={classesPerWeek}
+            onChange={(e) => setClassesPerWeek(e.target.value)}
+          />
+          <small>Used as a default when assigning this subject to classes or teachers.</small>
         </div>
 
        <div className="form-group">

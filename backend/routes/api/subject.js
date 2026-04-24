@@ -4,6 +4,24 @@ import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js
 import ClassSubject from '../../models/ClassSubject.js';
 import auth from '../../middleware/auth.js';
 
+const parseOptionalPositiveNumber = (value, label, { allowNull = false } = {}) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === '') {
+    return allowNull ? null : undefined;
+  }
+
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue) || parsedValue < 1) {
+    const error = new Error(`${label} must be a positive number.`);
+    error.status = 400;
+    throw error;
+  }
+
+  return parsedValue;
+};
 
 const protectedRouter = Router();
 protectedRouter.use(auth);
@@ -14,12 +32,14 @@ protectedRouter.post('/subjects', async (req, res) => {
   console.log("[POST /subjects] Body:", req.body);
   try {
     const { id, name, sem, combined_classes, isElective } = req.body;
+    const classesPerWeek = parseOptionalPositiveNumber(req.body.classesPerWeek, 'classesPerWeek');
     const s = new Subject({
       collegeId: req.collegeId,
       id,
       name,
       sem,
-      type: req.body.type, // ✅ new property
+      type: req.body.type,
+      ...(classesPerWeek !== undefined ? { classesPerWeek } : {}),
       combined_classes,
       isElective: Boolean(isElective),
     });
@@ -28,7 +48,7 @@ protectedRouter.post('/subjects', async (req, res) => {
     console.log("[POST /subjects] Saved subject:", s);
     res.json(s);
   } catch (e) {
-    res.status(400).json({ error: 'Bad Request' });
+    res.status(400).json({ error: e.message || 'Bad Request' });
   }
 });
 
@@ -49,10 +69,22 @@ protectedRouter.put('/subjects/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, sem, type, combined_classes, isElective } = req.body;
+    const update = {
+      name,
+      sem,
+      type,
+      combined_classes,
+      isElective,
+    };
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'classesPerWeek')) {
+      const classesPerWeek = parseOptionalPositiveNumber(req.body.classesPerWeek, 'classesPerWeek', { allowNull: true });
+      update.classesPerWeek = classesPerWeek;
+    }
 
     const updatedSubject = await Subject.findOneAndUpdate(
       { _id: id, collegeId: req.collegeId },
-      { name, sem, type, combined_classes, isElective },
+      update,
       { new: true, runValidators: true }
     );
 
@@ -61,7 +93,7 @@ protectedRouter.put('/subjects/:id', async (req, res) => {
     }
     res.json(updatedSubject);
   } catch (e) {
-    res.status(400).json({ error: 'Bad Request' });
+    res.status(400).json({ error: e.message || 'Bad Request' });
   }
 });
 
