@@ -491,7 +491,8 @@ def _build_attempt_constraint_config(
             ("subjectClustering", 0.4),
             ("subjectDistribution", 0.4),
             ("highLoadSubjectTiming", 0.3),
-            ("frontLoading", 0.35),
+            ("dailyCompactness", 0.35),
+            ("weeklyFrontLoading", 0.35),
             ("teacherWeeklyLoadBalance", 0.4),
             ("classDailyMinimumLoad", 0.5),
             ("teacherBoundaryPreference", 0.4),
@@ -1530,39 +1531,107 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         0, int(_cfg_get(constraint_config, ["highLoadSubjectTiming", "weight"], 60))
     )
 
-    front_loading_enabled = _to_bool(
-        _cfg_get(constraint_config, ["frontLoading", "enabled"], False), False
+    daily_compactness_enabled = _to_bool(
+        _cfg_get(
+            constraint_config,
+            ["dailyCompactness", "enabled"],
+            False,
+        ),
+        False,
     )
-    front_loading_weight = max(0, int(_cfg_get(constraint_config, ["frontLoading", "weight"], 400)))
-    front_loading_transition_weight = max(
+    daily_compactness_weight = max(
         0,
         int(
             _cfg_get(
                 constraint_config,
-                ["frontLoading", "transitionWeight"],
-                front_loading_weight,
+                ["dailyCompactness", "weight"],
+                400,
             )
         ),
     )
-    front_loading_empty_before_later_weight = max(
+    daily_compactness_transition_weight = max(
         0,
         int(
             _cfg_get(
                 constraint_config,
-                ["frontLoading", "emptyBeforeLaterOccupiedWeight"],
-                front_loading_weight,
+                ["dailyCompactness", "transitionWeight"],
+                daily_compactness_weight,
             )
         ),
     )
-    front_loading_late_slot_weight = max(
+    daily_compactness_empty_before_later_weight = max(
         0,
         int(
             _cfg_get(
                 constraint_config,
-                ["frontLoading", "lateSlotWeight"],
-                front_loading_weight,
+                ["dailyCompactness", "emptyBeforeLaterOccupiedWeight"],
+                daily_compactness_weight,
             )
         ),
+    )
+    daily_compactness_late_slot_weight = max(
+        0,
+        int(
+            _cfg_get(
+                constraint_config,
+                ["dailyCompactness", "lateSlotWeight"],
+                daily_compactness_weight,
+            )
+        ),
+    )
+    weekly_front_loading_enabled = _to_bool(
+        _cfg_get(
+            constraint_config,
+            ["weeklyFrontLoading", "enabled"],
+            _cfg_get(constraint_config, ["frontLoading", "enabled"], False),
+        ),
+        False,
+    )
+    weekly_front_loading_weight = max(
+        0,
+        int(
+            _cfg_get(
+                constraint_config,
+                ["weeklyFrontLoading", "weight"],
+                _cfg_get(constraint_config, ["frontLoading", "weight"], 400),
+            )
+        ),
+    )
+    weekly_front_loading_transition_weight = max(
+        0,
+        int(
+            _cfg_get(
+                constraint_config,
+                ["weeklyFrontLoading", "transitionWeight"],
+                weekly_front_loading_weight,
+            )
+        ),
+    )
+    weekly_front_loading_empty_before_later_weight = max(
+        0,
+        int(
+            _cfg_get(
+                constraint_config,
+                ["weeklyFrontLoading", "emptyBeforeLaterOccupiedWeight"],
+                weekly_front_loading_weight,
+            )
+        ),
+    )
+    weekly_front_loading_late_slot_weight = max(
+        0,
+        int(
+            _cfg_get(
+                constraint_config,
+                ["weeklyFrontLoading", "lateSlotWeight"],
+                weekly_front_loading_weight,
+            )
+        ),
+    )
+    weekly_balance_enabled = _to_bool(
+        _cfg_get(constraint_config, ["weeklyBalance", "enabled"], False), False
+    )
+    weekly_balance_weight = max(
+        0, int(_cfg_get(constraint_config, ["weeklyBalance", "weight"], 140))
     )
 
     teacher_avail_enabled = _to_bool(
@@ -1677,12 +1746,30 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             "minHoursPerWeek": high_load_timing_min_hours,
             "weight": high_load_timing_weight,
         },
+        "dailyCompactness": {
+            "enabled": daily_compactness_enabled,
+            "weight": daily_compactness_weight,
+            "transitionWeight": daily_compactness_transition_weight,
+            "emptyBeforeLaterOccupiedWeight": daily_compactness_empty_before_later_weight,
+            "lateSlotWeight": daily_compactness_late_slot_weight,
+        },
+        "weeklyFrontLoading": {
+            "enabled": weekly_front_loading_enabled,
+            "weight": weekly_front_loading_weight,
+            "transitionWeight": weekly_front_loading_transition_weight,
+            "emptyBeforeLaterOccupiedWeight": weekly_front_loading_empty_before_later_weight,
+            "lateSlotWeight": weekly_front_loading_late_slot_weight,
+        },
         "frontLoading": {
-            "enabled": front_loading_enabled,
-            "weight": front_loading_weight,
-            "transitionWeight": front_loading_transition_weight,
-            "emptyBeforeLaterOccupiedWeight": front_loading_empty_before_later_weight,
-            "lateSlotWeight": front_loading_late_slot_weight,
+            "enabled": weekly_front_loading_enabled,
+            "weight": weekly_front_loading_weight,
+            "transitionWeight": weekly_front_loading_transition_weight,
+            "emptyBeforeLaterOccupiedWeight": weekly_front_loading_empty_before_later_weight,
+            "lateSlotWeight": weekly_front_loading_late_slot_weight,
+        },
+        "weeklyBalance": {
+            "enabled": weekly_balance_enabled,
+            "weight": weekly_balance_weight,
         },
         "teacherAvailability": {
             "enabled": teacher_avail_enabled,
@@ -1756,6 +1843,10 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             required_hours_by_class_subject[cid][subj["_id"]] = _required_hours(
                 cls, subj
             )
+    required_total_hours_by_class: Dict[str, int] = {
+        cid: sum(subject_hours.values())
+        for cid, subject_hours in required_hours_by_class_subject.items()
+    }
 
     # Validate fixed slots early (non-fatal): keep only valid ones and continue.
     valid_fixed_slots: List[Dict[str, Any]] = []
@@ -2820,14 +2911,63 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                             sum(terms) * high_load_timing_weight * slot_cost * demand_factor
                         )
 
-    # Medium soft constraint: global front-loading per class across the full week.
+    # Soft constraint: daily compactness per class.
+    # Keep each day's occupied block as far left as possible after the hard no-gap rule.
+    if daily_compactness_enabled and daily_compactness_weight > 0:
+        for cls in classes:
+            class_id = cls["_id"]
+            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            if days <= 0:
+                continue
+
+            for day in range(days):
+                day_occ: List[cp_model.IntVar] = [
+                    class_occ[(class_id, day, hour)] for hour in valid_hours
+                ]
+                if len(day_occ) <= 1:
+                    continue
+
+                for i in range(len(day_occ) - 1):
+                    prev_occ = day_occ[i]
+                    next_occ = day_occ[i + 1]
+                    violation = model.NewBoolVar(
+                        f"class_daily_compact_violation_{class_id}_{day}_{i}"
+                    )
+                    # violation = 1 iff (prev_occ=0 and next_occ=1)
+                    model.Add(violation >= next_occ - prev_occ)
+                    model.Add(violation <= next_occ)
+                    model.Add(violation <= 1 - prev_occ)
+                    objective_terms.append(violation * daily_compactness_transition_weight)
+
+                suffix_has_occ: List[cp_model.IntVar] = [None] * len(day_occ)  # type: ignore
+                for i in range(len(day_occ) - 1, -1, -1):
+                    s = model.NewBoolVar(f"class_day_suffix_has_occ_{class_id}_{day}_{i}")
+                    suffix_has_occ[i] = s
+                    if i == len(day_occ) - 1:
+                        model.Add(s == day_occ[i])
+                    else:
+                        model.Add(s >= day_occ[i])
+                        model.Add(s >= suffix_has_occ[i + 1])
+                        model.Add(s <= day_occ[i] + suffix_has_occ[i + 1])
+
+                for i, occ in enumerate(day_occ):
+                    objective_terms.append(occ * daily_compactness_late_slot_weight * (i + 1))
+                    if i == len(day_occ) - 1:
+                        continue
+                    empty_before_later_occ = model.NewBoolVar(
+                        f"class_day_empty_before_late_occ_{class_id}_{day}_{i}"
+                    )
+                    # 1 iff day_occ[i] == 0 and some later slot on the same day is occupied.
+                    model.Add(empty_before_later_occ <= 1 - occ)
+                    model.Add(empty_before_later_occ <= suffix_has_occ[i + 1])
+                    model.Add(empty_before_later_occ >= suffix_has_occ[i + 1] - occ)
+                    objective_terms.append(
+                        empty_before_later_occ * daily_compactness_empty_before_later_weight
+                    )
+
+    # Soft constraint: week-wide front loading per class.
     # Flatten class occupancy by (day, hour) order (excluding breaks).
-    # 1) Penalize any 0 -> 1 transition (occupied after empty).
-    # 2) Penalize an empty slot if any later slot is occupied.
-    # 3) Penalize occupied slots with larger position index.
-    # Together this strongly pushes empty slots toward the end of the week,
-    # while still respecting hard constraints and fixed slots.
-    if front_loading_enabled and front_loading_weight > 0:
+    if weekly_front_loading_enabled and weekly_front_loading_weight > 0:
         for cls in classes:
             class_id = cls["_id"]
             days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
@@ -2847,17 +2987,15 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             for i in range(len(flat_occ) - 1):
                 prev_occ = flat_occ[i]
                 next_occ = flat_occ[i + 1]
-                violation = model.NewBoolVar(f"class_frontload_violation_{class_id}_{i}")
-                # violation = 1 iff (prev_occ=0 and next_occ=1)
+                violation = model.NewBoolVar(f"class_week_frontload_violation_{class_id}_{i}")
                 model.Add(violation >= next_occ - prev_occ)
                 model.Add(violation <= next_occ)
                 model.Add(violation <= 1 - prev_occ)
-                objective_terms.append(violation * front_loading_transition_weight)
+                objective_terms.append(violation * weekly_front_loading_transition_weight)
 
-            # Stronger compaction: penalize any empty slot that has an occupied slot later.
             suffix_has_occ: List[cp_model.IntVar] = [None] * len(flat_occ)  # type: ignore
             for i in range(len(flat_occ) - 1, -1, -1):
-                s = model.NewBoolVar(f"class_suffix_has_occ_{class_id}_{i}")
+                s = model.NewBoolVar(f"class_week_suffix_has_occ_{class_id}_{i}")
                 suffix_has_occ[i] = s
                 if i == len(flat_occ) - 1:
                     model.Add(s == flat_occ[i])
@@ -2868,20 +3006,43 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             for i in range(len(flat_occ) - 1):
                 empty_before_later_occ = model.NewBoolVar(
-                    f"class_empty_before_late_occ_{class_id}_{i}"
+                    f"class_week_empty_before_late_occ_{class_id}_{i}"
                 )
-                # 1 iff flat_occ[i] == 0 and some later slot is occupied.
                 model.Add(empty_before_later_occ <= 1 - flat_occ[i])
                 model.Add(empty_before_later_occ <= suffix_has_occ[i + 1])
                 model.Add(empty_before_later_occ >= suffix_has_occ[i + 1] - flat_occ[i])
                 objective_terms.append(
-                    empty_before_later_occ * front_loading_empty_before_later_weight
+                    empty_before_later_occ * weekly_front_loading_empty_before_later_weight
                 )
 
-            # Additional compaction pressure: later occupied positions are costlier.
-            # This improves week-end empty-slot packing, especially when fixed slots exist.
             for i, occ in enumerate(flat_occ):
-                objective_terms.append(occ * front_loading_late_slot_weight * (i + 1))
+                objective_terms.append(occ * weekly_front_loading_late_slot_weight * (i + 1))
+
+    # Soft constraint: balance each class's weekly load across days.
+    if weekly_balance_enabled and weekly_balance_weight > 0:
+        for cls in classes:
+            class_id = cls["_id"]
+            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            total_required = required_total_hours_by_class.get(class_id, 0)
+            if days <= 0 or total_required <= 0:
+                continue
+
+            for day in range(days):
+                daily_load = model.NewIntVar(
+                    0,
+                    len(valid_hours),
+                    f"class_weekly_balance_load_{class_id}_{day}",
+                )
+                model.Add(daily_load == sum(class_occ[(class_id, day, hour)] for hour in valid_hours))
+                imbalance_cap = max(total_required, len(valid_hours) * max(1, days))
+                deviation = model.NewIntVar(
+                    0,
+                    imbalance_cap,
+                    f"class_weekly_balance_dev_{class_id}_{day}",
+                )
+                model.Add(deviation >= daily_load * days - total_required)
+                model.Add(deviation >= total_required - daily_load * days)
+                objective_terms.append(deviation * weekly_balance_weight)
 
     if objective_terms:
         model.Minimize(sum(objective_terms))

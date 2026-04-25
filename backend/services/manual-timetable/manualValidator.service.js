@@ -29,8 +29,8 @@ function getConstraintConfig(state = {}) {
       enabled: config?.subjectClustering?.enabled !== false,
       maxPerDay: Math.max(1, Number(config?.subjectClustering?.maxPerDay || 3)),
     },
-    frontLoading: {
-      enabled: config?.frontLoading?.enabled !== false,
+    dailyCompactness: {
+      enabled: config?.dailyCompactness?.enabled !== false,
     },
   };
 }
@@ -241,14 +241,14 @@ function collectSoftWarnings({
       }
 
       if (
-        cfg.frontLoading.enabled &&
+        cfg.dailyCompactness.enabled &&
         placement.hour >= Math.ceil(cfg.schedule.hoursPerDay / 2)
       ) {
         addUnique(warnings, "Placed in a later period than preferred.");
       }
 
-      if (cfg.frontLoading.enabled && hasEarlierGapBeforeOccupancy(row, placement.hour)) {
-        addUnique(warnings, "Creates a front-loading penalty for this class.");
+      if (cfg.dailyCompactness.enabled && hasEarlierGapBeforeOccupancy(row, placement.hour)) {
+        addUnique(warnings, "Creates a daily compactness penalty for this class.");
       }
     }
   }

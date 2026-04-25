@@ -55,12 +55,23 @@ export const DEFAULT_CONSTRAINT_CONFIG = {
     minHoursPerWeek: 4,
     weight: 60,
   },
-  frontLoading: {
+  dailyCompactness: {
     enabled: true,
     weight: 400,
     transitionWeight: 400,
     emptyBeforeLaterOccupiedWeight: 400,
     lateSlotWeight: 400,
+  },
+  weeklyFrontLoading: {
+    enabled: false,
+    weight: 400,
+    transitionWeight: 400,
+    emptyBeforeLaterOccupiedWeight: 400,
+    lateSlotWeight: 400,
+  },
+  weeklyBalance: {
+    enabled: true,
+    weight: 140,
   },
   teacherAvailability: {
     enabled: false,
@@ -189,7 +200,9 @@ export function normalizeConstraintConfig(input = {}) {
   const subjectClustering = cfg.subjectClustering || {};
   const subjectDistribution = cfg.subjectDistribution || {};
   const highLoadSubjectTiming = cfg.highLoadSubjectTiming || {};
-  const frontLoading = cfg.frontLoading || {};
+  const dailyCompactness = cfg.dailyCompactness || {};
+  const weeklyFrontLoading = cfg.weeklyFrontLoading || cfg.frontLoading || {};
+  const weeklyBalance = cfg.weeklyBalance || {};
   const teacherAvailability = cfg.teacherAvailability || {};
   const teacherWeeklyLoadBalance = cfg.teacherWeeklyLoadBalance || {};
   const classDailyMinimumLoad = cfg.classDailyMinimumLoad || {};
@@ -323,22 +336,91 @@ export function normalizeConstraintConfig(input = {}) {
         0
       ),
     },
-    frontLoading: {
-      enabled: toBool(frontLoading.enabled, DEFAULT_CONSTRAINT_CONFIG.frontLoading.enabled),
-      weight: safeInt(frontLoading.weight, DEFAULT_CONSTRAINT_CONFIG.frontLoading.weight, 0),
+    dailyCompactness: {
+      enabled: toBool(
+        dailyCompactness.enabled,
+        DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.enabled
+      ),
+      weight: safeInt(
+        dailyCompactness.weight,
+        DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.weight,
+        0
+      ),
       transitionWeight: safeInt(
-        frontLoading.transitionWeight,
-        frontLoading.weight ?? DEFAULT_CONSTRAINT_CONFIG.frontLoading.transitionWeight,
+        dailyCompactness.transitionWeight,
+        dailyCompactness.weight ?? DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.transitionWeight,
         0
       ),
       emptyBeforeLaterOccupiedWeight: safeInt(
-        frontLoading.emptyBeforeLaterOccupiedWeight,
-        frontLoading.weight ?? DEFAULT_CONSTRAINT_CONFIG.frontLoading.emptyBeforeLaterOccupiedWeight,
+        dailyCompactness.emptyBeforeLaterOccupiedWeight,
+        dailyCompactness.weight ??
+          DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.emptyBeforeLaterOccupiedWeight,
         0
       ),
       lateSlotWeight: safeInt(
-        frontLoading.lateSlotWeight,
-        frontLoading.weight ?? DEFAULT_CONSTRAINT_CONFIG.frontLoading.lateSlotWeight,
+        dailyCompactness.lateSlotWeight,
+        dailyCompactness.weight ?? DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.lateSlotWeight,
+        0
+      ),
+    },
+    weeklyFrontLoading: {
+      enabled: toBool(
+        weeklyFrontLoading.enabled,
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.enabled
+      ),
+      weight: safeInt(
+        weeklyFrontLoading.weight,
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.weight,
+        0
+      ),
+      transitionWeight: safeInt(
+        weeklyFrontLoading.transitionWeight,
+        weeklyFrontLoading.weight ??
+          DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.transitionWeight,
+        0
+      ),
+      emptyBeforeLaterOccupiedWeight: safeInt(
+        weeklyFrontLoading.emptyBeforeLaterOccupiedWeight,
+        weeklyFrontLoading.weight ??
+          DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.emptyBeforeLaterOccupiedWeight,
+        0
+      ),
+      lateSlotWeight: safeInt(
+        weeklyFrontLoading.lateSlotWeight,
+        weeklyFrontLoading.weight ?? DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.lateSlotWeight,
+        0
+      ),
+    },
+    weeklyBalance: {
+      enabled: toBool(weeklyBalance.enabled, DEFAULT_CONSTRAINT_CONFIG.weeklyBalance.enabled),
+      weight: safeInt(weeklyBalance.weight, DEFAULT_CONSTRAINT_CONFIG.weeklyBalance.weight, 0),
+    },
+    frontLoading: {
+      enabled: toBool(
+        weeklyFrontLoading.enabled,
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.enabled
+      ),
+      weight: safeInt(
+        weeklyFrontLoading.weight,
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.weight,
+        0
+      ),
+      transitionWeight: safeInt(
+        weeklyFrontLoading.transitionWeight,
+        weeklyFrontLoading.weight ??
+          DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.transitionWeight,
+        0
+      ),
+      emptyBeforeLaterOccupiedWeight: safeInt(
+        weeklyFrontLoading.emptyBeforeLaterOccupiedWeight,
+        weeklyFrontLoading.weight ??
+          DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.emptyBeforeLaterOccupiedWeight,
+        0
+      ),
+      lateSlotWeight: safeInt(
+        weeklyFrontLoading.lateSlotWeight,
+        weeklyFrontLoading.weight ??
+          DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.lateSlotWeight,
         0
       ),
     },

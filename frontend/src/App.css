@@ -75,6 +75,139 @@
   margin-top: 2px;
 }
 
+.combined-classes-help {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.combined-classes-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 140, 66, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 140, 66, 0.04);
+  color: #374151;
+  font-size: 0.92rem;
+}
+
+.combined-classes-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.text-action-btn {
+  border: none;
+  background: transparent;
+  color: #ff8c42;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+.text-action-btn:disabled {
+  color: #c7c7c7;
+  cursor: not-allowed;
+}
+
+.combined-classes-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.combined-classes-empty {
+  padding: 12px 14px;
+  border: 1px dashed #d8d8d8;
+  border-radius: 10px;
+  color: #6b7280;
+  background: #fcfcfc;
+}
+
+.combined-classes-group {
+  padding: 14px;
+  border: 1px solid #e7e7e7;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.combined-classes-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.combined-classes-group-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #222;
+}
+
+.combined-classes-group-header span {
+  color: #6b7280;
+  font-size: 0.88rem;
+}
+
+.combined-classes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.combined-class-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dedede;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.combined-class-card:hover {
+  border-color: rgba(255, 140, 66, 0.5);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+.combined-class-card.is-selected {
+  border-color: rgba(255, 140, 66, 0.8);
+  background: rgba(255, 140, 66, 0.08);
+  box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.12);
+}
+
+.combined-class-card input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.combined-class-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.combined-class-card-title {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.combined-class-card-meta {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
 /* Inputs & Selects */
 .form-group input,
 .form-group select {

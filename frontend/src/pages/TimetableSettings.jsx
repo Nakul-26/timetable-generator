@@ -25,7 +25,21 @@ const POLICY_PRESETS = {
     subjectClustering: { enabled: true, maxPerDay: 3, weight: 50 },
     subjectDistribution: { enabled: true, mode: "spread", weight: 70 },
     highLoadSubjectTiming: { enabled: true, mode: "early", minHoursPerWeek: 4, weight: 60 },
-    frontLoading: { enabled: true, weight: 400, transitionWeight: 400, emptyBeforeLaterOccupiedWeight: 400, lateSlotWeight: 400 },
+    dailyCompactness: {
+      enabled: true,
+      weight: 400,
+      transitionWeight: 400,
+      emptyBeforeLaterOccupiedWeight: 400,
+      lateSlotWeight: 400,
+    },
+    weeklyFrontLoading: {
+      enabled: false,
+      weight: 400,
+      transitionWeight: 400,
+      emptyBeforeLaterOccupiedWeight: 400,
+      lateSlotWeight: 400,
+    },
+    weeklyBalance: { enabled: true, weight: 140 },
     teacherAvailability: { enabled: true, hard: true, weight: 250 },
     teacherBoundaryPreference: { enabled: false, avoidFirstPeriod: true, avoidLastPeriod: true, weight: 60 },
   },
@@ -39,7 +53,21 @@ const POLICY_PRESETS = {
     subjectClustering: { enabled: true, maxPerDay: 2, weight: 80 },
     subjectDistribution: { enabled: true, mode: "spread", weight: 90 },
     highLoadSubjectTiming: { enabled: true, mode: "early", minHoursPerWeek: 4, weight: 75 },
-    frontLoading: { enabled: true, weight: 550, transitionWeight: 550, emptyBeforeLaterOccupiedWeight: 550, lateSlotWeight: 550 },
+    dailyCompactness: {
+      enabled: true,
+      weight: 550,
+      transitionWeight: 550,
+      emptyBeforeLaterOccupiedWeight: 550,
+      lateSlotWeight: 550,
+    },
+    weeklyFrontLoading: {
+      enabled: true,
+      weight: 550,
+      transitionWeight: 550,
+      emptyBeforeLaterOccupiedWeight: 550,
+      lateSlotWeight: 550,
+    },
+    weeklyBalance: { enabled: true, weight: 180 },
     teacherAvailability: { enabled: true, hard: true, weight: 250 },
     teacherBoundaryPreference: { enabled: false, avoidFirstPeriod: true, avoidLastPeriod: true, weight: 60 },
   },
@@ -53,7 +81,21 @@ const POLICY_PRESETS = {
     subjectClustering: { enabled: true, maxPerDay: 3, weight: 50 },
     subjectDistribution: { enabled: true, mode: "compact", weight: 70 },
     highLoadSubjectTiming: { enabled: false, mode: "early", minHoursPerWeek: 4, weight: 60 },
-    frontLoading: { enabled: false, weight: 400, transitionWeight: 400, emptyBeforeLaterOccupiedWeight: 400, lateSlotWeight: 400 },
+    dailyCompactness: {
+      enabled: true,
+      weight: 300,
+      transitionWeight: 300,
+      emptyBeforeLaterOccupiedWeight: 300,
+      lateSlotWeight: 300,
+    },
+    weeklyFrontLoading: {
+      enabled: false,
+      weight: 300,
+      transitionWeight: 300,
+      emptyBeforeLaterOccupiedWeight: 300,
+      lateSlotWeight: 300,
+    },
+    weeklyBalance: { enabled: true, weight: 120 },
     teacherAvailability: { enabled: true, hard: true, weight: 250 },
     teacherBoundaryPreference: { enabled: true, avoidFirstPeriod: true, avoidLastPeriod: true, weight: 75 },
   },
@@ -185,21 +227,41 @@ function TimetableSettings() {
         DEFAULT_CONSTRAINT_CONFIG.highLoadSubjectTiming.weight,
         config.highLoadSubjectTiming.weight
       ),
-      frontLoading: toStrength(
-        DEFAULT_CONSTRAINT_CONFIG.frontLoading.weight,
-        config.frontLoading.weight
+      dailyCompactness: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.weight,
+        config.dailyCompactness.weight
       ),
-      frontLoadingTransition: toStrength(
-        DEFAULT_CONSTRAINT_CONFIG.frontLoading.transitionWeight,
-        config.frontLoading.transitionWeight
+      dailyCompactnessTransition: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.transitionWeight,
+        config.dailyCompactness.transitionWeight
       ),
-      frontLoadingEmptyBeforeLater: toStrength(
-        DEFAULT_CONSTRAINT_CONFIG.frontLoading.emptyBeforeLaterOccupiedWeight,
-        config.frontLoading.emptyBeforeLaterOccupiedWeight
+      dailyCompactnessEmptyBeforeLater: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.emptyBeforeLaterOccupiedWeight,
+        config.dailyCompactness.emptyBeforeLaterOccupiedWeight
       ),
-      frontLoadingLateSlot: toStrength(
-        DEFAULT_CONSTRAINT_CONFIG.frontLoading.lateSlotWeight,
-        config.frontLoading.lateSlotWeight
+      dailyCompactnessLateSlot: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.lateSlotWeight,
+        config.dailyCompactness.lateSlotWeight
+      ),
+      weeklyFrontLoading: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.weight,
+        config.weeklyFrontLoading.weight
+      ),
+      weeklyFrontLoadingTransition: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.transitionWeight,
+        config.weeklyFrontLoading.transitionWeight
+      ),
+      weeklyFrontLoadingEmptyBeforeLater: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.emptyBeforeLaterOccupiedWeight,
+        config.weeklyFrontLoading.emptyBeforeLaterOccupiedWeight
+      ),
+      weeklyFrontLoadingLateSlot: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.lateSlotWeight,
+        config.weeklyFrontLoading.lateSlotWeight
+      ),
+      weeklyBalance: toStrength(
+        DEFAULT_CONSTRAINT_CONFIG.weeklyBalance.weight,
+        config.weeklyBalance.weight
       ),
       teacherAvailability: toStrength(
         DEFAULT_CONSTRAINT_CONFIG.teacherAvailability.weight,
@@ -258,7 +320,9 @@ function TimetableSettings() {
         subjectClustering: { ...prev.subjectClustering, ...(preset.subjectClustering || {}) },
         subjectDistribution: { ...prev.subjectDistribution, ...(preset.subjectDistribution || {}) },
         highLoadSubjectTiming: { ...prev.highLoadSubjectTiming, ...(preset.highLoadSubjectTiming || {}) },
-        frontLoading: { ...prev.frontLoading, ...(preset.frontLoading || {}) },
+        dailyCompactness: { ...prev.dailyCompactness, ...(preset.dailyCompactness || {}) },
+        weeklyFrontLoading: { ...prev.weeklyFrontLoading, ...(preset.weeklyFrontLoading || {}) },
+        weeklyBalance: { ...prev.weeklyBalance, ...(preset.weeklyBalance || {}) },
         teacherAvailability: { ...prev.teacherAvailability, ...(preset.teacherAvailability || {}) },
         teacherBoundaryPreference: {
           ...prev.teacherBoundaryPreference,
@@ -433,8 +497,16 @@ function TimetableSettings() {
             Places heavy subjects earlier or later in the day.
           </div>
           <div className="tt-settings-glossary-item">
-            <strong>Front Loading</strong>
-            Pushes classes toward earlier slots and leaves later slots freer.
+            <strong>Daily Compactness</strong>
+            Packs each class into the earliest possible periods within a day.
+          </div>
+          <div className="tt-settings-glossary-item">
+            <strong>Weekly Front Loading</strong>
+            Pushes classes toward earlier days and leaves later days freer.
+          </div>
+          <div className="tt-settings-glossary-item">
+            <strong>Weekly Balance</strong>
+            Spreads each class's total load more evenly across the week.
           </div>
           <div className="tt-settings-glossary-item">
             <strong>Teacher Availability</strong>
@@ -1051,14 +1123,14 @@ function TimetableSettings() {
 
         <div className="filters-container tt-settings-row">
         <label>
-          Front Loading
+          Daily Compactness
           <select
-            value={config.frontLoading.enabled ? "enabled" : "disabled"}
+            value={config.dailyCompactness.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
               updateConfig((prev) => ({
                 ...prev,
-                frontLoading: {
-                  ...prev.frontLoading,
+                dailyCompactness: {
+                  ...prev.dailyCompactness,
                   enabled: e.target.value === "enabled",
                 },
               }))
@@ -1069,19 +1141,19 @@ function TimetableSettings() {
           </select>
         </label>
         <label>
-          Front Loading Overall Strength
+          Daily Compactness Strength
           <select
-            value={strengths.frontLoading}
+            value={strengths.dailyCompactness}
             onChange={(e) =>
               updateConfig((prev) => {
                 const weight = fromStrength(
-                  DEFAULT_CONSTRAINT_CONFIG.frontLoading.weight,
+                  DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.weight,
                   e.target.value
                 );
                 return {
                   ...prev,
-                  frontLoading: {
-                    ...prev.frontLoading,
+                  dailyCompactness: {
+                    ...prev.dailyCompactness,
                     weight,
                     transitionWeight: weight,
                     emptyBeforeLaterOccupiedWeight: weight,
@@ -1090,7 +1162,97 @@ function TimetableSettings() {
                 };
               })
             }
-            disabled={!config.frontLoading.enabled}
+            disabled={!config.dailyCompactness.enabled}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="very_high">Very High</option>
+          </select>
+        </label>
+        <label>
+          Weekly Front Loading
+          <select
+            value={config.weeklyFrontLoading.enabled ? "enabled" : "disabled"}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                weeklyFrontLoading: {
+                  ...prev.weeklyFrontLoading,
+                  enabled: e.target.value === "enabled",
+                },
+              }))
+            }
+          >
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        </label>
+        <label>
+          Weekly Front Loading Strength
+          <select
+            value={strengths.weeklyFrontLoading}
+            onChange={(e) =>
+              updateConfig((prev) => {
+                const weight = fromStrength(
+                  DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.weight,
+                  e.target.value
+                );
+                return {
+                  ...prev,
+                  weeklyFrontLoading: {
+                    ...prev.weeklyFrontLoading,
+                    weight,
+                    transitionWeight: weight,
+                    emptyBeforeLaterOccupiedWeight: weight,
+                    lateSlotWeight: weight,
+                  },
+                };
+              })
+            }
+            disabled={!config.weeklyFrontLoading.enabled}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="very_high">Very High</option>
+          </select>
+        </label>
+        <label>
+          Weekly Balance
+          <select
+            value={config.weeklyBalance.enabled ? "enabled" : "disabled"}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                weeklyBalance: {
+                  ...prev.weeklyBalance,
+                  enabled: e.target.value === "enabled",
+                },
+              }))
+            }
+          >
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        </label>
+        <label>
+          Weekly Balance Strength
+          <select
+            value={strengths.weeklyBalance}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                weeklyBalance: {
+                  ...prev.weeklyBalance,
+                  weight: fromStrength(
+                    DEFAULT_CONSTRAINT_CONFIG.weeklyBalance.weight,
+                    e.target.value
+                  ),
+                },
+              }))
+            }
+            disabled={!config.weeklyBalance.enabled}
           >
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -1103,22 +1265,22 @@ function TimetableSettings() {
         {showAdvancedSettings ? (
         <div className="filters-container tt-settings-row">
         <label>
-          Front Loading Transition Strength
+          Daily Compactness Transition Strength
           <select
-            value={strengths.frontLoadingTransition}
+            value={strengths.dailyCompactnessTransition}
             onChange={(e) =>
               updateConfig((prev) => ({
                 ...prev,
-                frontLoading: {
-                  ...prev.frontLoading,
+                dailyCompactness: {
+                  ...prev.dailyCompactness,
                   transitionWeight: fromStrength(
-                    DEFAULT_CONSTRAINT_CONFIG.frontLoading.transitionWeight,
+                    DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.transitionWeight,
                     e.target.value
                   ),
                 },
               }))
             }
-            disabled={!config.frontLoading.enabled}
+            disabled={!config.dailyCompactness.enabled}
           >
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -1127,22 +1289,22 @@ function TimetableSettings() {
           </select>
         </label>
         <label>
-          Front Loading Empty-Before-Later Strength
+          Daily Compactness Empty-Before-Later Strength
           <select
-            value={strengths.frontLoadingEmptyBeforeLater}
+            value={strengths.dailyCompactnessEmptyBeforeLater}
             onChange={(e) =>
               updateConfig((prev) => ({
                 ...prev,
-                frontLoading: {
-                  ...prev.frontLoading,
+                dailyCompactness: {
+                  ...prev.dailyCompactness,
                   emptyBeforeLaterOccupiedWeight: fromStrength(
-                    DEFAULT_CONSTRAINT_CONFIG.frontLoading.emptyBeforeLaterOccupiedWeight,
+                    DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.emptyBeforeLaterOccupiedWeight,
                     e.target.value
                   ),
                 },
               }))
             }
-            disabled={!config.frontLoading.enabled}
+            disabled={!config.dailyCompactness.enabled}
           >
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -1151,22 +1313,94 @@ function TimetableSettings() {
           </select>
         </label>
         <label>
-          Front Loading Late-Slot Strength
+          Daily Compactness Late-Slot Strength
           <select
-            value={strengths.frontLoadingLateSlot}
+            value={strengths.dailyCompactnessLateSlot}
             onChange={(e) =>
               updateConfig((prev) => ({
                 ...prev,
-                frontLoading: {
-                  ...prev.frontLoading,
+                dailyCompactness: {
+                  ...prev.dailyCompactness,
                   lateSlotWeight: fromStrength(
-                    DEFAULT_CONSTRAINT_CONFIG.frontLoading.lateSlotWeight,
+                    DEFAULT_CONSTRAINT_CONFIG.dailyCompactness.lateSlotWeight,
                     e.target.value
                   ),
                 },
               }))
             }
-            disabled={!config.frontLoading.enabled}
+            disabled={!config.dailyCompactness.enabled}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="very_high">Very High</option>
+          </select>
+        </label>
+        <label>
+          Weekly Front Loading Transition Strength
+          <select
+            value={strengths.weeklyFrontLoadingTransition}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                weeklyFrontLoading: {
+                  ...prev.weeklyFrontLoading,
+                  transitionWeight: fromStrength(
+                    DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.transitionWeight,
+                    e.target.value
+                  ),
+                },
+              }))
+            }
+            disabled={!config.weeklyFrontLoading.enabled}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="very_high">Very High</option>
+          </select>
+        </label>
+        <label>
+          Weekly Front Loading Empty-Before-Later Strength
+          <select
+            value={strengths.weeklyFrontLoadingEmptyBeforeLater}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                weeklyFrontLoading: {
+                  ...prev.weeklyFrontLoading,
+                  emptyBeforeLaterOccupiedWeight: fromStrength(
+                    DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.emptyBeforeLaterOccupiedWeight,
+                    e.target.value
+                  ),
+                },
+              }))
+            }
+            disabled={!config.weeklyFrontLoading.enabled}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="very_high">Very High</option>
+          </select>
+        </label>
+        <label>
+          Weekly Front Loading Late-Slot Strength
+          <select
+            value={strengths.weeklyFrontLoadingLateSlot}
+            onChange={(e) =>
+              updateConfig((prev) => ({
+                ...prev,
+                weeklyFrontLoading: {
+                  ...prev.weeklyFrontLoading,
+                  lateSlotWeight: fromStrength(
+                    DEFAULT_CONSTRAINT_CONFIG.weeklyFrontLoading.lateSlotWeight,
+                    e.target.value
+                  ),
+                },
+              }))
+            }
+            disabled={!config.weeklyFrontLoading.enabled}
           >
             <option value="low">Low</option>
             <option value="medium">Medium</option>

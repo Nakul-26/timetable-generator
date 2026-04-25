@@ -8,7 +8,8 @@ import Subject from "../models/Subject.js";
 import TeacherSubjectCombination from "../models/TeacherSubjectCombination.js";
 
 // Detailed breakdown from your 2025-2026 timetables.
-// NOTE: Subject model requires: { collegeId, id, name, sem, type }.
+// NOTE: Subject model stores the default weekly load in `classesPerWeek`.
+// This script also writes `hoursPerWeek` so the timetable source data stays explicit.
 // Allowed types are: theory | lab | no_teacher
 const RAW_SUBJECTS = [
   // VI Semester (EVEN)
@@ -18,6 +19,7 @@ const RAW_SUBJECTS = [
     code: "BCS601",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3.5,
   },
   {
     sem: 6,
@@ -25,6 +27,7 @@ const RAW_SUBJECTS = [
     code: "BCS602",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3.5,
   },
   {
     sem: 6,
@@ -32,6 +35,7 @@ const RAW_SUBJECTS = [
     code: "BCS603",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3.5,
   },
   {
     sem: 6,
@@ -39,6 +43,7 @@ const RAW_SUBJECTS = [
     code: "BCSL607",
     subjectType: "Lab",
     isElective: false,
+    hoursPerWeek: 2.5,
   },
   {
     sem: 6,
@@ -46,6 +51,7 @@ const RAW_SUBJECTS = [
     code: "BCS604A",
     subjectType: "Theory",
     isElective: true,
+    hoursPerWeek: 3.5,
   },
   {
     sem: 6,
@@ -53,6 +59,7 @@ const RAW_SUBJECTS = [
     code: "BCS604C",
     subjectType: "Theory",
     isElective: true,
+    hoursPerWeek: 3.5,
   },
   {
     sem: 6,
@@ -60,6 +67,7 @@ const RAW_SUBJECTS = [
     code: "BCS608A",
     subjectType: "Theory/Skill",
     isElective: true,
+    hoursPerWeek: 2,
   },
   {
     sem: 6,
@@ -67,6 +75,7 @@ const RAW_SUBJECTS = [
     code: "BCS608C",
     subjectType: "Theory/Skill",
     isElective: true,
+    hoursPerWeek: 2,
   },
   {
     sem: 6,
@@ -74,6 +83,7 @@ const RAW_SUBJECTS = [
     code: "BIKS610",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 1,
   },
   {
     sem: 6,
@@ -81,6 +91,7 @@ const RAW_SUBJECTS = [
     code: "BCS605",
     subjectType: "Project",
     isElective: false,
+    hoursPerWeek: 2.5,
   },
   {
     sem: 6,
@@ -88,6 +99,7 @@ const RAW_SUBJECTS = [
     code: "CRC",
     subjectType: "Training",
     isElective: false,
+    hoursPerWeek: 2,
   },
 
   // IV Semester (EVEN)
@@ -97,6 +109,7 @@ const RAW_SUBJECTS = [
     code: "BCS401",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 4,
   },
   {
     sem: 4,
@@ -104,6 +117,7 @@ const RAW_SUBJECTS = [
     code: "BCS402",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3.5,
   },
   {
     sem: 4,
@@ -111,6 +125,7 @@ const RAW_SUBJECTS = [
     code: "BCS403",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 4,
   },
   {
     sem: 4,
@@ -118,6 +133,7 @@ const RAW_SUBJECTS = [
     code: "BCSL404",
     subjectType: "Lab",
     isElective: false,
+    hoursPerWeek: 2.5,
   },
   {
     sem: 4,
@@ -125,6 +141,7 @@ const RAW_SUBJECTS = [
     code: "BCS405A",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 4,
   },
   {
     sem: 4,
@@ -132,6 +149,7 @@ const RAW_SUBJECTS = [
     code: "BBOC407",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 2,
   },
   {
     sem: 4,
@@ -139,6 +157,7 @@ const RAW_SUBJECTS = [
     code: "BUHK408",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 1,
   },
   {
     sem: 4,
@@ -146,6 +165,7 @@ const RAW_SUBJECTS = [
     code: "BCS456E",
     subjectType: "Lab/Skill",
     isElective: true,
+    hoursPerWeek: 2.5,
   },
   {
     sem: 4,
@@ -153,6 +173,7 @@ const RAW_SUBJECTS = [
     code: "BCS456F",
     subjectType: "Lab/Skill",
     isElective: true,
+    hoursPerWeek: 2.5,
   },
   {
     sem: 4,
@@ -160,6 +181,7 @@ const RAW_SUBJECTS = [
     code: "CRC",
     subjectType: "Training",
     isElective: false,
+    hoursPerWeek: 2,
   },
 
   // II Semester (EVEN)
@@ -169,6 +191,7 @@ const RAW_SUBJECTS = [
     code: "1BMATCS201",
     subjectType: "Theory/Tutorial",
     isElective: false,
+    hoursPerWeek: 5,
   },
   {
     sem: 2,
@@ -176,6 +199,7 @@ const RAW_SUBJECTS = [
     code: "1BPHYCS202",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 4,
   },
   {
     sem: 2,
@@ -183,6 +207,7 @@ const RAW_SUBJECTS = [
     code: "1BCHECS102",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 4,
   },
   {
     sem: 2,
@@ -190,6 +215,7 @@ const RAW_SUBJECTS = [
     code: "1BCEDCS203",
     subjectType: "Theory/Lab",
     isElective: false,
+    hoursPerWeek: 4.5,
   },
   {
     sem: 2,
@@ -197,6 +223,7 @@ const RAW_SUBJECTS = [
     code: "1BESC204B",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3,
   },
   {
     sem: 2,
@@ -204,6 +231,7 @@ const RAW_SUBJECTS = [
     code: "1BPIC205",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3,
   },
   {
     sem: 2,
@@ -211,6 +239,7 @@ const RAW_SUBJECTS = [
     code: "1BPLC205B",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3,
   },
   {
     sem: 2,
@@ -218,6 +247,7 @@ const RAW_SUBJECTS = [
     code: "1BA1203",
     subjectType: "Theory",
     isElective: false,
+    hoursPerWeek: 3,
   },
   {
     sem: 2,
@@ -225,6 +255,7 @@ const RAW_SUBJECTS = [
     code: "1BPRJ208",
     subjectType: "Project",
     isElective: false,
+    hoursPerWeek: 2,
   },
 ];
 
@@ -367,6 +398,7 @@ async function main() {
           name,
           subjectType: entry.subjectType,
           isElective: Boolean(entry.isElective),
+          hoursPerWeek: Number(entry.hoursPerWeek || 0),
         });
       }
     }
@@ -394,6 +426,8 @@ async function main() {
           sem: s.sem,
           type: mapSubjectType(s.subjectType),
           isElective: Boolean(s.isElective),
+          hoursPerWeek: s.hoursPerWeek,
+          classesPerWeek: s.hoursPerWeek,
         };
       });
 
@@ -413,7 +447,7 @@ async function main() {
       console.log(`[DRY RUN] Would upsert ${subjects.length} subject records:`);
       for (const s of subjects) {
         console.log(
-          `- sem=${s.sem} type=${s.type} elective=${s.isElective ? "yes" : "no"  }  id=${s.id}  name=${s.name}`
+          `- sem=${s.sem} type=${s.type} elective=${s.isElective ? "yes" : "no"  }  hours=${s.hoursPerWeek}  id=${s.id}  name=${s.name}`
         );
       }
       return;
@@ -435,6 +469,8 @@ async function main() {
                 sem: s.sem,
                 type: s.type,
                 isElective: Boolean(s.isElective),
+                hoursPerWeek: s.hoursPerWeek,
+                classesPerWeek: s.hoursPerWeek,
               },
             },
           },
@@ -450,6 +486,8 @@ async function main() {
               sem: s.sem,
               type: s.type,
               isElective: Boolean(s.isElective),
+              hoursPerWeek: s.hoursPerWeek,
+              classesPerWeek: s.hoursPerWeek,
             },
             $setOnInsert: {
               collegeId: s.collegeId,
