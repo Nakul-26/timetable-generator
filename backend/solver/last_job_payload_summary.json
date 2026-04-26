@@ -1,0 +1,44 @@
+{
+  "jobId": "69edc16a7cba95579bfefb0d",
+  "collegeId": "2",
+  "inputMode": "EXPLICIT",
+  "counts": {
+    "classes": 1,
+    "subjects": 31,
+    "faculties": 114,
+    "combos": 1
+  },
+  "missingLabCombos": [],
+  "missingRequiredCombos": [],
+  "requiredSummary": [
+    {
+      "classId": "69e61645dbb51e885a1c96ce",
+      "className": "VI-A",
+      "requiredSubjectCount": 1,
+      "totalRequiredHours": 2.0,
+      "topRequired": [
+        {
+          "subjectId": "69e60e95dbb51e885a1c95e0",
+          "subjectName": "Machine Learning Lab",
+          "subjectType": "lab",
+          "requiredHours": 2.0,
+          "eligibleCombos": 1
+        }
+      ]
+    }
+  ],
+  "combosSummary": [
+    {
+      "comboId": "C1",
+      "subjectId": "69e60e95dbb51e885a1c95e0",
+      "subjectName": "Machine Learning Lab",
+      "subjectType": "lab",
+      "classIds": [
+        "69e61645dbb51e885a1c96ce"
+      ],
+      "facultyIds": [
+        "69e607e9dbb51e885a1c955c"
+      ]
+    }
+  ]
+}

@@ -1375,6 +1375,167 @@ async def start_job(request: Request) -> Dict[str, Any]:
     print(f"fixedSlots: {len(payload_data.get('fixedSlots', []))}")
     print(f"DAYS_PER_WEEK: {payload_data.get('DAYS_PER_WEEK')}")
     print(f"HOURS_PER_DAY: {payload_data.get('HOURS_PER_DAY')}")
+    print(f"inputMode: {payload_data.get('inputMode')}")
+    print(f"collegeId: {payload_data.get('collegeId')}")
+
+    # Persist a lightweight summary for quick debugging (even when full dumps are disabled).
+    try:
+        subjects_list = payload_data.get("subjects", []) or []
+        classes_list = payload_data.get("classes", []) or []
+        combos_list = payload_data.get("combos", []) or []
+
+        def _try_int(value: Any) -> Optional[int]:
+            try:
+                return int(value)
+            except Exception:
+                return None
+
+        subject_by_id = {str(s.get("_id") or s.get("id")): s for s in subjects_list if isinstance(s, dict)}
+        combo_count_by_pair: Dict[Tuple[str, str], int] = {}
+        for combo in combos_list:
+            if not isinstance(combo, dict):
+                continue
+            subject_id = str(combo.get("subject_id") or combo.get("subjectId") or "")
+            class_ids = combo.get("class_ids") or combo.get("classIds") or []
+            if not isinstance(class_ids, list):
+                class_ids = [class_ids]
+            for class_id in [str(cid) for cid in class_ids if cid is not None and str(cid).strip()]:
+                key = (class_id, subject_id)
+                combo_count_by_pair[key] = combo_count_by_pair.get(key, 0) + 1
+
+        missing_lab_combos: List[Dict[str, Any]] = []
+        missing_required_combos: List[Dict[str, Any]] = []
+        required_summary: List[Dict[str, Any]] = []
+        for cls in classes_list:
+            if not isinstance(cls, dict):
+                continue
+            class_id = str(cls.get("_id") or cls.get("id") or "")
+            class_name = cls.get("name") or class_id
+            class_days_raw = cls.get("days_per_week")
+            if class_days_raw is None:
+                class_days_raw = cls.get("daysPerWeek")
+            class_days_parsed = _try_int(class_days_raw)
+            subj_hours = cls.get("subject_hours")
+            if not isinstance(subj_hours, dict):
+                continue
+
+            required_pairs_for_class: List[Dict[str, Any]] = []
+            total_required_hours = 0.0
+            for subject_id, hours in subj_hours.items():
+                try:
+                    required = float(hours or 0)
+                except Exception:
+                    required = 0
+                if required <= 0:
+                    continue
+                total_required_hours += required
+                subj = subject_by_id.get(str(subject_id)) or {}
+                subj_type = str(subj.get("type") or "").strip().lower()
+                subj_name = subj.get("name") or str(subject_id)
+                eligible = combo_count_by_pair.get((class_id, str(subject_id)), 0)
+
+                required_pairs_for_class.append({
+                    "subjectId": str(subject_id),
+                    "subjectName": subj_name,
+                    "subjectType": subj_type or None,
+                    "requiredHours": required,
+                    "eligibleCombos": eligible,
+                })
+
+                if eligible <= 0:
+                    missing_required_combos.append({
+                        "classId": class_id,
+                        "className": class_name,
+                        "subjectId": str(subject_id),
+                        "subjectName": subj_name,
+                        "subjectType": subj_type or None,
+                        "requiredHours": required,
+                    })
+                if subj_type != "lab":
+                    continue
+                if eligible <= 0:
+                    missing_lab_combos.append({
+                        "classId": class_id,
+                        "className": class_name,
+                        "subjectId": str(subject_id),
+                        "subjectName": subj_name,
+                        "requiredHours": required,
+                    })
+
+            required_pairs_for_class.sort(key=lambda x: (-float(x.get("requiredHours") or 0), str(x.get("subjectName") or "")))
+            required_summary.append({
+                "classId": class_id,
+                "className": class_name,
+                "classDaysPerWeekRaw": class_days_raw,
+                "classDaysPerWeekParsed": class_days_parsed,
+                "requiredSubjectCount": len(required_pairs_for_class),
+                "totalRequiredHours": total_required_hours,
+                "topRequired": required_pairs_for_class[:12],
+            })
+
+        combos_summary = []
+        for combo in (combos_list or [])[:25]:
+            if not isinstance(combo, dict):
+                continue
+            subject_id = str(combo.get("subject_id") or combo.get("subjectId") or "")
+            subj = subject_by_id.get(subject_id) or {}
+            combos_summary.append({
+                "comboId": str(combo.get("_id") or combo.get("id") or ""),
+                "subjectId": subject_id,
+                "subjectName": subj.get("name") or subject_id,
+                "subjectType": str(subj.get("type") or "").strip().lower() or None,
+                "classIds": combo.get("class_ids") or combo.get("classIds") or [],
+                "facultyIds": combo.get("faculty_ids") or combo.get("facultyIds") or [],
+            })
+
+        summary = {
+            "jobId": body.get("jobId"),
+            "collegeId": payload_data.get("collegeId"),
+            "inputMode": payload_data.get("inputMode"),
+            "schedule": {
+                "daysPerWeek": payload_data.get("DAYS_PER_WEEK"),
+                "hoursPerDay": payload_data.get("HOURS_PER_DAY"),
+                "breakHours": payload_data.get("BREAK_HOURS"),
+            },
+            "counts": {
+                "classes": len(classes_list),
+                "subjects": len(subjects_list),
+                "faculties": len(payload_data.get("faculties", []) or []),
+                "combos": len(combos_list),
+            },
+            "missingLabCombos": missing_lab_combos,
+            "missingRequiredCombos": missing_required_combos[:50],
+            "requiredSummary": required_summary[:10],
+            "combosSummary": combos_summary,
+        }
+        tmp_path = "last_job_payload_summary.json.tmp"
+        out_path = "last_job_payload_summary.json"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, default=_json_default)
+        os.replace(tmp_path, out_path)
+        if missing_lab_combos:
+            print(
+                f"[jobs] Missing lab combos for {len(missing_lab_combos)} class-subject pairs; see last_job_payload_summary.json"
+            )
+    except Exception as exc:
+        print(f"[jobs] Failed to write payload summary: {type(exc).__name__}: {exc}")
+        try:
+            import traceback
+            with open("last_job_payload_summary_error.txt", "w", encoding="utf-8") as ef:
+                ef.write(f"{type(exc).__name__}: {exc}\n")
+                ef.write(traceback.format_exc())
+        except Exception:
+            pass
+
+    # Always log the full payload to terminal for debugging
+    print("\n=== FULL PAYLOAD RECEIVED ===")
+    try:
+        print(json.dumps(body, indent=2, default=_json_default))
+    except Exception as e:
+        print(f"Error serializing payload: {e}")
+        print(f"Raw body: {body}")
+    print("=== FULL PAYLOAD END ===\n")
+
     if DEBUG_DUMP_PAYLOADS:
         print("Full payload saved to received_payload.json")
     print("=== RECEIVED PAYLOAD SUMMARY END ===")
@@ -1404,6 +1565,17 @@ async def start_job(request: Request) -> Dict[str, Any]:
 
 
 def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
+    print("=== SOLVE_INSTANCE STARTED ===")
+    print(f"Payload keys: {list(payload.keys())}")
+    print(f"Combos count: {len(payload.get('combos', []))}")
+    print(f"Classes count: {len(payload.get('classes', []))}")
+    print(f"Subjects count: {len(payload.get('subjects', []))}")
+    print(f"Faculties count: {len(payload.get('faculties', []))}")
+    print(f"Input mode: {payload.get('inputMode')}")
+    print(f"DAYS_PER_WEEK: {payload.get('DAYS_PER_WEEK')}")
+    print(f"HOURS_PER_DAY: {payload.get('HOURS_PER_DAY')}")
+    print("=== SOLVE_INSTANCE PAYLOAD PROCESSED ===")
+
     constraint_config = payload.get("constraintConfig") or {}
     debug_labs = str(os.getenv("DEBUG_LAB_ALLOCATION", "")).strip().lower() in ("1", "true", "yes", "on")
     input_mode = payload.get("inputMode", "EXPLICIT")
@@ -1423,6 +1595,13 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     subjects = [_normalize_id({**s, "type": s.get("type") or "theory"}) for s in payload.get("subjects", [])]
     classes = [_normalize_id(c) for c in payload.get("classes", [])]
     combos_raw = payload.get("combos", [])
+
+    def _is_lab_subject(subj: Dict[str, Any]) -> bool:
+        subj_type = str(subj.get("type") or "").strip().lower()
+        if subj_type == "lab":
+            return True
+        subj_name = str(subj.get("name") or "").strip().lower()
+        return "lab" in subj_name
 
     combos = []
     for idx, c in enumerate(combos_raw):
@@ -1469,6 +1648,13 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
         combos.append(combo)
 
+    print(f"=== PROCESSED COMBOS ({len(combos)}) ===")
+    for i, combo in enumerate(combos[:5]):  # Show first 5 combos
+        print(f"Combo {i+1}: {combo.get('_id')} - Subject: {combo.get('subject_id')} - Teachers: {combo.get('faculty_ids')} - Classes: {combo.get('class_ids')}")
+    if len(combos) > 5:
+        print(f"... and {len(combos) - 5} more combos")
+    print("=== PROCESSED COMBOS END ===\n")
+
     DAYS_PER_WEEK = int(
         _cfg_get(constraint_config, ["schedule", "daysPerWeek"], payload.get("DAYS_PER_WEEK") or 6)
     )
@@ -1482,6 +1668,21 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     ]
     break_hours_set = set(BREAK_HOURS)
 
+    def _safe_int(value: Any) -> Optional[int]:
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    def _class_days_per_week(class_obj: Dict[str, Any]) -> int:
+        raw = class_obj.get("days_per_week")
+        if raw is None:
+            raw = class_obj.get("daysPerWeek")
+        parsed = _safe_int(raw)
+        if parsed is None or parsed <= 0:
+            parsed = DAYS_PER_WEEK
+        return max(1, min(int(parsed), max(1, DAYS_PER_WEEK)))
+
     fixed_slots = payload.get("fixed_slots") or payload.get("fixedSlots") or []
     random_seed = int(payload.get("random_seed") or os.getenv("SOLVER_RANDOM_SEED", "1"))
     solver_time_limit_sec = float(
@@ -1491,6 +1692,17 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC,
         )
     )
+
+    print(f"=== SOLVER CONFIGURATION ===")
+    print(f"DAYS_PER_WEEK: {DAYS_PER_WEEK}")
+    print(f"HOURS_PER_DAY: {HOURS_PER_DAY}")
+    print(f"BREAK_HOURS: {BREAK_HOURS}")
+    print(f"Fixed slots: {len(fixed_slots)}")
+    print(f"Random seed: {random_seed}")
+    print(f"Solver time limit: {solver_time_limit_sec}s")
+    print(f"Constraint config keys: {list(constraint_config.keys()) if constraint_config else 'None'}")
+    print("=== SOLVER CONFIGURATION END ===\n")
+
     max_candidates_per_combo = int(
         _cfg_get(
             constraint_config,
@@ -1964,7 +2176,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         if combo_id not in combo_by_id:
             fixed_slot_warnings.append(f"Fixed slot combo not found: {combo_id}")
             continue
-        if day < 0 or day >= int(class_by_id[class_id].get("days_per_week") or DAYS_PER_WEEK):
+        if day < 0 or day >= _class_days_per_week(class_by_id[class_id]):
             fixed_slot_warnings.append(
                 f"Fixed slot day out of range for class {class_id}: {day}"
             )
@@ -1985,7 +2197,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
             continue
         if combo and any(
-            day >= int(class_by_id[cid].get("days_per_week") or DAYS_PER_WEEK)
+            day >= _class_days_per_week(class_by_id[cid])
             for cid in combo_class_ids
             if cid in class_by_id
         ):
@@ -1996,7 +2208,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         if teacher_avail_enabled and teacher_avail_hard:
             if combo:
                 subj = subject_by_id.get(combo.get("subject_id"))
-                block = lab_block_size if subj and subj.get("type") == "lab" else theory_block_size
+                block = lab_block_size if subj and _is_lab_subject(subj) else theory_block_size
                 availability_conflict = False
                 for fid in combo.get("faculty_ids", []):
                     if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, min(HOURS_PER_DAY, hour + block))):
@@ -2049,9 +2261,9 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             if DEBUG:
                 print(f"[DEBUG] Skipping combo {combo_id}: no required hours for classes {class_ids}, subject {combo['subject_id']}, hours: {required_hours_list}")
             continue
-        block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         max_days_for_combo = min(
-            [int(class_by_id[cid].get("days_per_week") or DAYS_PER_WEEK) for cid in class_ids] or [DAYS_PER_WEEK]
+            [_class_days_per_week(class_by_id[cid]) for cid in class_ids] or [DAYS_PER_WEEK]
         )
         candidate_starts: List[Tuple[int, int]] = []
         rejected_break = 0
@@ -2071,7 +2283,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
 
                 candidate_starts.append((day, hour))
 
-        if debug_labs and str(subj.get("type") or "").lower() == "lab":
+        if debug_labs and _is_lab_subject(subj):
             print("[solve_instance] lab candidate scan", {
                 "comboId": combo_id,
                 "subjectId": combo["subject_id"],
@@ -2120,8 +2332,9 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         fixed_bonus = sum(
             1 for day, hour in candidate_starts if (combo_id, day, hour) in fixed_slot_keys
         )
+        is_lab = _is_lab_subject(subj)
         combo_search_rank[combo_id] = (
-            (10000 if subj.get("type") == "lab" else 0)
+            (10000 if is_lab else 0)
             + (9000 if fixed_bonus > 0 else 0)
             + (7000 if len(class_ids) > 1 else 0)
             + (6000 if len(combo.get("faculty_ids", [])) <= 1 else 0)
@@ -2146,7 +2359,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         candidate_starts = combo_candidate_starts.get(combo_id, [])
         subj = subject_by_id.get(combo["subject_id"])
         if not class_ids or not candidate_starts:
-            if debug_labs and subj and str(subj.get("type") or "").lower() == "lab":
+            if debug_labs and subj and _is_lab_subject(subj):
                 print("[solve_instance] skipping lab combo during search", {
                     "comboId": combo_id,
                     "subjectId": combo["subject_id"],
@@ -2157,7 +2370,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if not subj:
             continue
-        block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         ordered_starts = sorted(
             candidate_starts,
             key=lambda slot: (
@@ -2223,7 +2436,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Constraint: at most one lesson per class per hour
     for cls in classes:
         class_id = cls["_id"]
-        days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+        days = _class_days_per_week(cls)
         for day in range(days):
             for hour in range(HOURS_PER_DAY):
                 if hour in break_hours_set:
@@ -2246,7 +2459,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     class_occ: Dict[Tuple[str, int, int], cp_model.IntVar] = {}
     for cls in classes:
         class_id = cls["_id"]
-        days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+        days = _class_days_per_week(cls)
         for day in range(days):
             for hour in range(HOURS_PER_DAY):
                 if hour in break_hours_set:
@@ -2282,7 +2495,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         subj = subject_by_id.get(combo["subject_id"])
         if not subj:
             continue
-        block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         for class_id in combo.get("class_ids", []):
             x_by_class_subject.setdefault((class_id, combo["subject_id"]), []).append(
                 (var, block)
@@ -2509,12 +2722,12 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     def _build_partial_preview() -> Dict[str, Any]:
-        max_days = max([int(c.get("days_per_week") or DAYS_PER_WEEK) for c in classes] or [DAYS_PER_WEEK])
+        max_days = max([_class_days_per_week(c) for c in classes] or [DAYS_PER_WEEK])
 
         class_timetables: Dict[str, List[List[Any]]] = {}
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             table = []
             for _day in range(days):
                 row = []
@@ -2553,7 +2766,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             subj = subject_by_id.get(combo["subject_id"])
             if not subj:
                 continue
-            block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+            block = lab_block_size if _is_lab_subject(subj) else theory_block_size
             candidate_starts = combo_candidate_starts.get(combo_id, [])
             if not candidate_starts:
                 continue
@@ -2596,7 +2809,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                     ):
                         continue
                     if any(
-                        day >= int(class_by_id[class_id].get("days_per_week") or DAYS_PER_WEEK)
+                        day >= _class_days_per_week(class_by_id[class_id])
                         for class_id in class_ids
                     ):
                         continue
@@ -2676,7 +2889,16 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                 model.Add(scheduled == scheduled_terms)
                 shortage = model.NewIntVar(0, req, f"shortage_{class_id}_{subj_id}")
                 model.Add(scheduled + shortage == req)
-                objective_terms.append(shortage * weekly_hours_shortage_weight)
+                # Strongly prioritize meeting lab hours; otherwise the solver can prefer
+                # an empty timetable (especially in minimal instances) because many soft
+                # constraints penalize placing sessions.
+                effective_shortage_weight = weekly_hours_shortage_weight
+                if _is_lab_subject(subj):
+                    # Ensure lab shortages are never treated as "free" even if config weight is 0.
+                    effective_shortage_weight = max(effective_shortage_weight, weekly_hours_shortage_weight * 50, 50000)
+
+                if effective_shortage_weight > 0:
+                    objective_terms.append(shortage * effective_shortage_weight)
 
     # Soft constraint: teacher continuity.
     teacher_continuity_teachers = [
@@ -2718,7 +2940,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         win_len = class_cont_max + 1
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             for day in range(days):
                 for start in range(HOURS_PER_DAY - win_len + 1):
                     if any(h in break_hours_set for h in range(start, start + win_len)):
@@ -2737,7 +2959,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     # and at least one class after it on the same day.
     for cls in classes:
         class_id = cls["_id"]
-        days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+        days = _class_days_per_week(cls)
         for day in range(days):
             day_hours = [h for h in range(HOURS_PER_DAY) if h not in break_hours_set]
             if len(day_hours) <= 2:
@@ -2842,7 +3064,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     if class_daily_min_enabled and class_daily_min_value > 0:
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             for day in range(days):
                 day_terms = [
                     class_occ[(class_id, day, h)]
@@ -2961,7 +3183,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     if subject_cluster_enabled and subject_cluster_weight > 0:
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             for subj in subjects:
                 subj_id = subj["_id"]
                 req = required_hours_by_class_subject[class_id][subj_id]
@@ -2990,7 +3212,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         usable_hours_per_day = len([h for h in range(HOURS_PER_DAY) if h not in break_hours_set])
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             if days <= 0:
                 continue
             for subj in subjects:
@@ -3042,7 +3264,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     if high_load_timing_enabled and high_load_timing_weight > 0:
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             for subj in subjects:
                 subj_id = subj["_id"]
                 req = required_hours_by_class_subject[class_id][subj_id]
@@ -3068,7 +3290,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     if daily_compactness_enabled and daily_compactness_weight > 0:
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             if days <= 0:
                 continue
 
@@ -3122,7 +3344,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     if weekly_front_loading_enabled and weekly_front_loading_weight > 0:
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             if days <= 0:
                 continue
 
@@ -3174,7 +3396,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     if weekly_balance_enabled and weekly_balance_weight > 0:
         for cls in classes:
             class_id = cls["_id"]
-            days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+            days = _class_days_per_week(cls)
             total_required = required_total_hours_by_class.get(class_id, 0)
             if days <= 0 or total_required <= 0:
                 continue
@@ -3291,12 +3513,12 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     # Build outputs
-    max_days = max([int(c.get("days_per_week") or DAYS_PER_WEEK) for c in classes] or [DAYS_PER_WEEK])
+    max_days = max([_class_days_per_week(c) for c in classes] or [DAYS_PER_WEEK])
 
     class_timetables: Dict[str, List[List[Any]]] = {}
     for cls in classes:
         class_id = cls["_id"]
-        days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+        days = _class_days_per_week(cls)
         table = []
         for d in range(days):
             row = []
@@ -3327,7 +3549,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         combo = combo_by_id[combo_id]
         subj = subject_by_id[combo["subject_id"]]
-        block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         for h in range(hour, hour + block):
             for class_id in combo.get("class_ids", []):
                 class_timetables[class_id][day][h] = combo_id
@@ -3337,7 +3559,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Post-solve unmet requirements report for transparency
     for cls in classes:
         class_id = cls["_id"]
-        days = int(cls.get("days_per_week") or DAYS_PER_WEEK)
+        days = _class_days_per_week(cls)
         for subj in subjects:
             subj_id = subj["_id"]
             req = required_hours_by_class_subject[class_id][subj_id]
@@ -3358,13 +3580,19 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                 u["class_id"] == class_id and u["subject_id"] == subj_id
                 for u in unmet_requirements
             ):
+                eligible_pairs = x_by_class_subject.get((class_id, subj_id), [])
+                reason = (
+                    "no_eligible_combo_starts"
+                    if not eligible_pairs
+                    else "infeasible_under_current_constraints"
+                )
                 unmet_requirements.append(
                     {
                         "class_id": class_id,
                         "subject_id": subj_id,
                         "required_hours": req,
                         "scheduled_hours": scheduled,
-                        "reason": "infeasible_under_current_constraints",
+                        "reason": reason,
                     }
                 )
 

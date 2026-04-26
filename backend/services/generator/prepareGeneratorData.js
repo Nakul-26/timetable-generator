@@ -16,24 +16,6 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
   const debugLabs = String(process.env.DEBUG_LAB_ALLOCATION || "").trim().toLowerCase() === "1" ||
     String(process.env.DEBUG_LAB_ALLOCATION || "").trim().toLowerCase() === "true";
 
-  // Filter inputs based on inputMode
-  let filteredTeachingAllocations = teachingAllocations;
-  let filteredClassSubjectsRaw = classSubjectsRaw;
-  let filteredCombosRaw = combosRaw;
-
-  if (inputMode === "EXPLICIT") {
-    // EXPLICIT: Only use explicit TeachingAllocations, ignore derived relations
-    filteredClassSubjectsRaw = [];
-    filteredCombosRaw = [];
-    console.log("[prepareGeneratorData] EXPLICIT mode: using only TeachingAllocations, ignoring derived relations");
-  } else if (inputMode === "DERIVED") {
-    // DERIVED: Use derived relations, ignore explicit TeachingAllocations
-    filteredTeachingAllocations = [];
-    console.log("[prepareGeneratorData] DERIVED mode: using derived relations, ignoring explicit TeachingAllocations");
-  } else {
-    console.warn(`[prepareGeneratorData] Unknown inputMode: ${inputMode}, using all data`);
-  }
-
   const [
     faculties,
     subjects,
@@ -52,6 +34,31 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
     ElectiveSubjectSetting.find({ collegeId }).lean(),
     TeachingAllocation.find({ collegeId }).lean(),
   ]);
+
+  // Filter inputs based on inputMode
+  let filteredTeachingAllocations = teachingAllocations;
+  let filteredClassSubjectsRaw = classSubjectsRaw;
+  let filteredCombosRaw = combosRaw;
+
+  if (inputMode === "EXPLICIT") {
+    // EXPLICIT: Only use explicit TeachingAllocations, ignore derived relations
+    filteredClassSubjectsRaw = [];
+    filteredCombosRaw = [];
+    console.log("[prepareGeneratorData] EXPLICIT mode: using only TeachingAllocations, ignoring derived relations");
+  } else if (inputMode === "DERIVED") {
+    // DERIVED: Prefer derived relations, but keep explicit LAB allocations.
+    // Labs often need explicit teacher assignment and block-handling; dropping them can
+    // yield required lab hours with zero eligible combos.
+    filteredTeachingAllocations = (teachingAllocations || []).filter((allocation) => {
+      const allocationType = String(allocation?.type || "").toUpperCase();
+      return allocationType === "LAB";
+    });
+    console.log(
+      `[prepareGeneratorData] DERIVED mode: using derived relations + ${filteredTeachingAllocations.length} LAB TeachingAllocations`
+    );
+  } else {
+    console.warn(`[prepareGeneratorData] Unknown inputMode: ${inputMode}, using all data`);
+  }
 
   const explicitClassSubjectKeys = new Set();
   const explicitClassTeacherKeys = new Set();

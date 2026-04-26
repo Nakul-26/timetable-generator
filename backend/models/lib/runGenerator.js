@@ -3,6 +3,9 @@ const DEFAULT_SOLVER_URL = process.env.SOLVER_URL || "http://localhost:8001";
 const DEFAULT_SOLVER_TIME_LIMIT_SEC = 180;
 const DEFAULT_SOLUTION_COUNT = 5;
 
+import fs from "fs/promises";
+import path from "path";
+
 function analyzeClassInternalGaps(classTimetables) {
   let gapCount = 0;
 
@@ -102,21 +105,97 @@ async function callCpSatSolver({
   }, 2000);
 
   try {
+    const requestBody = {
+      faculties,
+      subjects,
+      classes,
+      combos,
+      DAYS_PER_WEEK,
+      HOURS_PER_DAY,
+      fixed_slots: fixedSlots || [],
+      constraintConfig,
+      random_seed,
+      solver_time_limit_sec: solverTimeLimitSec,
+    };
+
+    const debugSolver = String(process.env.DEBUG_SOLVER || "").trim().toLowerCase() in ("1", "true", "yes", "on");
+    const debugLabs = String(process.env.DEBUG_LAB_ALLOCATION || "").trim().toLowerCase() in ("1", "true", "yes", "on");
+
+    if (debugSolver || debugLabs) {
+      try {
+        const outDir = path.resolve(process.cwd(), "solver");
+        const subjectById = new Map((subjects || []).map((s) => [String(s?._id), s]));
+        const comboCountByClassSubject = new Map();
+        for (const combo of combos || []) {
+          const subjectId = String(combo?.subject_id || combo?.subjectId || "");
+          const classIds = Array.isArray(combo?.class_ids) ? combo.class_ids.map(String) : [];
+          for (const classId of classIds) {
+            const key = `${classId}|${subjectId}`;
+            comboCountByClassSubject.set(key, (comboCountByClassSubject.get(key) || 0) + 1);
+          }
+        }
+
+        const missingLabCombos = [];
+        for (const cls of classes || []) {
+          const classId = String(cls?._id);
+          const subjHours = cls?.subject_hours && typeof cls.subject_hours === "object" ? cls.subject_hours : {};
+          for (const [subjectIdRaw, hoursRaw] of Object.entries(subjHours || {})) {
+            const subjectId = String(subjectIdRaw);
+            const required = Number(hoursRaw || 0);
+            if (!(required > 0)) continue;
+            const subject = subjectById.get(subjectId);
+            const subjType = String(subject?.type || "").trim().toLowerCase();
+            if (subjType !== "lab") continue;
+            const key = `${classId}|${subjectId}`;
+            const eligibleComboCount = comboCountByClassSubject.get(key) || 0;
+            if (eligibleComboCount <= 0) {
+              missingLabCombos.push({
+                classId,
+                className: cls?.name || classId,
+                subjectId,
+                subjectName: subject?.name || subjectId,
+                requiredHours: required,
+              });
+            }
+          }
+        }
+
+        const payloadDumpPath = path.join(outDir, "last_solver_payload.json");
+        const summaryPath = path.join(outDir, "last_solver_payload_summary.json");
+        await fs.writeFile(payloadDumpPath, JSON.stringify(requestBody, null, 2), "utf8");
+        await fs.writeFile(
+          summaryPath,
+          JSON.stringify(
+            {
+              solverUrl: DEFAULT_SOLVER_URL,
+              counts: {
+                faculties: Array.isArray(faculties) ? faculties.length : 0,
+                subjects: Array.isArray(subjects) ? subjects.length : 0,
+                classes: Array.isArray(classes) ? classes.length : 0,
+                combos: Array.isArray(combos) ? combos.length : 0,
+              },
+              missingLabCombos,
+            },
+            null,
+            2
+          ),
+          "utf8"
+        );
+
+        if (missingLabCombos.length > 0) {
+          console.warn(
+            `[runGenerator] Missing lab combos for ${missingLabCombos.length} class-subject pairs. See solver/last_solver_payload_summary.json`
+          );
+        }
+      } catch (e) {
+        console.warn("[runGenerator] Failed to dump solver payload:", String(e));
+      }
+    }
+
     const res = await fetch(`${DEFAULT_SOLVER_URL}/solve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        faculties,
-        subjects,
-        classes,
-        combos,
-        DAYS_PER_WEEK,
-        HOURS_PER_DAY,
-        fixed_slots: fixedSlots || [],
-        constraintConfig,
-        random_seed,
-        solver_time_limit_sec: solverTimeLimitSec,
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 

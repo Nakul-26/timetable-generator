@@ -1,0 +1,6 @@
+UnboundLocalError: cannot access local variable 'json' where it is not associated with a value
+Traceback (most recent call last):
+  File "D:\.vscode\erp\timetable\backend\solver\app.py", line 1445, in start_job
+    json.dump(summary, f, indent=2, default=_json_default)
+    ^^^^
+UnboundLocalError: cannot access local variable 'json' where it is not associated with a value
