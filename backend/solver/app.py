@@ -695,7 +695,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         "random_seed": 42,  # Fixed seed for feasibility
         "solver_time_limit_sec": feasibility_time_limit_sec,
     })
-    if feasibility_result.get("ok"):
+    if feasibility_result.get("ok") and not (feasibility_result.get("unmet_requirements") or []):
         progress_callback and progress_callback({"progress": 50, "phase": "feasibility_found"})
         # Return feasibility result immediately if it works
         return {
@@ -1361,6 +1361,10 @@ def health() -> Dict[str, str]:
 @app.post("/jobs")
 async def start_job(request: Request) -> Dict[str, Any]:
     print("=== /jobs endpoint called ===")
+    # Import the JSON module under a local alias so this function never depends
+    # on the module name staying unshadowed by future edits.
+    import json as json_module
+
     body = await request.json()
     print("=== Body received ===")
 
@@ -1511,7 +1515,7 @@ async def start_job(request: Request) -> Dict[str, Any]:
         tmp_path = "last_job_payload_summary.json.tmp"
         out_path = "last_job_payload_summary.json"
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, default=_json_default)
+            json_module.dump(summary, f, indent=2, default=_json_default)
         os.replace(tmp_path, out_path)
         if missing_lab_combos:
             print(
@@ -1530,7 +1534,7 @@ async def start_job(request: Request) -> Dict[str, Any]:
     # Always log the full payload to terminal for debugging
     print("\n=== FULL PAYLOAD RECEIVED ===")
     try:
-        print(json.dumps(body, indent=2, default=_json_default))
+        print(json_module.dumps(body, indent=2, default=_json_default))
     except Exception as e:
         print(f"Error serializing payload: {e}")
         print(f"Raw body: {body}")
@@ -1543,7 +1547,7 @@ async def start_job(request: Request) -> Dict[str, Any]:
     if DEBUG_DUMP_PAYLOADS:
         try:
             with open("received_payload.json", "w", encoding="utf-8") as f:
-                json.dump(body, f, indent=2, default=_json_default)
+                json_module.dump(body, f, indent=2, default=_json_default)
         except Exception as exc:
             print(f"Failed to dump received payload: {exc}")
 
@@ -2882,7 +2886,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                     model.Add(sum(terms) == 0)
                 continue
             scheduled_terms = sum(terms) if terms else 0
-            if weekly_hours_hard:
+            if weekly_hours_hard or _is_lab_subject(subj):
                 model.Add(scheduled_terms == req)
             else:
                 scheduled = model.NewIntVar(0, req, f"scheduled_{class_id}_{subj_id}")

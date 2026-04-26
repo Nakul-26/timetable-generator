@@ -62,6 +62,13 @@ def build_variables(
     combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {}
     search_ordered_vars: List[cp_model.IntVar] = []
 
+    def _is_lab_subject(subj: Dict[str, Any]) -> bool:
+        subj_type = str(subj.get("type") or "").strip().lower()
+        if subj_type == "lab":
+            return True
+        subj_name = str(subj.get("name") or "").strip().lower()
+        return "lab" in subj_name
+
     # Build candidate starts and variables
     for combo in combos:
         combo_id = combo["_id"]
@@ -71,7 +78,7 @@ def build_variables(
         subj = subject_by_id.get(combo["subject_id"])
         if not subj:
             continue
-        block = lab_block_size if subj.get("type") == "lab" else theory_block_size
+        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         max_days_for_combo = min(
             [int(class_by_id[cid].get("days_per_week") or days_per_week) for cid in class_ids] or [days_per_week]
         )
