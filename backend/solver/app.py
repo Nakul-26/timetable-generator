@@ -25,6 +25,8 @@ from bson import ObjectId
 from pymongo import MongoClient
 import boto3
 
+DEBUG = os.getenv("DEBUG_SOLVER", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # Avoid noisy Proactor transport shutdown tracebacks on Windows when clients disconnect.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -78,6 +80,12 @@ def _apply_config_preset(config: Dict[str, Any], mode: str = "college") -> Dict[
         config.setdefault("noGaps", {})["hard"] = False
         config.setdefault("teacherAvailability", {})["hard"] = False
         config.setdefault("teacherContinuity", {})["weight"] = 50  # Lower
+    elif mode == "test":
+        # Very relaxed for testing minimal cases
+        config.setdefault("noGaps", {})["hard"] = False
+        config.setdefault("teacherAvailability", {})["hard"] = False
+        config.setdefault("weeklySubjectHours", {})["hard"] = False
+        config.setdefault("teacherContinuity", {})["weight"] = 10
     return config
 
 def analyze_difficulty(
@@ -162,17 +170,19 @@ def _call_local_solve(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_adaptive_time_limit(difficulty: str, base_time: float) -> float:
     """Get adaptive time limit based on difficulty."""
-    if difficulty == "very_hard":
-        return min(120, base_time)  # Allow up to 2 mins for very hard
-    elif difficulty == "hard":
-        return min(90, base_time)   # Up to 1.5 mins
-    elif difficulty == "medium":
-        return min(60, base_time)   # Up to 1 min
-    return min(120, base_time)       # Up to 2 mins for unknown/easy
+    budget = max(5.0, float(base_time or 0))
+    share_by_difficulty = {
+        "very_hard": 0.80,
+        "hard": 0.60,
+        "medium": 0.45,
+        "easy": 0.35,
+        "unknown": 0.55,
+    }
+    share = share_by_difficulty.get(difficulty, 0.55)
+    return max(30.0, budget * share)
 
 DEFAULT_SOLVER_TIME_LIMIT_SEC = 180.0
 DEFAULT_SOLUTION_COUNT = 2
-TOTAL_TIME_LIMIT = 1200.0  # Allow up to 20 minutes as set in frontend
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
 JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
@@ -513,6 +523,7 @@ def _build_attempt_constraint_config(
 def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cancel_check=None) -> Dict[str, Any]:
     # DEBUG: Log payload summary at start of generation
     print("=== GENERATION PAYLOAD SUMMARY ===")
+    print(f"inputMode: {payload.get('inputMode', 'EXPLICIT')}")
     print(f"classes: {len(payload.get('classes', []))}")
     print(f"subjects: {len(payload.get('subjects', []))}")
     print(f"faculties: {len(payload.get('faculties', []))}")
@@ -654,12 +665,15 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         }
 
     # Phase 1: Feasibility - find any valid timetable with relaxed constraints
+    configured_time_limit = float(
+        _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
+    )
     feasibility_config = copy.deepcopy(constraint_config)
     feasibility_config.setdefault("noGaps", {})["hard"] = False
     feasibility_config.setdefault("teacherAvailability", {})["hard"] = False
     feasibility_config.setdefault("solver", {})["maxCandidatesPerCombo"] = 0  # Unlimited
     feasibility_config.setdefault("solver", {})["earlyAbortNoSolution"] = False
-    feasibility_config.setdefault("weeklySubjectHours", {})["hard"] = True  # Keep structural integrity
+    feasibility_config.setdefault("weeklySubjectHours", {})["hard"] = False  # Allow partial for feasibility
     # Relax weights
     for section in feasibility_config:
         if isinstance(feasibility_config[section], dict):
@@ -668,6 +682,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                     feasibility_config[section][key] = max(1, feasibility_config[section][key] // 2)
 
     progress_callback and progress_callback({"progress": 10, "phase": "feasibility_start"})
+    feasibility_time_limit_sec = max(60.0, min(configured_time_limit, configured_time_limit * 0.25))
     feasibility_result = solve_instance({
         "faculties": faculties,
         "subjects": subjects,
@@ -678,7 +693,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         "fixedSlots": fixed_slots,
         "constraintConfig": feasibility_config,
         "random_seed": 42,  # Fixed seed for feasibility
-        "solver_time_limit_sec": 60,  # 1 min for feasibility
+        "solver_time_limit_sec": feasibility_time_limit_sec,
     })
     if feasibility_result.get("ok"):
         progress_callback and progress_callback({"progress": 50, "phase": "feasibility_found"})
@@ -765,10 +780,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
     adaptive_relax = False  # New: adaptive constraint relaxation
     stop_reason = "attempt_budget_exhausted"
     started = __import__("time").time()
-    configured_time_limit = float(
-        _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
-    )
-    total_time_limit = max(1200.0, configured_time_limit)
+    total_time_limit = max(60.0, configured_time_limit)
     print(f"Configured time limit: {configured_time_limit} seconds ({configured_time_limit/60:.1f} minutes)")
     print(f"Total time limit: {total_time_limit} seconds ({total_time_limit/60:.1f} minutes)")
     min_solver_time_per_attempt_sec = max(
@@ -886,7 +898,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         ) or 1.0
         target_time_share = float(strategy.get("timeShare") or 0) / remaining_share
         per_attempt_time_limit_sec = min(
-            get_adaptive_time_limit(difficulty, 120),  # Adaptive time limit
+            get_adaptive_time_limit(difficulty, configured_time_limit),  # Adaptive time limit scales with the configured budget
             max(
                 min_solver_time_per_attempt_sec,
                 min(
@@ -1393,6 +1405,19 @@ async def start_job(request: Request) -> Dict[str, Any]:
 
 def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     constraint_config = payload.get("constraintConfig") or {}
+    debug_labs = str(os.getenv("DEBUG_LAB_ALLOCATION", "")).strip().lower() in ("1", "true", "yes", "on")
+    input_mode = payload.get("inputMode", "EXPLICIT")
+    
+    if DEBUG:
+        print(f"[solve_instance] Input mode: {input_mode}")
+        print(f"[solve_instance] Combos count: {len(payload.get('combos', []))}")
+
+    def _string_list(value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value if item is not None and str(item).strip()]
+        return [str(value)] if str(value).strip() else []
 
     faculties = [_normalize_id(f) for f in payload.get("faculties", [])]
     subjects = [_normalize_id({**s, "type": s.get("type") or "theory"}) for s in payload.get("subjects", [])]
@@ -1400,13 +1425,47 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     combos_raw = payload.get("combos", [])
 
     combos = []
-    for c in combos_raw:
+    for idx, c in enumerate(combos_raw):
+        subject_ref = c.get("subject")
+        subject_id_value = c.get("subject_id") or c.get("subjectId")
+        if not subject_id_value and isinstance(subject_ref, dict):
+            subject_id_value = (
+                subject_ref.get("_id")
+                or subject_ref.get("id")
+                or subject_ref.get("subject_id")
+                or subject_ref.get("subjectId")
+            )
+        elif not subject_id_value and isinstance(subject_ref, (str, int)):
+            subject_id_value = subject_ref
+
+        class_ids_value = (
+            c.get("class_ids")
+            or c.get("classIds")
+            or c.get("class_id")
+            or c.get("classId")
+            or c.get("class")
+            or c.get("classes")
+            or c.get("class_list")
+        )
+        faculty_ids_value = (
+            c.get("faculty_ids")
+            or c.get("facultyIds")
+            or c.get("faculty_id")
+            or c.get("facultyId")
+            or c.get("teacher_ids")
+            or c.get("teacherIds")
+            or c.get("teacher_id")
+            or c.get("teacherId")
+            or c.get("teachers")
+            or c.get("faculty")
+            or c.get("teacher")
+        )
         combo = {
             **c,
             "_id": str(c.get("_id") or c.get("id")),
-            "subject_id": str(c.get("subject_id")),
-            "faculty_ids": [str(x) for x in (c.get("faculty_ids") or ([c.get("faculty_id")] if c.get("faculty_id") else []))],
-            "class_ids": [str(x) for x in (c.get("class_ids") or [])],
+            "subject_id": str(subject_id_value or ""),
+            "faculty_ids": _string_list(faculty_ids_value),
+            "class_ids": _string_list(class_ids_value),
         }
         combos.append(combo)
 
@@ -1456,8 +1515,8 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     theory_block_size = max(1, int(_cfg_get(constraint_config, ["structural", "theoryBlockSize"], 1)))
 
     weekly_hours_hard = _to_bool(
-        _cfg_get(constraint_config, ["weeklySubjectHours", "hard"], True),
-        True,
+        _cfg_get(constraint_config, ["weeklySubjectHours", "hard"], False),
+        False,
     )
     weekly_hours_shortage_weight = max(
         0, int(_cfg_get(constraint_config, ["weeklySubjectHours", "shortageWeight"], 1000))
@@ -1847,6 +1906,44 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         cid: sum(subject_hours.values())
         for cid, subject_hours in required_hours_by_class_subject.items()
     }
+    if debug_labs:
+        target_subjects = {
+            subj["_id"]: subj.get("name")
+            for subj in subjects
+            if "lab" in str(subj.get("name") or "").lower() or str(subj.get("type") or "").lower() == "lab"
+        }
+        print("[solve_instance] payload summary", {
+            "classes": len(classes),
+            "subjects": len(subjects),
+            "combos": len(combos),
+            "labSubjects": target_subjects,
+        })
+        for cls in classes:
+            class_id = cls["_id"]
+            combo_ids = [
+                combo["_id"]
+                for combo in combos
+                if class_id in [str(cid) for cid in (combo.get("class_ids") or [])]
+            ]
+            print("[solve_instance] class combos", {
+                "classId": class_id,
+                "className": cls.get("name") or class_id,
+                "comboCount": len(combo_ids),
+                "comboIds": combo_ids[:20],
+            })
+        for combo in combos:
+            combo_subject = subject_by_id.get(combo.get("subject_id"))
+            combo_subject_type = str(combo_subject.get("type") or "").lower() if combo_subject else ""
+            if combo_subject_type != "lab":
+                continue
+            print("[solve_instance] lab combo normalized", {
+                "comboId": combo.get("_id"),
+                "subjectId": combo.get("subject_id"),
+                "subjectName": (combo_subject.get("name") if combo_subject else None) or combo.get("subject_id"),
+                "classIds": combo.get("class_ids", []),
+                "facultyIds": combo.get("faculty_ids", []),
+                "rawKeys": sorted(list(combo.keys()))[:40],
+            })
 
     # Validate fixed slots early (non-fatal): keep only valid ones and continue.
     valid_fixed_slots: List[Dict[str, Any]] = []
@@ -1939,29 +2036,66 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         combo_id = combo["_id"]
         class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
         if not class_ids:
+            if DEBUG:
+                print(f"[DEBUG] Skipping combo {combo_id}: no valid class_ids")
             continue
         subj = subject_by_id.get(combo["subject_id"])
         if not subj:
+            if DEBUG:
+                print(f"[DEBUG] Skipping combo {combo_id}: subject {combo['subject_id']} not found")
             continue
-        if all(required_hours_by_class_subject[cid].get(combo["subject_id"], 0) <= 0 for cid in class_ids):
+        required_hours_list = [required_hours_by_class_subject[cid].get(combo["subject_id"], 0) for cid in class_ids]
+        if all(h <= 0 for h in required_hours_list):
+            if DEBUG:
+                print(f"[DEBUG] Skipping combo {combo_id}: no required hours for classes {class_ids}, subject {combo['subject_id']}, hours: {required_hours_list}")
             continue
         block = lab_block_size if subj.get("type") == "lab" else theory_block_size
         max_days_for_combo = min(
             [int(class_by_id[cid].get("days_per_week") or DAYS_PER_WEEK) for cid in class_ids] or [DAYS_PER_WEEK]
         )
         candidate_starts: List[Tuple[int, int]] = []
+        rejected_break = 0
+        rejected_overflow = 0
+        rejected_split_break = 0
         for day in range(max_days_for_combo):
             for hour in range(HOURS_PER_DAY):
                 if hour in break_hours_set:
+                    rejected_break += 1
                     continue
                 if hour + block > HOURS_PER_DAY:
+                    rejected_overflow += 1
                     continue
                 if any(h in break_hours_set for h in range(hour, hour + block)):
+                    rejected_split_break += 1
                     continue
 
                 candidate_starts.append((day, hour))
 
+        if debug_labs and str(subj.get("type") or "").lower() == "lab":
+            print("[solve_instance] lab candidate scan", {
+                "comboId": combo_id,
+                "subjectId": combo["subject_id"],
+                "subjectName": subj.get("name") or combo["subject_id"],
+                "classIds": class_ids,
+                "facultyIds": combo.get("faculty_ids", []),
+                "block": block,
+                "daysPerWeek": max_days_for_combo,
+                "hoursPerDay": HOURS_PER_DAY,
+                "breakHours": sorted(list(break_hours_set)),
+                "candidateCount": len(candidate_starts),
+                "rejectedBreakStarts": rejected_break,
+                "rejectedOverflowStarts": rejected_overflow,
+                "rejectedSplitBreakStarts": rejected_split_break,
+                "sampleCandidates": candidate_starts[:20],
+                "requiredHours": {
+                    cid: required_hours_by_class_subject.get(cid, {}).get(combo["subject_id"], 0)
+                    for cid in class_ids
+                },
+            })
+
         if not candidate_starts:
+            if DEBUG:
+                print(f"[DEBUG] Skipping combo {combo_id}: no candidate starts (block={block}, days={max_days_for_combo})")
             continue
 
         combo_candidate_starts[combo_id] = candidate_starts
@@ -2010,9 +2144,17 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
         combo_id = combo["_id"]
         class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
         candidate_starts = combo_candidate_starts.get(combo_id, [])
-        if not class_ids or not candidate_starts:
-            continue
         subj = subject_by_id.get(combo["subject_id"])
+        if not class_ids or not candidate_starts:
+            if debug_labs and subj and str(subj.get("type") or "").lower() == "lab":
+                print("[solve_instance] skipping lab combo during search", {
+                    "comboId": combo_id,
+                    "subjectId": combo["subject_id"],
+                    "subjectName": subj.get("name") or combo["subject_id"],
+                    "classIds": class_ids,
+                    "candidateStarts": len(candidate_starts),
+                })
+            continue
         if not subj:
             continue
         block = lab_block_size if subj.get("type") == "lab" else theory_block_size
@@ -2511,6 +2653,16 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             req = required_hours_by_class_subject[class_id][subj_id]
             pairs = x_by_class_subject.get((class_id, subj_id), [])
             terms = [var * block for (var, block) in pairs]
+            if debug_labs and req > 0 and str(subj.get("type") or "").lower() == "lab":
+                print("[solve_instance] class subject coverage", {
+                    "classId": class_id,
+                    "className": cls.get("name") or class_id,
+                    "subjectId": subj_id,
+                    "subjectName": subj.get("name") or subj_id,
+                    "requiredHours": req,
+                    "candidateCount": len(pairs),
+                    "block": lab_block_size,
+                })
 
             if req <= 0:
                 if terms:

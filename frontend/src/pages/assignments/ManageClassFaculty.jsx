@@ -13,6 +13,8 @@ const ManageClassFaculty = () => {
     const [bulkMessage, setBulkMessage] = useState("");
     const [bulkError, setBulkError] = useState("");
     const [mutationMessage, setMutationMessage] = useState("");
+    const [selectedAssignmentKeys, setSelectedAssignmentKeys] = useState([]);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
 
     const handleAdd = async (e) => {
         e.preventDefault();
@@ -48,11 +50,34 @@ const ManageClassFaculty = () => {
         setMutationMessage("Deleting class-faculty assignment. Please wait...");
         try {
             await api.delete(`/classes/${classId}/faculties/${facultyId}`);
+            setSelectedAssignmentKeys((prev) => prev.filter((key) => key !== `${classId}__${facultyId}`));
             refetchData(['classes']);
         } catch (err) {
             console.log(`Error: ${err.message}`);
         } finally {
             setMutationMessage("");
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedAssignmentKeys.length === 0) return;
+        if (!window.confirm(`Are you sure you want to delete ${selectedAssignmentKeys.length} selected assignment(s)?`)) return;
+        setBulkDeleting(true);
+        setMutationMessage("Deleting selected class-faculty assignments. Please wait...");
+        try {
+            await Promise.allSettled(
+                selectedAssignmentKeys.map((key) => {
+                    const [classId, facultyId] = key.split("__");
+                    return api.delete(`/classes/${classId}/faculties/${facultyId}`);
+                })
+            );
+            setSelectedAssignmentKeys([]);
+            refetchData(['classes']);
+        } catch (err) {
+            console.log(`Error: ${err.message}`);
+        } finally {
+            setMutationMessage("");
+            setBulkDeleting(false);
         }
     };
 
@@ -66,6 +91,11 @@ const ManageClassFaculty = () => {
         const facultyMatch = !filterFaculty || (assignment.faculty?._id === filterFaculty.value);
         return classMatch && facultyMatch;
     });
+    const filteredAssignmentKeys = filteredAssignments.map((assignment) => `${assignment.class?._id}__${assignment.faculty?._id}`);
+    const allVisibleAssignmentsSelected =
+        filteredAssignmentKeys.length > 0 && filteredAssignmentKeys.every((key) => selectedAssignmentKeys.includes(key));
+    const someVisibleAssignmentsSelected =
+        filteredAssignmentKeys.some((key) => selectedAssignmentKeys.includes(key));
 
     return (
         <div className="manage-container">
@@ -115,12 +145,50 @@ const ManageClassFaculty = () => {
                 />
             </div>
 
+            {selectedAssignmentKeys.length > 0 ? (
+                <div className="bulk-actions-bar">
+                    <label className="bulk-select-all">
+                        <input
+                            type="checkbox"
+                            checked={allVisibleAssignmentsSelected}
+                            ref={(input) => {
+                                if (input) input.indeterminate = !allVisibleAssignmentsSelected && someVisibleAssignmentsSelected;
+                            }}
+                            onChange={(e) => {
+                                const nextSelected = e.target.checked
+                                    ? Array.from(new Set([...selectedAssignmentKeys, ...filteredAssignmentKeys]))
+                                    : selectedAssignmentKeys.filter((key) => !filteredAssignmentKeys.includes(key));
+                                setSelectedAssignmentKeys(nextSelected);
+                            }}
+                        />
+                        Select all visible
+                    </label>
+                    <span className="bulk-selection-count">{selectedAssignmentKeys.length} selected</span>
+                    <button type="button" className="danger-btn" onClick={handleBulkDelete} disabled={bulkDeleting || Boolean(mutationMessage)}>
+                        Delete selected
+                    </button>
+                    <button type="button" className="secondary-btn" onClick={() => setSelectedAssignmentKeys([])} disabled={bulkDeleting || Boolean(mutationMessage)}>
+                        Clear selection
+                    </button>
+                </div>
+            ) : null}
+
             {loading ? (
                 <div>Loading...</div>
             ) : (
                 <table className="styled-table">
                     <thead>
                         <tr>
+                            <th className="selection-column">
+                                <input
+                                    type="checkbox"
+                                    checked={allVisibleAssignmentsSelected}
+                                    ref={(input) => {
+                                        if (input) input.indeterminate = !allVisibleAssignmentsSelected && someVisibleAssignmentsSelected;
+                                    }}
+                                    onChange={(e) => setSelectedAssignmentKeys(e.target.checked ? filteredAssignmentKeys : [])}
+                                />
+                            </th>
                             <th>Class</th>
                             <th>Faculty</th>
                             <th>Actions</th>
@@ -128,11 +196,24 @@ const ManageClassFaculty = () => {
                     </thead>
                     <tbody>
                         {filteredAssignments.map(({ class: c, faculty: f }) => (
-                            <tr key={`${c._id}-${f._id}`}>
+                            <tr key={`${c._id}-${f._id}`} className={selectedAssignmentKeys.includes(`${c._id}__${f._id}`) ? "row-selected" : ""}>
+                                <td className="selection-cell">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedAssignmentKeys.includes(`${c._id}__${f._id}`)}
+                                        onChange={(e) => {
+                                            setSelectedAssignmentKeys((prev) =>
+                                                e.target.checked
+                                                    ? Array.from(new Set([...prev, `${c._id}__${f._id}`]))
+                                                    : prev.filter((key) => key !== `${c._id}__${f._id}`)
+                                            );
+                                        }}
+                                    />
+                                </td>
                                 <td>{c.name}</td>
                                 <td>{f.name}</td>
                                 <td>
-                                    <button onClick={() => handleDelete(c._id, f._id)} className="danger-btn" disabled={Boolean(mutationMessage)}>
+                                    <button onClick={() => handleDelete(c._id, f._id)} className="danger-btn" disabled={Boolean(mutationMessage) || bulkDeleting}>
                                         {mutationMessage ? "Working..." : "Delete"}
                                     </button>
                                 </td>

@@ -11,6 +11,8 @@ const ManageTeacher = () => {
   const [excelError, setExcelError] = useState("");
   const [uploadingExcel, setUploadingExcel] = useState(false);
   const [mutationMessage, setMutationMessage] = useState("");
+  const [selectedTeacherIds, setSelectedTeacherIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef(null);
 
   // Edit form states
@@ -185,11 +187,29 @@ const ManageTeacher = () => {
     setMutationMessage("Deleting teacher. Please wait...");
     try {
       await API.delete(`/faculties/${id}`);
+      setSelectedTeacherIds((prev) => prev.filter((itemId) => itemId !== id));
       refetchData(['faculties']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
     } finally {
       setMutationMessage("");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTeacherIds.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedTeacherIds.length} selected teacher(s)?`)) return;
+    setBulkDeleting(true);
+    setMutationMessage("Deleting selected teachers. Please wait...");
+    try {
+      await Promise.allSettled(selectedTeacherIds.map((id) => API.delete(`/faculties/${id}`)));
+      setSelectedTeacherIds([]);
+      refetchData(['faculties']);
+    } catch (err) {
+      console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
+      setBulkDeleting(false);
     }
   };
 
@@ -225,6 +245,11 @@ const ManageTeacher = () => {
         (t.id && t.id.toLowerCase().includes(filterFacultyId.toLowerCase())))
     );
   });
+  const filteredTeacherIds = filteredTeachers.map((teacher) => teacher._id);
+  const allVisibleTeachersSelected =
+    filteredTeacherIds.length > 0 && filteredTeacherIds.every((id) => selectedTeacherIds.includes(id));
+  const someVisibleTeachersSelected =
+    filteredTeacherIds.some((id) => selectedTeacherIds.includes(id));
 
   const resetFilters = () => {
     setFilterName("");
@@ -281,6 +306,34 @@ const ManageTeacher = () => {
         </div>
       )}
 
+      {selectedTeacherIds.length > 0 ? (
+        <div className="bulk-actions-bar">
+          <label className="bulk-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleTeachersSelected}
+              ref={(input) => {
+                if (input) input.indeterminate = !allVisibleTeachersSelected && someVisibleTeachersSelected;
+              }}
+              onChange={(e) => {
+                const nextSelected = e.target.checked
+                  ? Array.from(new Set([...selectedTeacherIds, ...filteredTeacherIds]))
+                  : selectedTeacherIds.filter((id) => !filteredTeacherIds.includes(id));
+                setSelectedTeacherIds(nextSelected);
+              }}
+            />
+            Select all visible
+          </label>
+          <span className="bulk-selection-count">{selectedTeacherIds.length} selected</span>
+          <button type="button" className="danger-btn" onClick={handleBulkDelete} disabled={bulkDeleting || Boolean(mutationMessage)}>
+            Delete selected
+          </button>
+          <button type="button" className="secondary-btn" onClick={() => setSelectedTeacherIds([])} disabled={bulkDeleting || Boolean(mutationMessage)}>
+            Clear selection
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
@@ -289,6 +342,16 @@ const ManageTeacher = () => {
         <table className="styled-table">
           <thead>
             <tr>
+              <th className="selection-column">
+                <input
+                  type="checkbox"
+                  checked={allVisibleTeachersSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = !allVisibleTeachersSelected && someVisibleTeachersSelected;
+                  }}
+                  onChange={(e) => setSelectedTeacherIds(e.target.checked ? filteredTeacherIds : [])}
+                />
+              </th>
               <th>Name</th>
               <th>Faculty ID</th>
               <th>Assigned Classes</th>
@@ -301,7 +364,20 @@ const ManageTeacher = () => {
           <tbody>
             {Array.isArray(filteredTeachers) &&
               filteredTeachers.map((teacher) => (
-                <tr key={teacher._id}>
+                <tr key={teacher._id} className={selectedTeacherIds.includes(teacher._id) ? "row-selected" : ""}>
+                  <td className="selection-cell">
+                    <input
+                      type="checkbox"
+                      checked={selectedTeacherIds.includes(teacher._id)}
+                      onChange={(e) => {
+                        setSelectedTeacherIds((prev) =>
+                          e.target.checked
+                            ? Array.from(new Set([...prev, teacher._id]))
+                            : prev.filter((id) => id !== teacher._id)
+                        );
+                      }}
+                    />
+                  </td>
                   <td>
                     {editId === teacher._id ? (
                       <input
@@ -374,7 +450,7 @@ const ManageTeacher = () => {
                         <button
                           onClick={() => handleDelete(teacher._id)}
                           className="danger-btn"
-                          disabled={Boolean(mutationMessage)}
+                          disabled={Boolean(mutationMessage) || bulkDeleting}
                         >
                           {mutationMessage ? "Working..." : "Delete"}
                         </button>

@@ -11,6 +11,8 @@ function ManageSubject() {
   const [excelError, setExcelError] = useState("");
   const [uploadingExcel, setUploadingExcel] = useState(false);
   const [mutationMessage, setMutationMessage] = useState("");
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef(null);
 
   // Edit states
@@ -249,11 +251,29 @@ function ManageSubject() {
     setMutationMessage("Deleting subject. Please wait...");
     try {
       await axios.delete(`/subjects/${id}`);
+      setSelectedSubjectIds((prev) => prev.filter((itemId) => itemId !== id));
       refetchData(['subjects']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
     } finally {
       setMutationMessage("");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedSubjectIds.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedSubjectIds.length} selected subject(s)?`)) return;
+    setBulkDeleting(true);
+    setMutationMessage("Deleting selected subjects. Please wait...");
+    try {
+      await Promise.allSettled(selectedSubjectIds.map((id) => axios.delete(`/subjects/${id}`)));
+      setSelectedSubjectIds([]);
+      refetchData(['subjects']);
+    } catch (err) {
+      console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
+      setBulkDeleting(false);
     }
   };
 
@@ -325,6 +345,11 @@ function ManageSubject() {
       (!filterSem || (s.sem && String(s.sem) === filterSem))
     );
   });
+  const filteredSubjectIds = filteredSubjects.map((subject) => subject._id);
+  const allVisibleSubjectsSelected =
+    filteredSubjectIds.length > 0 && filteredSubjectIds.every((id) => selectedSubjectIds.includes(id));
+  const someVisibleSubjectsSelected =
+    filteredSubjectIds.some((id) => selectedSubjectIds.includes(id));
 
   return (
     <div className="manage-container">
@@ -382,6 +407,34 @@ function ManageSubject() {
         </div>
       )}
 
+      {selectedSubjectIds.length > 0 ? (
+        <div className="bulk-actions-bar">
+          <label className="bulk-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleSubjectsSelected}
+              ref={(input) => {
+                if (input) input.indeterminate = !allVisibleSubjectsSelected && someVisibleSubjectsSelected;
+              }}
+              onChange={(e) => {
+                const nextSelected = e.target.checked
+                  ? Array.from(new Set([...selectedSubjectIds, ...filteredSubjectIds]))
+                  : selectedSubjectIds.filter((id) => !filteredSubjectIds.includes(id));
+                setSelectedSubjectIds(nextSelected);
+              }}
+            />
+            Select all visible
+          </label>
+          <span className="bulk-selection-count">{selectedSubjectIds.length} selected</span>
+          <button type="button" className="danger-btn" onClick={handleBulkDelete} disabled={bulkDeleting || Boolean(mutationMessage)}>
+            Delete selected
+          </button>
+          <button type="button" className="secondary-btn" onClick={() => setSelectedSubjectIds([])} disabled={bulkDeleting || Boolean(mutationMessage)}>
+            Clear selection
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
@@ -390,6 +443,16 @@ function ManageSubject() {
         <table className="styled-table">
           <thead>
             <tr>
+              <th className="selection-column">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSubjectsSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = !allVisibleSubjectsSelected && someVisibleSubjectsSelected;
+                  }}
+                  onChange={(e) => setSelectedSubjectIds(e.target.checked ? filteredSubjectIds : [])}
+                />
+              </th>
               <th>Name</th>
               <th>Code</th>
               <th>Semester/Class</th>
@@ -405,7 +468,20 @@ function ManageSubject() {
           <tbody>
             {Array.isArray(filteredSubjects) &&
               filteredSubjects.map((subject) => (
-                <tr key={subject._id}>
+                <tr key={subject._id} className={selectedSubjectIds.includes(subject._id) ? "row-selected" : ""}>
+                  <td className="selection-cell">
+                    <input
+                      type="checkbox"
+                      checked={selectedSubjectIds.includes(subject._id)}
+                      onChange={(e) => {
+                        setSelectedSubjectIds((prev) =>
+                          e.target.checked
+                            ? Array.from(new Set([...prev, subject._id]))
+                            : prev.filter((id) => id !== subject._id)
+                        );
+                      }}
+                    />
+                  </td>
                   <td style={{ width: '10%' }}>
                     {editId === subject._id ? (
                       <input
@@ -546,7 +622,7 @@ function ManageSubject() {
                         <button
                           onClick={() => handleDelete(subject._id)}
                           className="danger-btn"
-                          disabled={Boolean(mutationMessage)}
+                          disabled={Boolean(mutationMessage) || bulkDeleting}
                         >
                           {mutationMessage ? "Working..." : "Delete"}
                         </button>

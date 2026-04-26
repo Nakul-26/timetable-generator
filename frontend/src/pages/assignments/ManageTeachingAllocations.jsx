@@ -15,6 +15,55 @@ const resolveSelectedHours = (selectedSubjectItems, subjects) => {
   const uniqueValues = [...new Set(values)];
   return uniqueValues.length === 1 ? String(uniqueValues[0]) : "";
 };
+const createElectiveRow = () => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  subject: null,
+  teacher: null,
+});
+const getAllocationSubjectIds = (item) => {
+  if (Array.isArray(item?.subjects) && item.subjects.length > 0) {
+    return [...new Set(item.subjects
+      .map((pair) => String(pair?.subject?._id || pair?.subject || pair?.subjectId || ""))
+      .filter(Boolean))];
+  }
+  return item?.subject?._id ? [String(item.subject._id)] : item?.subject ? [String(item.subject)] : [];
+};
+const getAllocationTeacherIds = (item) => {
+  if (Array.isArray(item?.subjects) && item.subjects.length > 0) {
+    const ids = item.subjects
+      .map((pair) => String(pair?.teacher?._id || pair?.teacher || pair?.teacherId || ""))
+      .filter(Boolean);
+    return [...new Set(ids)];
+  }
+  if (Array.isArray(item?.teachers) && item.teachers.length > 0) {
+    return item.teachers.map((teacher) => String(teacher?._id || teacher || "")).filter(Boolean);
+  }
+  return item?.teacher?._id ? [String(item.teacher._id)] : item?.teacher ? [String(item.teacher)] : [];
+};
+const formatAllocationSubjects = (item) => {
+  if (Array.isArray(item?.subjects) && item.subjects.length > 0) {
+    return [...new Set(item.subjects
+      .map((pair) => pair?.subject?.name || "Unknown Subject")
+      .filter(Boolean))]
+      .join(" + ");
+  }
+  return item?.subject?.name || "Unknown Subject";
+};
+const formatAllocationTeachers = (item) => {
+  if (Array.isArray(item?.subjects) && item.subjects.length > 0) {
+    return [...new Set(item.subjects
+      .map((pair) => pair?.teacher?.name || "No Teacher")
+      .filter(Boolean))]
+      .join(" + ");
+  }
+  if (Array.isArray(item?.teachers) && item.teachers.length > 0) {
+    return item.teachers
+      .map((teacher) => teacher?.name)
+      .filter(Boolean)
+      .join(" + ");
+  }
+  return item?.teacher?.name || "No Teacher";
+};
 
 const ManageTeachingAllocations = () => {
   const { classes, subjects, faculties } = useContext(DataContext);
@@ -22,6 +71,10 @@ const ManageTeachingAllocations = () => {
   const [selectedClasses, setSelectedClasses] = useState([]);
   const [selectedSubjects, setSelectedSubjects] = useState([]);
   const [selectedTeachers, setSelectedTeachers] = useState([]);
+  const [selectedLabSubject, setSelectedLabSubject] = useState(null);
+  const [selectedLabTeachers, setSelectedLabTeachers] = useState([]);
+  const [allocationMode, setAllocationMode] = useState("normal");
+  const [electiveRows, setElectiveRows] = useState([createElectiveRow()]);
   const [hoursPerWeek, setHoursPerWeek] = useState("");
   const [combinedClassGroupId, setCombinedClassGroupId] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -31,6 +84,8 @@ const ManageTeachingAllocations = () => {
   const [submitting, setSubmitting] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [selectedAllocationIds, setSelectedAllocationIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [error, setError] = useState("");
   const [calcSummary, setCalcSummary] = useState(null);
 
@@ -43,14 +98,42 @@ const ManageTeachingAllocations = () => {
       const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
       return String(subject?.type || "").toLowerCase() === "no_teacher";
     });
-  const getSubjectType = (subjectId) => {
-    const subject = subjects.find((s) => String(s._id) === String(subjectId));
-    return String(subject?.type || "").toLowerCase();
-  };
+  const anySelectedSubjectsGroupedTeachers =
+    selectedSubjects.length > 0 &&
+    selectedSubjects.some((subjectOption) => {
+      const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
+      const subjectType = String(subject?.type || "").toLowerCase();
+      return Boolean(subject?.isElective) || subjectType === "lab";
+    });
 
   useEffect(() => {
-    setHoursPerWeek(resolveSelectedHours(selectedSubjects, subjects));
-  }, [selectedSubjects, subjects]);
+    const subjectItems =
+      allocationMode === "elective"
+        ? electiveRows.map((row) => row.subject).filter(Boolean)
+        : allocationMode === "lab"
+          ? selectedLabSubject
+            ? [selectedLabSubject]
+            : []
+          : selectedSubjects;
+    setHoursPerWeek(resolveSelectedHours(subjectItems, subjects));
+  }, [allocationMode, electiveRows, selectedLabSubject, selectedSubjects, subjects]);
+
+  useEffect(() => {
+    if (allocationMode === "normal") {
+      setSelectedLabSubject(null);
+      setSelectedLabTeachers([]);
+      setElectiveRows([createElectiveRow()]);
+    } else if (allocationMode === "lab") {
+      setSelectedSubjects([]);
+      setSelectedTeachers([]);
+      setElectiveRows([createElectiveRow()]);
+    } else if (allocationMode === "elective") {
+      setSelectedSubjects([]);
+      setSelectedTeachers([]);
+      setSelectedLabSubject(null);
+      setSelectedLabTeachers([]);
+    }
+  }, [allocationMode]);
 
   const fetchAllocations = async () => {
     setLoading(true);
@@ -75,15 +158,21 @@ const ManageTeachingAllocations = () => {
         !filterClassId ||
         String(item?.class?._id) === String(filterClassId) ||
         (item?.classes || []).some((cls) => String(cls?._id) === String(filterClassId));
-      const subjectMatch = !filterSubjectId || String(item?.subject?._id) === String(filterSubjectId);
+      const subjectIds = getAllocationSubjectIds(item);
+      const teacherIds = getAllocationTeacherIds(item);
+      const subjectMatch = !filterSubjectId || subjectIds.includes(String(filterSubjectId));
       const teacherMatch =
         !filterTeacherId ||
-        String(item?.teacher?._id) === String(filterTeacherId) ||
-        (item?.teachers || []).some((teacher) => String(teacher?._id) === String(filterTeacherId)) ||
-        (!item?.teacher && filterTeacherId === "__none__");
+        teacherIds.includes(String(filterTeacherId)) ||
+        (!teacherIds.length && filterTeacherId === "__none__");
       return classMatch && subjectMatch && teacherMatch;
     });
   }, [allocations, filterClassId, filterSubjectId, filterTeacherId]);
+  const filteredAllocationIds = filteredAllocations.map((item) => String(item?.id || item?._id || ""));
+  const allVisibleAllocationsSelected =
+    filteredAllocationIds.length > 0 && filteredAllocationIds.every((id) => selectedAllocationIds.includes(id));
+  const someVisibleAllocationsSelected =
+    filteredAllocationIds.some((id) => selectedAllocationIds.includes(id));
 
   const classOptions = useMemo(
     () =>
@@ -114,19 +203,8 @@ const ManageTeachingAllocations = () => {
 
   const handleAdd = async (e) => {
     e.preventDefault();
-    if (
-      selectedClasses.length === 0 ||
-      selectedSubjects.length === 0 ||
-      (!allSelectedSubjectsNoTeacher && selectedTeachers.length === 0)
-    ) {
-      setError("Please select at least one class and subject. Teachers are optional only for no-teacher subjects.");
-      return;
-    }
-    if (!allSelectedSubjectsNoTeacher && selectedSubjects.some((subjectOption) => {
-      const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
-      return String(subject?.type || "").toLowerCase() === "no_teacher";
-    })) {
-      setError("Add no-teacher subjects separately from teacher-assigned subjects.");
+    if (selectedClasses.length === 0) {
+      setError("Please select at least one class.");
       return;
     }
     if (selectedClasses.length > 1 && !combinedClassGroupId.trim()) {
@@ -138,26 +216,89 @@ const ManageTeachingAllocations = () => {
     setError("");
     try {
       const requests = [];
-      for (const subject of selectedSubjects) {
-        const subjectData = subjects.find((s) => String(s._id) === String(subject.value));
-        const subjectType = String(subjectData?.type || "").toLowerCase();
-        const isNoTeacher = subjectType === "no_teacher";
-        const isLab = subjectType === "lab";
-        const teacherGroups = isNoTeacher
-          ? [[]]
-          : isLab
-            ? [selectedTeachers]
-            : selectedTeachers.map((teacher) => [teacher]);
-        for (const teacherGroup of teacherGroups) {
-          requests.push(
-            api.post("/teaching-allocations", {
-              classIds: selectedClasses.map((item) => item.value),
-              subjectId: subject.value,
-              teacherIds: teacherGroup.map((teacher) => teacher.value),
-              hoursPerWeek: hoursPerWeek === "" ? undefined : Number(hoursPerWeek),
-              combinedClassGroupId: selectedClasses.length > 1 ? combinedClassGroupId : null,
-            })
-          );
+
+      if (allocationMode === "elective") {
+        if (electiveRows.length < 2) {
+          setError("Add at least two subject-teacher rows for an elective block.");
+          return;
+        }
+        if (electiveRows.some((row) => !row.subject || !row.teacher)) {
+          setError("Each elective row must have both a subject and a teacher.");
+          return;
+        }
+        const subjectPayload = electiveRows.map((row) => ({
+          subjectId: row.subject.value,
+          teacherId: row.teacher.value,
+        }));
+        requests.push(api.post("/teaching-allocations", {
+          classIds: selectedClasses.map((item) => item.value),
+          type: "ELECTIVE",
+          subjects: subjectPayload,
+          subjectId: subjectPayload[0]?.subjectId,
+          teacherIds: subjectPayload.map((row) => row.teacherId),
+          hoursPerWeek: hoursPerWeek === "" ? undefined : Number(hoursPerWeek),
+          combinedClassGroupId: selectedClasses.length > 1 ? combinedClassGroupId : null,
+        }));
+      } else if (allocationMode === "lab") {
+        if (!selectedLabSubject) {
+          setError("Please select a lab subject.");
+          return;
+        }
+        if (String(subjects.find((s) => String(s._id) === String(selectedLabSubject.value))?.type || "").toLowerCase() !== "lab") {
+          setError("Lab mode requires a lab subject.");
+          return;
+        }
+        if (selectedLabTeachers.length === 0) {
+          setError("Please select at least one teacher for the lab block.");
+          return;
+        }
+        requests.push(api.post("/teaching-allocations", {
+          classIds: selectedClasses.map((item) => item.value),
+          type: "LAB",
+          subjectId: selectedLabSubject.value,
+          teacherIds: selectedLabTeachers.map((teacher) => teacher.value),
+          hoursPerWeek: hoursPerWeek === "" ? undefined : Number(hoursPerWeek),
+          combinedClassGroupId: selectedClasses.length > 1 ? combinedClassGroupId : null,
+        }));
+      } else {
+        if (
+          selectedSubjects.length === 0 ||
+          (!allSelectedSubjectsNoTeacher && selectedTeachers.length === 0)
+        ) {
+          setError("Please select at least one subject. Teachers are optional only for no-teacher subjects.");
+          return;
+        }
+        if (!allSelectedSubjectsNoTeacher && selectedSubjects.some((subjectOption) => {
+          const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
+          return String(subject?.type || "").toLowerCase() === "no_teacher";
+        })) {
+          setError("Add no-teacher subjects separately from teacher-assigned subjects.");
+          return;
+        }
+
+        for (const subject of selectedSubjects) {
+          const subjectData = subjects.find((s) => String(s._id) === String(subject.value));
+          const subjectType = String(subjectData?.type || "").toLowerCase();
+          const isNoTeacher = subjectType === "no_teacher";
+          const isLab = subjectType === "lab";
+          const isElective = Boolean(subjectData?.isElective);
+          const keepTeachersTogether = isLab || isElective;
+          const teacherGroups = isNoTeacher
+            ? [[]]
+            : keepTeachersTogether
+              ? [selectedTeachers]
+              : selectedTeachers.map((teacher) => [teacher]);
+          for (const teacherGroup of teacherGroups) {
+            requests.push(
+              api.post("/teaching-allocations", {
+                classIds: selectedClasses.map((item) => item.value),
+                subjectId: subject.value,
+                teacherIds: teacherGroup.map((teacher) => teacher.value),
+                hoursPerWeek: hoursPerWeek === "" ? undefined : Number(hoursPerWeek),
+                combinedClassGroupId: selectedClasses.length > 1 ? combinedClassGroupId : null,
+              })
+            );
+          }
         }
       }
 
@@ -170,6 +311,10 @@ const ManageTeachingAllocations = () => {
       setSelectedClasses([]);
       setSelectedSubjects([]);
       setSelectedTeachers([]);
+      setSelectedLabSubject(null);
+      setSelectedLabTeachers([]);
+      setAllocationMode("normal");
+      setElectiveRows([createElectiveRow()]);
       setHoursPerWeek("");
       setCombinedClassGroupId("");
       await fetchAllocations();
@@ -181,20 +326,45 @@ const ManageTeachingAllocations = () => {
   };
 
   const handleDelete = async (item) => {
+    const allocationId = String(item?.id || item?._id || "");
+    if (!allocationId) return;
     if (!window.confirm("Delete this class-subject-teacher allocation?")) return;
     setDeleting(true);
     setError("");
     try {
       await api.delete("/teaching-allocations", {
         data: {
-          allocationId: item.id,
+          allocationId,
         },
       });
+      setSelectedAllocationIds((prev) => prev.filter((id) => id !== allocationId));
       await fetchAllocations();
     } catch (e) {
       setError(e?.response?.data?.error || "Failed to delete allocation.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedAllocationIds.length === 0) return;
+    if (!window.confirm(`Delete ${selectedAllocationIds.length} selected allocation(s)?`)) return;
+    setBulkDeleting(true);
+    setError("");
+    try {
+      await Promise.allSettled(
+        selectedAllocationIds.map((allocationId) =>
+          api.delete("/teaching-allocations", {
+            data: { allocationId },
+          })
+        )
+      );
+      setSelectedAllocationIds([]);
+      await fetchAllocations();
+    } catch (e) {
+      setError(e?.response?.data?.error || "Failed to delete selected allocations.");
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -265,30 +435,129 @@ const ManageTeachingAllocations = () => {
           </div>
 
           <div className="form-group cst-field">
-            <label>Select Subjects</label>
-            <Select
-              options={subjectOptions}
-              value={selectedSubjects}
-              onChange={(value) => setSelectedSubjects(value || [])}
-              placeholder="Select Subjects"
-              isMulti
-            />
+            <label>Allocation Mode</label>
+            <select value={allocationMode} onChange={(e) => setAllocationMode(e.target.value)}>
+              <option value="normal">Normal Subject Combo</option>
+              <option value="lab">Lab Block</option>
+              <option value="elective">Elective Block</option>
+            </select>
           </div>
 
-          <div className="form-group cst-field">
-            <label>Select Teachers</label>
-            <Select
-              options={teacherOptions}
-              value={selectedTeachers}
-              onChange={(value) => setSelectedTeachers(value || [])}
-              placeholder={allSelectedSubjectsNoTeacher ? "Not required for no-teacher subjects" : "Select Teachers"}
-              isMulti
-              isDisabled={allSelectedSubjectsNoTeacher}
-            />
-            {!allSelectedSubjectsNoTeacher && selectedSubjects.some((subjectOption) => getSubjectType(subjectOption.value) === "lab") ? (
-              <small>For lab subjects, selected teachers are saved as one co-teaching combo.</small>
-            ) : null}
-          </div>
+          {allocationMode === "elective" ? (
+            <div className="form-group cst-field" style={{ gridColumn: "1 / -1" }}>
+              <label>Elective Options</label>
+              <small>Each row is one subject-teacher pair that runs in the same block.</small>
+              <div className="elective-option-list">
+                {electiveRows.map((row, index) => (
+                  <div key={row.id} className="elective-option-row">
+                    <div className="elective-option-index">Option {index + 1}</div>
+                    <div className="elective-option-fields">
+                      <div className="elective-option-field">
+                        <label>Subject</label>
+                        <Select
+                          options={subjectOptions}
+                          value={row.subject}
+                          onChange={(value) =>
+                            setElectiveRows((prev) =>
+                              prev.map((item) => (item.id === row.id ? { ...item, subject: value || null } : item))
+                            )
+                          }
+                          placeholder="Select subject"
+                        />
+                      </div>
+                      <div className="elective-option-field">
+                        <label>Teacher</label>
+                        <Select
+                          options={teacherOptions}
+                          value={row.teacher}
+                          onChange={(value) =>
+                            setElectiveRows((prev) =>
+                              prev.map((item) => (item.id === row.id ? { ...item, teacher: value || null } : item))
+                            )
+                          }
+                          placeholder="Select teacher"
+                        />
+                      </div>
+                    </div>
+                    <div className="elective-option-actions">
+                      <button
+                        type="button"
+                        className="danger-btn"
+                        onClick={() => setElectiveRows((prev) => prev.length > 1 ? prev.filter((item) => item.id !== row.id) : prev)}
+                        disabled={electiveRows.length <= 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="elective-option-add-row">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => setElectiveRows((prev) => [...prev, createElectiveRow()])}
+                >
+                  + Add Option
+                </button>
+              </div>
+            </div>
+          ) : allocationMode === "lab" ? (
+            <>
+              <div className="form-group cst-field">
+                <label>Select Lab Subject</label>
+                <Select
+                  options={subjectOptions.filter((subject) => {
+                    const subjectData = subjects.find((item) => String(item._id) === String(subject.value));
+                    return String(subjectData?.type || "").toLowerCase() === "lab";
+                  })}
+                  value={selectedLabSubject}
+                  onChange={(value) => setSelectedLabSubject(value || null)}
+                  placeholder="Select lab subject"
+                />
+              </div>
+
+              <div className="form-group cst-field">
+                <label>Select Lab Teachers</label>
+                <Select
+                  options={teacherOptions}
+                  value={selectedLabTeachers}
+                  onChange={(value) => setSelectedLabTeachers(value || [])}
+                  placeholder="Select one or more teachers"
+                  isMulti
+                />
+                <small>Lab subjects can be taught by one or more teachers in the same block.</small>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="form-group cst-field">
+                <label>Select Subjects</label>
+                <Select
+                  options={subjectOptions}
+                  value={selectedSubjects}
+                  onChange={(value) => setSelectedSubjects(value || [])}
+                  placeholder="Select Subjects"
+                  isMulti
+                />
+              </div>
+
+              <div className="form-group cst-field">
+                <label>Select Teachers</label>
+                <Select
+                  options={teacherOptions}
+                  value={selectedTeachers}
+                  onChange={(value) => setSelectedTeachers(value || [])}
+                  placeholder={allSelectedSubjectsNoTeacher ? "Not required for no-teacher subjects" : "Select Teachers"}
+                  isMulti
+                  isDisabled={allSelectedSubjectsNoTeacher}
+                />
+                {!allSelectedSubjectsNoTeacher && anySelectedSubjectsGroupedTeachers ? (
+                  <small>For lab and elective subjects, selected teachers are saved as one combo.</small>
+                ) : null}
+              </div>
+            </>
+          )}
 
           <div className="form-group cst-field cst-hours-field">
             <label>Hours per week</label>
@@ -381,12 +650,50 @@ const ManageTeachingAllocations = () => {
 
       {error ? <div className="error-message">{error}</div> : null}
 
+      {selectedAllocationIds.length > 0 ? (
+        <div className="bulk-actions-bar">
+          <label className="bulk-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleAllocationsSelected}
+              ref={(input) => {
+                if (input) input.indeterminate = !allVisibleAllocationsSelected && someVisibleAllocationsSelected;
+              }}
+              onChange={(e) => {
+                const nextSelected = e.target.checked
+                  ? Array.from(new Set([...selectedAllocationIds, ...filteredAllocationIds]))
+                  : selectedAllocationIds.filter((id) => !filteredAllocationIds.includes(id));
+                setSelectedAllocationIds(nextSelected);
+              }}
+            />
+            Select all visible
+          </label>
+          <span className="bulk-selection-count">{selectedAllocationIds.length} selected</span>
+          <button type="button" className="danger-btn" onClick={handleBulkDelete} disabled={bulkDeleting || deleting || calculating || submitting}>
+            Delete selected
+          </button>
+          <button type="button" className="secondary-btn" onClick={() => setSelectedAllocationIds([])} disabled={bulkDeleting || deleting || calculating || submitting}>
+            Clear selection
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <div>Loading...</div>
       ) : (
         <table className="styled-table">
           <thead>
             <tr>
+              <th className="selection-column">
+                <input
+                  type="checkbox"
+                  checked={allVisibleAllocationsSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = !allVisibleAllocationsSelected && someVisibleAllocationsSelected;
+                  }}
+                  onChange={(e) => setSelectedAllocationIds(e.target.checked ? filteredAllocationIds : [])}
+                />
+              </th>
               <th>Class</th>
               <th>Subject</th>
               <th>Teacher</th>
@@ -399,24 +706,34 @@ const ManageTeachingAllocations = () => {
           </thead>
           <tbody>
             {filteredAllocations.map((item) => (
-              <tr key={item.id}>
+              <tr key={item.id} className={selectedAllocationIds.includes(String(item?.id || item?._id || "")) ? "row-selected" : ""}>
+                <td className="selection-cell">
+                  <input
+                    type="checkbox"
+                    checked={selectedAllocationIds.includes(String(item?.id || item?._id || ""))}
+                    onChange={(e) => {
+                      const allocationId = String(item?.id || item?._id || "");
+                      setSelectedAllocationIds((prev) =>
+                        e.target.checked
+                          ? Array.from(new Set([...prev, allocationId]))
+                          : prev.filter((id) => id !== allocationId)
+                      );
+                    }}
+                  />
+                </td>
                 <td>
                   {item?.isCombined
                     ? (item?.classes || []).map((cls) => cls?.name).filter(Boolean).join(" + ")
                     : item?.class?.name}
                 </td>
-                <td>{item?.subject?.name}</td>
-                <td>
-                  {(item?.teachers || []).length > 0
-                    ? item.teachers.map((teacher) => teacher?.name).filter(Boolean).join(" + ")
-                    : item?.teacher?.name || "No Teacher"}
-                </td>
+                <td>{formatAllocationSubjects(item)}</td>
+                <td>{formatAllocationTeachers(item)}</td>
                 <td>{item?.hoursPerWeek ?? 0}</td>
                 <td>{item?.combinedClassGroupId || "—"}</td>
-                <td>{item?.subject?.type === "no_teacher" ? "No Teacher" : item?.isLab ? "Lab" : "Theory"}</td>
+                <td>{item?.type || (item?.isElectiveBlock ? "ELECTIVE" : item?.subject?.type === "no_teacher" ? "No Teacher" : item?.isLab ? "Lab" : "Theory")}</td>
                 <td>{item?.status || "active"}</td>
                 <td>
-                  <button className="danger-btn" onClick={() => handleDelete(item)} disabled={deleting || calculating || submitting}>
+                  <button className="danger-btn" onClick={() => handleDelete(item)} disabled={deleting || calculating || submitting || bulkDeleting}>
                     {deleting ? "Working..." : "Delete"}
                   </button>
                 </td>
@@ -424,7 +741,7 @@ const ManageTeachingAllocations = () => {
             ))}
             {filteredAllocations.length === 0 ? (
               <tr>
-                <td colSpan="8">No allocations found.</td>
+                <td colSpan="9">No allocations found.</td>
               </tr>
             ) : null}
           </tbody>

@@ -48,6 +48,10 @@ function generateElectiveCartesian(requirements, teachersByCategory) {
     return results;
 }
 
+function getUniqueStrings(values) {
+    return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 
 export function convertNewCollegeInput({
     classes,
@@ -56,6 +60,7 @@ export function convertNewCollegeInput({
     classSubjects,
     classTeachers,
     teacherSubjectCombos = [],
+    labAllocations = [],
     classElectiveSubjects = []
 }) {
 
@@ -78,6 +83,22 @@ export function convertNewCollegeInput({
     
     const teachersByCategory = new Map();
     const explicitAllocations = [];
+    const explicitLabAllocations = [];
+    for (const allocation of labAllocations) {
+        const classIds = getUniqueStrings(allocation.classIds);
+        const subjectId = String(allocation.subjectId || "").trim();
+        const teacherIds = getUniqueStrings(allocation.teacherIds).slice(0, 1);
+        const hoursRequired = Number(allocation.hoursPerWeek || 0);
+        if (!subjectId || classIds.length === 0 || hoursRequired <= 0) continue;
+        explicitLabAllocations.push({
+            teacherId: teacherIds[0] || null,
+            teacherIds,
+            subjectId,
+            classIds,
+            hoursPerWeek: hoursRequired,
+            combinedClassGroupId: allocation.combinedClassGroupId || null,
+        });
+    }
     for (const combo of teacherSubjectCombos) {
         const subjectIdStr = String(combo.subjectId);
         const teacherIds = Array.isArray(combo.teacherIds) && combo.teacherIds.length > 0
@@ -105,6 +126,7 @@ export function convertNewCollegeInput({
             teachersByCategory.get(subjectIdStr).push(String(teacherId));
         });
     }
+    explicitAllocations.unshift(...explicitLabAllocations);
 
     const subjectsPerClass = {}, teachersPerClass = {}, hoursPerClassSubject = {};
     for (const cs of classSubjects) {

@@ -138,6 +138,7 @@ function TimetableSettings() {
   const [showPolicySettings, setShowPolicySettings] = useState(true);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState("custom");
+  const [inputMode, setInputMode] = useState("EXPLICIT");
   const [jsonText, setJsonText] = useState(() =>
     JSON.stringify(normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG), null, 2)
   );
@@ -159,6 +160,7 @@ function TimetableSettings() {
       try {
         const res = await api.get("/timetable-settings");
         const serverConfig = res?.data?.settings?.constraintConfig;
+        const serverInputMode = res?.data?.settings?.inputMode;
         if (cancelled) return;
         if (serverConfig && typeof serverConfig === "object") {
           const normalized = normalizeConstraintConfig(serverConfig);
@@ -173,6 +175,9 @@ function TimetableSettings() {
           setTeacherBoundaryOverridesText(
             JSON.stringify(normalized.teacherBoundaryPreference?.teacherOverrides || {}, null, 2)
           );
+        }
+        if (serverInputMode) {
+          setInputMode(serverInputMode);
         }
       } catch {
         // Fallback: if DB settings cannot be loaded, use localStorage (legacy).
@@ -346,7 +351,7 @@ function TimetableSettings() {
     setTeacherBoundaryOverridesText(
       JSON.stringify(normalized.teacherBoundaryPreference.teacherOverrides || {}, null, 2)
     );
-    api.put("/timetable-settings", { constraintConfig: normalized }).catch(() => {
+    api.put("/timetable-settings", { constraintConfig: normalized, inputMode }).catch(() => {
       /* ignore */
     });
     setSavedAt(new Date().toLocaleString());
@@ -356,6 +361,7 @@ function TimetableSettings() {
     const defaults = normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG);
     setConfig(defaults);
     setSelectedPreset("custom");
+    setInputMode("EXPLICIT");
     setJsonText(JSON.stringify(defaults, null, 2));
     setAvailabilityMapText(
       JSON.stringify(defaults.teacherAvailability.unavailableSlotsByTeacher || {}, null, 2)
@@ -367,7 +373,7 @@ function TimetableSettings() {
       JSON.stringify(defaults.teacherBoundaryPreference.teacherOverrides || {}, null, 2)
     );
     setJsonError("");
-    api.put("/timetable-settings", { constraintConfig: defaults }).catch(() => {
+    api.put("/timetable-settings", { constraintConfig: defaults, inputMode: "EXPLICIT" }).catch(() => {
       /* ignore */
     });
   };
@@ -450,6 +456,25 @@ function TimetableSettings() {
             >
               {showAdvancedSettings ? "Hide Advanced" : "Show Advanced"}
             </button>
+          </label>
+        </div>
+      </section>
+
+      <section className="tt-settings-section">
+        <h3>Input Mode</h3>
+        <p className="tt-settings-help">
+          Choose how to generate combos from your data. EXPLICIT uses Teaching Allocations (recommended for new setups). DERIVED uses legacy Class-Subject and Teacher-Subject combinations.
+        </p>
+        <div className="filters-container tt-settings-row">
+          <label>
+            Combo Generation Mode
+            <select
+              value={inputMode}
+              onChange={(e) => setInputMode(e.target.value)}
+            >
+              <option value="EXPLICIT">EXPLICIT - Use Teaching Allocations</option>
+              <option value="DERIVED">DERIVED - Use Legacy Relations</option>
+            </select>
           </label>
         </div>
       </section>

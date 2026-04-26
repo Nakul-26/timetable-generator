@@ -2,6 +2,22 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
+const TeachingAllocationSubjectSchema = new Schema(
+  {
+    subject: {
+      type: Schema.Types.ObjectId,
+      ref: "Subject",
+      required: true,
+    },
+    teacher: {
+      type: Schema.Types.ObjectId,
+      ref: "Faculty",
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const TeachingAllocationSchema = new Schema(
   {
     collegeId: {
@@ -20,7 +36,7 @@ const TeachingAllocationSchema = new Schema(
     subject: {
       type: Schema.Types.ObjectId,
       ref: "Subject",
-      required: true,
+      default: null,
     },
     teacher: {
       type: Schema.Types.ObjectId,
@@ -33,6 +49,16 @@ const TeachingAllocationSchema = new Schema(
         ref: "Faculty",
       },
     ],
+    type: {
+      type: String,
+      enum: ["NORMAL", "LAB", "ELECTIVE"],
+      default: "NORMAL",
+      index: true,
+    },
+    subjects: {
+      type: [TeachingAllocationSubjectSchema],
+      default: [],
+    },
     hoursPerWeek: {
       type: Number,
       required: true,
@@ -47,6 +73,9 @@ const TeachingAllocationSchema = new Schema(
   { timestamps: true }
 );
 
-TeachingAllocationSchema.index({ collegeId: 1, teacher: 1, subject: 1, combinedClassGroupId: 1 });
+TeachingAllocationSchema.index(
+  { collegeId: 1, teacher: 1, subject: 1, combinedClassGroupId: 1 },
+  { partialFilterExpression: { type: "NORMAL" } }
+);
 
 export default mongoose.model("TeachingAllocation", TeachingAllocationSchema);

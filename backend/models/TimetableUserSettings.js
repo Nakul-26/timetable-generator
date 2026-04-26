@@ -28,6 +28,11 @@ const TimetableUserSettingsSchema = new Schema(
       type: Schema.Types.Mixed,
       default: null,
     },
+    inputMode: {
+      type: String,
+      enum: ["EXPLICIT", "DERIVED"],
+      default: "EXPLICIT",
+    },
   },
   {
     timestamps: true,

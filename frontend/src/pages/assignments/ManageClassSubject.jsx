@@ -27,6 +27,8 @@ const ManageClassSubject = () => {
     const [bulkMessage, setBulkMessage] = useState("");
     const [bulkError, setBulkError] = useState("");
     const [mutationMessage, setMutationMessage] = useState("");
+    const [selectedAssignmentIds, setSelectedAssignmentIds] = useState([]);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
 
     useEffect(() => {
         const defaultHours = resolveSelectedHours(addSubjects, subjects);
@@ -73,11 +75,29 @@ const ManageClassSubject = () => {
         setMutationMessage("Deleting class-subject assignment. Please wait...");
         try {
             await api.delete(`/class-subjects/${assignmentId}`);
+            setSelectedAssignmentIds((prev) => prev.filter((itemId) => itemId !== assignmentId));
             refetchData(['class-subjects']);
         } catch (err) {
             console.log(`Error: ${err.message}`);
         } finally {
             setMutationMessage("");
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedAssignmentIds.length === 0) return;
+        if (!window.confirm(`Are you sure you want to delete ${selectedAssignmentIds.length} selected assignment(s)?`)) return;
+        setBulkDeleting(true);
+        setMutationMessage("Deleting selected class-subject assignments. Please wait...");
+        try {
+            await Promise.allSettled(selectedAssignmentIds.map((assignmentId) => api.delete(`/class-subjects/${assignmentId}`)));
+            setSelectedAssignmentIds([]);
+            refetchData(['class-subjects']);
+        } catch (err) {
+            console.log(`Error: ${err.message}`);
+        } finally {
+            setMutationMessage("");
+            setBulkDeleting(false);
         }
     };
 
@@ -89,6 +109,11 @@ const ManageClassSubject = () => {
         const subjectMatch = !filterSubject || (assignment.subject?._id === filterSubject.value);
         return classMatch && subjectMatch;
     });
+    const filteredAssignmentIds = filteredAssignments.map((assignment) => assignment._id);
+    const allVisibleAssignmentsSelected =
+        filteredAssignmentIds.length > 0 && filteredAssignmentIds.every((id) => selectedAssignmentIds.includes(id));
+    const someVisibleAssignmentsSelected =
+        filteredAssignmentIds.some((id) => selectedAssignmentIds.includes(id));
 
     return (
         <div className="manage-container">
@@ -146,12 +171,50 @@ const ManageClassSubject = () => {
                 />
             </div>
 
+            {selectedAssignmentIds.length > 0 ? (
+                <div className="bulk-actions-bar">
+                    <label className="bulk-select-all">
+                        <input
+                            type="checkbox"
+                            checked={allVisibleAssignmentsSelected}
+                            ref={(input) => {
+                                if (input) input.indeterminate = !allVisibleAssignmentsSelected && someVisibleAssignmentsSelected;
+                            }}
+                            onChange={(e) => {
+                                const nextSelected = e.target.checked
+                                    ? Array.from(new Set([...selectedAssignmentIds, ...filteredAssignmentIds]))
+                                    : selectedAssignmentIds.filter((id) => !filteredAssignmentIds.includes(id));
+                                setSelectedAssignmentIds(nextSelected);
+                            }}
+                        />
+                        Select all visible
+                    </label>
+                    <span className="bulk-selection-count">{selectedAssignmentIds.length} selected</span>
+                    <button type="button" className="danger-btn" onClick={handleBulkDelete} disabled={bulkDeleting || Boolean(mutationMessage)}>
+                        Delete selected
+                    </button>
+                    <button type="button" className="secondary-btn" onClick={() => setSelectedAssignmentIds([])} disabled={bulkDeleting || Boolean(mutationMessage)}>
+                        Clear selection
+                    </button>
+                </div>
+            ) : null}
+
             {loading ? (
                 <div>Loading...</div>
             ) : (
                 <table className="styled-table">
                     <thead>
                         <tr>
+                            <th className="selection-column">
+                                <input
+                                    type="checkbox"
+                                    checked={allVisibleAssignmentsSelected}
+                                    ref={(input) => {
+                                        if (input) input.indeterminate = !allVisibleAssignmentsSelected && someVisibleAssignmentsSelected;
+                                    }}
+                                    onChange={(e) => setSelectedAssignmentIds(e.target.checked ? filteredAssignmentIds : [])}
+                                />
+                            </th>
                             <th>Class</th>
                             <th>Subject</th>
                             <th>Hours per Week</th>
@@ -160,12 +223,25 @@ const ManageClassSubject = () => {
                     </thead>
                     <tbody>
                         {filteredAssignments.map((assignment) => (
-                            <tr key={assignment._id}>
+                            <tr key={assignment._id} className={selectedAssignmentIds.includes(assignment._id) ? "row-selected" : ""}>
+                                <td className="selection-cell">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedAssignmentIds.includes(assignment._id)}
+                                        onChange={(e) => {
+                                            setSelectedAssignmentIds((prev) =>
+                                                e.target.checked
+                                                    ? Array.from(new Set([...prev, assignment._id]))
+                                                    : prev.filter((id) => id !== assignment._id)
+                                            );
+                                        }}
+                                    />
+                                </td>
                                 <td>{assignment.class?.name}</td>
                                 <td>{assignment.subject?.name}</td>
                                 <td>{assignment.hoursPerWeek}</td>
                                 <td>
-                                    <button onClick={() => handleDelete(assignment._id)} className="danger-btn" disabled={Boolean(mutationMessage)}>
+                                    <button onClick={() => handleDelete(assignment._id)} className="danger-btn" disabled={Boolean(mutationMessage) || bulkDeleting}>
                                         {mutationMessage ? "Working..." : "Delete"}
                                     </button>
                                 </td>

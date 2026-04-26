@@ -12,6 +12,8 @@ function ManageClass() {
   const [excelError, setExcelError] = useState("");
   const [uploadingExcel, setUploadingExcel] = useState(false);
   const [mutationMessage, setMutationMessage] = useState("");
+  const [selectedClassIds, setSelectedClassIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef(null);
 
   // State for the assignment modal
@@ -197,11 +199,29 @@ function ManageClass() {
     setMutationMessage("Deleting class. Please wait...");
     try {
       await api.delete(`/classes/${id}`);
+      setSelectedClassIds((prev) => prev.filter((itemId) => itemId !== id));
       refetchData(['classes']);
     } catch (err) {
       console.log(`Error: ${err.message}`);
     } finally {
       setMutationMessage("");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedClassIds.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedClassIds.length} selected class(es)?`)) return;
+    setBulkDeleting(true);
+    setMutationMessage("Deleting selected classes. Please wait...");
+    try {
+      await Promise.allSettled(selectedClassIds.map((id) => api.delete(`/classes/${id}`)));
+      setSelectedClassIds([]);
+      refetchData(['classes']);
+    } catch (err) {
+      console.log(`Error: ${err.message}`);
+    } finally {
+      setMutationMessage("");
+      setBulkDeleting(false);
     }
   };
 
@@ -244,6 +264,11 @@ function ManageClass() {
       (!filterSemester || (c.sem && String(c.sem).toLowerCase().includes(filterSemester.toLowerCase())))
     );
   });
+  const filteredClassIds = filteredClasses.map((classItem) => classItem._id);
+  const allVisibleClassesSelected =
+    filteredClassIds.length > 0 && filteredClassIds.every((id) => selectedClassIds.includes(id));
+  const someVisibleClassesSelected =
+    filteredClassIds.some((id) => selectedClassIds.includes(id));
 
   const resetFilters = () => {
     setFilterClassId("");
@@ -312,6 +337,44 @@ function ManageClass() {
         </div>
       )}
 
+      {selectedClassIds.length > 0 ? (
+        <div className="bulk-actions-bar">
+          <label className="bulk-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleClassesSelected}
+              ref={(input) => {
+                if (input) input.indeterminate = !allVisibleClassesSelected && someVisibleClassesSelected;
+              }}
+              onChange={(e) => {
+                const nextSelected = e.target.checked
+                  ? Array.from(new Set([...selectedClassIds, ...filteredClassIds]))
+                  : selectedClassIds.filter((id) => !filteredClassIds.includes(id));
+                setSelectedClassIds(nextSelected);
+              }}
+            />
+            Select all visible
+          </label>
+          <span className="bulk-selection-count">{selectedClassIds.length} selected</span>
+          <button
+            type="button"
+            className="danger-btn"
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting || Boolean(mutationMessage)}
+          >
+            Delete selected
+          </button>
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => setSelectedClassIds([])}
+            disabled={bulkDeleting || Boolean(mutationMessage)}
+          >
+            Clear selection
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
@@ -320,6 +383,18 @@ function ManageClass() {
         <table className="styled-table">
           <thead>
             <tr>
+              <th className="selection-column">
+                <input
+                  type="checkbox"
+                  checked={allVisibleClassesSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = !allVisibleClassesSelected && someVisibleClassesSelected;
+                  }}
+                  onChange={(e) => {
+                    setSelectedClassIds(e.target.checked ? filteredClassIds : []);
+                  }}
+                />
+              </th>
               <th>Class ID</th>
               <th>Name</th>
               <th>Section</th>
@@ -333,7 +408,20 @@ function ManageClass() {
           <tbody>
             {Array.isArray(filteredClasses) &&
               filteredClasses.map((classItem) => (
-                <tr key={classItem._id}>
+                <tr key={classItem._id} className={selectedClassIds.includes(classItem._id) ? "row-selected" : ""}>
+                  <td className="selection-cell">
+                    <input
+                      type="checkbox"
+                      checked={selectedClassIds.includes(classItem._id)}
+                      onChange={(e) => {
+                        setSelectedClassIds((prev) =>
+                          e.target.checked
+                            ? Array.from(new Set([...prev, classItem._id]))
+                            : prev.filter((id) => id !== classItem._id)
+                        );
+                      }}
+                    />
+                  </td>
                   <td>
                     {editId === classItem._id ? (
                       <input
@@ -433,7 +521,7 @@ function ManageClass() {
                         <button
                           onClick={() => handleDelete(classItem._id)}
                           className="danger-btn"
-                          disabled={Boolean(mutationMessage)}
+                          disabled={Boolean(mutationMessage) || bulkDeleting}
                         >
                           {mutationMessage ? "Working..." : "Delete"}
                         </button>

@@ -19,6 +19,7 @@ import ManualTimetable from './pages/manual/ManualTimetable.jsx';
 import ProcessInputs from './pages/assignments/ProcessInputs.jsx';
 import SavedTimetables from './pages/SavedTimetables.jsx';
 import ViewTimetable from './pages/ViewTimetable.jsx';
+import GenerationPayloadViewer from './pages/GenerationPayloadViewer.jsx';
 import CreateCollege from './pages/superadmin/CreateCollege';
 import CreateAdmin from './pages/superadmin/CreateAdmin';
 import SuperadminColleges from './pages/superadmin/SuperadminColleges';
@@ -125,6 +126,7 @@ function App() {
           <Route path="/manual-timetable" element={<PrivateRoute><ManualTimetable /></PrivateRoute>} />
           <Route path="/saved-timetables" element={<PrivateRoute><SavedTimetables /></PrivateRoute>} />
           <Route path="/process-inputs" element={<PrivateRoute><ProcessInputs /></PrivateRoute>} />
+          <Route path="/generation-payload" element={<PrivateRoute><GenerationPayloadViewer /></PrivateRoute>} />
           <Route path="/superadmin" element={<PrivateRoute><Navigate to="/superadmin/colleges" replace /></PrivateRoute>} />
           <Route path="/superadmin/colleges" element={<PrivateRoute><SuperadminColleges /></PrivateRoute>} />
           <Route path="/superadmin/admins" element={<PrivateRoute><SuperadminAdmins /></PrivateRoute>} />

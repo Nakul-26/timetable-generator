@@ -134,12 +134,14 @@ protectedRouter.get('/timetable-settings', async (req, res) => {
             constraintConfig: doc.constraintConfig ?? null,
             blockGenerateOnHealthErrors: Boolean(doc.blockGenerateOnHealthErrors),
             fixedSlots: doc.fixedSlots ?? null,
+            inputMode: doc.inputMode ?? "EXPLICIT",
             updatedAt: doc.updatedAt,
           }
         : {
             constraintConfig: null,
             blockGenerateOnHealthErrors: false,
             fixedSlots: null,
+            inputMode: "EXPLICIT",
             updatedAt: null,
           },
     });
@@ -151,7 +153,7 @@ protectedRouter.get('/timetable-settings', async (req, res) => {
 
 protectedRouter.put('/timetable-settings', async (req, res) => {
   try {
-    const { constraintConfig = null, blockGenerateOnHealthErrors = false, fixedSlots = null } =
+    const { constraintConfig = null, blockGenerateOnHealthErrors = false, fixedSlots = null, inputMode = "EXPLICIT" } =
       req.body || {};
 
     const updated = await TimetableUserSettings.findOneAndUpdate(
@@ -163,6 +165,7 @@ protectedRouter.put('/timetable-settings', async (req, res) => {
           constraintConfig,
           blockGenerateOnHealthErrors: Boolean(blockGenerateOnHealthErrors),
           fixedSlots,
+          inputMode,
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -174,6 +177,7 @@ protectedRouter.put('/timetable-settings', async (req, res) => {
         constraintConfig: updated.constraintConfig ?? null,
         blockGenerateOnHealthErrors: Boolean(updated.blockGenerateOnHealthErrors),
         fixedSlots: updated.fixedSlots ?? null,
+        inputMode: updated.inputMode ?? "EXPLICIT",
         updatedAt: updated.updatedAt,
       },
     });
@@ -189,7 +193,7 @@ protectedRouter.post('/process-new-input', async (req, res) => {
         console.log("[POST /process-new-input] Starting data processing for assignments...");
 
         // Step 1: Use prepareGeneratorData to get all necessary processed data
-        const generatorData = await prepareGeneratorData(req.collegeId);
+        const generatorData = await prepareGeneratorData(req.collegeId, "DERIVED"); // Health check uses derived mode
         const { classes: classesOut, combos: generatedCombos, subjects, faculties } = generatorData;
         
         // Step 2: Create lookup maps for names
@@ -275,19 +279,49 @@ protectedRouter.post('/process-new-input', async (req, res) => {
 
 protectedRouter.post('/generate', async (req, res) => {
     try {
-
-      console.log("[POST /generate] Received generation request with body:", {
-        fixedSlots: req.body.fixedSlots,
-        constraintConfig: req.body.constraintConfig,
-        solutionCount: req.body.solutionCount,
-      } , "111111111111111111111111111111111111111111111111111111111111111");
+      // Load user settings to get inputMode
+      const userSettings = await TimetableUserSettings.findOne({
+        collegeId: req.collegeId,
+        userId: req.user?._id,
+      }).lean();
 
       const { fixedSlots, constraintConfig = {}, solutionCount } = req.body;
+      const inputMode = userSettings?.inputMode || "EXPLICIT";
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
-  
-      const generatorData = await prepareGeneratorData(req.collegeId);
+
+      console.log("[POST /generate] Generation request:", {
+        fixedSlots: !!fixedSlots,
+        constraintConfig: !!constraintConfig,
+        solutionCount,
+        inputMode,
+        userSettingsLoaded: !!userSettings,
+      });
+
+      const generatorData = await prepareGeneratorData(req.collegeId, inputMode);
+      
       const filteredGeneratorData = filterGeneratorDataForSolver(generatorData);
+      if (String(process.env.DEBUG_LAB_ALLOCATION || "").trim().toLowerCase() === "1" ||
+        String(process.env.DEBUG_LAB_ALLOCATION || "").trim().toLowerCase() === "true") {
+        const classSummary = (filteredGeneratorData.classes || []).map((klass) => ({
+          classId: String(klass._id),
+          className: klass.name || String(klass._id),
+          assignedCombos: Array.isArray(klass.assigned_teacher_subject_combos) ? klass.assigned_teacher_subject_combos.length : 0,
+          subjectHours: klass.subject_hours || {},
+        }));
+        const comboSummary = (filteredGeneratorData.combos || []).map((combo) => ({
+          comboId: String(combo._id),
+          subjectId: String(combo.subject_id),
+          subjectName: combo.subject?.name || String(combo.subject_id),
+          classIds: combo.class_ids || [],
+          facultyIds: combo.faculty_ids || [],
+          hoursPerWeek: combo.hours_per_week,
+        }));
+        console.log("[POST /generate] filtered generator summary", {
+          classes: classSummary,
+          combos: comboSummary,
+        });
+      }
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -336,6 +370,7 @@ protectedRouter.post('/generate', async (req, res) => {
         },
         payload: {
           collegeId: req.collegeId,
+          inputMode,
           ...filteredGeneratorData,
           fixedSlots,
           DAYS_PER_WEEK: daysPerWeek,
@@ -405,9 +440,16 @@ protectedRouter.post('/generate', async (req, res) => {
 
 protectedRouter.post('/health-check', async (req, res) => {
     try {
-      const { fixedSlots = [], constraintConfig = {} } = req.body || {};
+      // Load user settings to get inputMode
+      const userSettings = await TimetableUserSettings.findOne({
+        collegeId: req.collegeId,
+        userId: req.user?._id,
+      }).lean();
 
-      const generatorData = await prepareGeneratorData(req.collegeId);
+      const { fixedSlots = [], constraintConfig = {} } = req.body || {};
+      const inputMode = userSettings?.inputMode || "EXPLICIT";
+
+      const generatorData = await prepareGeneratorData(req.collegeId, inputMode);
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,
@@ -528,6 +570,55 @@ protectedRouter.get('/generation-status/:taskId', async (req, res) => {
     }
     res.json(serializeJobStatus(job));
   } catch {
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+protectedRouter.get('/generation-payload/latest', async (req, res) => {
+  try {
+    const job = await GenerationJob.findOne({
+      collegeId: req.collegeId,
+      payload: { $ne: null },
+    }).sort({ updatedAt: -1 }).lean();
+    if (!job) {
+      return res.status(404).json({ error: "No generation payload found." });
+    }
+    res.json({
+      taskId: String(job._id),
+      status: job.status,
+      phase: job.phase,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      payload: job.payload || null,
+      input: job.input || null,
+    });
+  } catch (e) {
+    console.error("[GET /generation-payload/latest] Error:", e);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+protectedRouter.get('/generation-payload/:taskId', async (req, res) => {
+  try {
+    const taskId = String(req.params.taskId || "").trim();
+    if (!taskId || taskId.toLowerCase() === "latest") {
+      return res.status(400).json({ error: "Use /generation-payload/latest for the latest payload." });
+    }
+    const job = await GenerationJob.findOne({ _id: taskId, collegeId: req.collegeId }).lean();
+    if (!job) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+    res.json({
+      taskId: String(job._id),
+      status: job.status,
+      phase: job.phase,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      payload: job.payload || null,
+      input: job.input || null,
+    });
+  } catch (e) {
+    console.error("[GET /generation-payload/:taskId] Error:", e);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -672,11 +763,18 @@ protectedRouter.get('/timetable/:id/export/excel', async (req, res) => {
 
 protectedRouter.post("/result/regenerate", async (req, res) => {
     try {
-      const { fixedSlots, constraintConfig = {} } = req.body;
+      // Load user settings to get inputMode
+      const userSettings = await TimetableUserSettings.findOne({
+        collegeId: req.collegeId,
+        userId: req.user?._id,
+      }).lean();
+
+      const { fixedSlots, constraintConfig = {}, solutionCount } = req.body;
+      const inputMode = userSettings?.inputMode || "EXPLICIT";
       const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
       const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
   
-      const generatorData = await prepareGeneratorData(req.collegeId);
+      const generatorData = await prepareGeneratorData(req.collegeId, inputMode);
       const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
         mergeTeacherAvailabilityConstraintConfig(
           constraintConfig,

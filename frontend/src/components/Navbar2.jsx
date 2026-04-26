@@ -84,6 +84,7 @@ const Navbar = () => {
             <NavLink to="/teacher-preferences" className="nav-item" onClick={() => setIsMenuOpen(false)}>Teacher Preferences</NavLink>
             <NavLink to="/timetable" className="nav-item" onClick={() => setIsMenuOpen(false)}>Timetable</NavLink>
             <NavLink to="/timetable/settings" className="nav-item" onClick={() => setIsMenuOpen(false)}>Timetable Settings</NavLink>
+            <NavLink to="/generation-payload" className="nav-item" onClick={() => setIsMenuOpen(false)}>Payload Viewer</NavLink>
             <NavLink to="/saved-timetables" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generated Timetables</NavLink>
           </>
         )}

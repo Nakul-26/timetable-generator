@@ -1,9 +1,6 @@
 // runGenerator.js
 const DEFAULT_SOLVER_URL = process.env.SOLVER_URL || "http://localhost:8001";
 const DEFAULT_SOLVER_TIME_LIMIT_SEC = 180;
-const DEFAULT_TIMEOUT_MS = Number(
-  process.env.SOLVER_TIMEOUT_MS || (DEFAULT_SOLVER_TIME_LIMIT_SEC * 1000 + 30000)
-);
 const DEFAULT_SOLUTION_COUNT = 5;
 
 function analyzeClassInternalGaps(classTimetables) {
@@ -74,11 +71,17 @@ async function callCpSatSolver({
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const solverTimeLimitSec =
     Number(solverTimeLimitSecOverride) ||
     Number(constraintConfig?.solver?.timeLimitSec) ||
     DEFAULT_SOLVER_TIME_LIMIT_SEC;
+  const envTimeoutMs = Number(process.env.SOLVER_TIMEOUT_MS);
+  const solverTimeoutMs = Math.round(solverTimeLimitSec * 1000) + 30000;
+  const timeoutMs =
+    Number.isFinite(envTimeoutMs) && envTimeoutMs > 0
+      ? Math.max(envTimeoutMs, solverTimeoutMs)
+      : solverTimeoutMs;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const expectedMs = Math.max(15_000, Math.round(solverTimeLimitSec * 1000));
   const progressSpan = Math.max(1, progressEnd - progressStart);
   const capBeforeDone = Math.min(99, Math.max(progressStart, progressEnd - 1));
