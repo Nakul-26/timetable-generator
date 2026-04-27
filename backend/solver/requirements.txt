@@ -3,3 +3,4 @@ uvicorn==0.30.6
 ortools==9.15.6755
 pymongo==4.10.1
 boto3==1.35.81
+python-dotenv==1.0.0

@@ -112,7 +112,7 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
         labAllocations.push({
           classIds,
           subjectId,
-          teacherIds: [primaryTeacherId],
+          teacherIds: teacherIds,
           hoursPerWeek: allocation.hoursPerWeek,
           combinedClassGroupId: allocation.combinedClassGroupId || null,
         });
@@ -208,26 +208,28 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
   labAllocations.forEach((allocation) => {
     const classIds = [...new Set((allocation.classIds || []).map((classId) => String(classId)).filter(Boolean))];
     const subjectId = String(allocation.subjectId || "").trim();
-    const primaryTeacherId = String((allocation.teacherIds || [])[0] || "").trim();
+    const teacherIds = (allocation.teacherIds || []).map(String).sort();
+    const primaryTeacherId = teacherIds[0] || "";
     const hoursPerWeek = Number(allocation.hoursPerWeek || 0);
     if (!classIds.length || !subjectId || !primaryTeacherId || hoursPerWeek <= 0) return;
 
     const existingCombo = generatorCombos.find((combo) => {
-      const comboClassIds = Array.isArray(combo.class_ids) ? combo.class_ids.map(String) : [];
-      const comboFacultyIds = Array.isArray(combo.faculty_ids) ? combo.faculty_ids.map(String) : [];
+      const comboClassIds = Array.isArray(combo.class_ids) ? combo.class_ids.map(String).sort() : [];
+      const comboFacultyIds = Array.isArray(combo.faculty_ids) ? combo.faculty_ids.map(String).sort() : [];
+      const targetClassIds = [...classIds].sort();
       return (
-        comboClassIds.length === classIds.length &&
-        comboClassIds.every((classId) => classIds.includes(classId)) &&
+        comboClassIds.length === targetClassIds.length &&
+        comboClassIds.every((id, idx) => id === targetClassIds[idx]) &&
         String(combo.subject_id) === subjectId &&
-        comboFacultyIds.length === 1 &&
-        comboFacultyIds[0] === primaryTeacherId
+        comboFacultyIds.length === teacherIds.length &&
+        comboFacultyIds.every((id, idx) => id === teacherIds[idx])
       );
     });
 
-    const comboId = existingCombo?._id || `LAB_${subjectId}_${classIds.join("_")}_${primaryTeacherId}`;
+    const comboId = existingCombo?._id || `LAB_${subjectId}_${classIds.sort().join("_")}_${teacherIds.sort().join("_")}`;
     const labCombo = existingCombo || {
       _id: comboId,
-      faculty_ids: [primaryTeacherId],
+      faculty_ids: teacherIds,
       subject_id: subjectId,
       subject: {
         _id: subjectId,
@@ -239,7 +241,7 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
       combined_class_group_id: allocation.combinedClassGroupId || null,
       hours_per_week: hoursPerWeek,
       hours_per_class: Object.fromEntries(classIds.map((classId) => [classId, hoursPerWeek])),
-      combo_name: `LAB_${classIds.join("_")}_${subjectId}_${primaryTeacherId}`,
+      combo_name: `LAB_${classIds.sort().join("_")}_${subjectId}_${teacherIds.sort().join("_")}`,
     };
 
     if (!existingCombo) {

@@ -54,7 +54,9 @@ def add_hard_constraints(
         for (class_id, subj_id), terms in x_by_class_subject.items():
             req = data["required_hours_by_class_subject"][class_id][subj_id]
             if req > 0:
-                scheduled_terms = sum(terms) if terms else 0
+                # terms is a list of (variable, block_size)
+                actual_terms = [var * block for (var, block) in terms]
+                scheduled_terms = sum(actual_terms) if actual_terms else 0
                 model.Add(scheduled_terms == req)
 
 
@@ -77,11 +79,12 @@ def add_soft_constraints(
         for (class_id, subj_id), terms in x_by_class_subject.items():
             req = required_hours_by_class_subject[class_id][subj_id]
             if req > 0:
-                scheduled_terms = sum(terms) if terms else 0
-                scheduled = model.NewIntVar(0, req, f"scheduled_{class_id}_{subj_id}")
+                actual_terms = [var * block for (var, block) in terms]
+                scheduled_terms = sum(actual_terms) if actual_terms else 0
+                scheduled = model.NewIntVar(0, req + 5, f"scheduled_{class_id}_{subj_id}") # Allow slight overage for labs
                 model.Add(scheduled == scheduled_terms)
                 shortage = model.NewIntVar(0, req, f"shortage_{class_id}_{subj_id}")
-                model.Add(scheduled + shortage == req)
+                model.Add(scheduled + shortage >= req)
                 objective_terms.append(shortage * weekly_hours_shortage_weight)
 
     # Add other soft constraints here...

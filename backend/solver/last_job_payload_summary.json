@@ -1,5 +1,5 @@
 {
-  "jobId": "69edc92c6658b67546aec85f",
+  "jobId": "69ef452a3c55d96ee502f06e",
   "collegeId": "2",
   "inputMode": "EXPLICIT",
   "schedule": {
@@ -9,27 +9,27 @@
   },
   "counts": {
     "classes": 1,
-    "subjects": 31,
-    "faculties": 114,
-    "combos": 1
+    "subjects": 2,
+    "faculties": 4,
+    "combos": 2
   },
   "missingLabCombos": [],
   "missingRequiredCombos": [],
   "requiredSummary": [
     {
-      "classId": "69e61645dbb51e885a1c96ce",
-      "className": "VI-A",
+      "classId": "69ef3698268f98dc19f43151",
+      "className": "VI A",
       "classDaysPerWeekRaw": null,
       "classDaysPerWeekParsed": null,
       "requiredSubjectCount": 1,
       "totalRequiredHours": 2.0,
       "topRequired": [
         {
-          "subjectId": "69e60e95dbb51e885a1c95e0",
-          "subjectName": "Machine Learning Lab",
+          "subjectId": "69ef367a268f98dc19f43100",
+          "subjectName": "machine learning lab",
           "subjectType": "lab",
           "requiredHours": 2.0,
-          "eligibleCombos": 1
+          "eligibleCombos": 2
         }
       ]
     }
@@ -37,14 +37,28 @@
   "combosSummary": [
     {
       "comboId": "C1",
-      "subjectId": "69e60e95dbb51e885a1c95e0",
-      "subjectName": "Machine Learning Lab",
+      "subjectId": "69ef367a268f98dc19f43100",
+      "subjectName": "machine learning lab",
       "subjectType": "lab",
       "classIds": [
-        "69e61645dbb51e885a1c96ce"
+        "69ef3698268f98dc19f43151"
       ],
       "facultyIds": [
-        "69e607e9dbb51e885a1c955c"
+        "69ef36b7268f98dc19f4319e",
+        "69ef36c7268f98dc19f431eb",
+        "69ef36d0268f98dc19f43238"
+      ]
+    },
+    {
+      "comboId": "C2",
+      "subjectId": "69ef367a268f98dc19f43100",
+      "subjectName": "machine learning lab",
+      "subjectType": "lab",
+      "classIds": [
+        "69ef3698268f98dc19f43151"
+      ],
+      "facultyIds": [
+        "69ef36b7268f98dc19f4319e"
       ]
     }
   ]

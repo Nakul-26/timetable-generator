@@ -21,6 +21,13 @@ import time
 from typing import Dict, List, Any, Tuple, Optional
 from fastapi import FastAPI, Request
 
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+MONGO_URI = os.getenv("MONGO_URI")
+
 _SOLVER_DIR = Path(__file__).resolve().parent
 if str(_SOLVER_DIR) not in sys.path:
     sys.path.insert(0, str(_SOLVER_DIR))
@@ -107,11 +114,13 @@ def _json_default(value: Any) -> Any:
 
 from typing import Union
 
-def _job_filter(job_id: str) -> Dict[str, Any]:
-    try:
-        from bson import ObjectId
-    except ImportError:
-        ObjectId = str  # type: ignore
+def _job_filter(job_id: Union[str, ObjectId]) -> Dict[str, Any]:
+    if isinstance(job_id, str):
+        try:
+            job_id = ObjectId(job_id)
+        except Exception:
+            pass
+    return {"_id": job_id}
 
 
 def _get_jobs_collection():
@@ -2080,7 +2089,9 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
             if DEBUG:
                 logger.debug("[solve_instance] Skipping combo %s: no valid class_ids", combo_id)
             continue
-        subj = subject_by_id.get(combo["subject_id"])
+        subj_ref = combo.get("subject")
+        subj = (subj_ref if isinstance(subj_ref, dict) else None) or subject_by_id.get(combo.get("subject_id"))
+
         if not subj:
             if DEBUG:
                 logger.debug(
@@ -2204,7 +2215,9 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
         combo_id = combo["_id"]
         class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
         candidate_starts = combo_candidate_starts.get(combo_id, [])
-        subj = subject_by_id.get(combo["subject_id"])
+        subj_ref = combo.get("subject")
+        subj = (subj_ref if isinstance(subj_ref, dict) else None) or subject_by_id.get(combo.get("subject_id"))
+
         if not class_ids or not candidate_starts:
             if debug_labs and subj and _is_lab_subject(subj):
                 logger.debug(
@@ -2239,14 +2252,16 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
                 hour_rank.get(slot[1], slot[1]),
             ),
         )
-        if max_candidates_per_combo > 0 and len(ordered_starts) > max_candidates_per_combo:
+        # Ensure labs have a full search space regardless of global limits
+        actual_max = 0 if _is_lab_subject(subj) else max_candidates_per_combo
+        if actual_max > 0 and len(ordered_starts) > actual_max:
             fixed_starts = [
                 slot for slot in ordered_starts if (combo_id, slot[0], slot[1]) in fixed_slot_keys
             ]
             non_fixed_starts = [
                 slot for slot in ordered_starts if (combo_id, slot[0], slot[1]) not in fixed_slot_keys
             ]
-            remaining_capacity = max(0, max_candidates_per_combo - len(fixed_starts))
+            remaining_capacity = max(0, actual_max - len(fixed_starts))
             ordered_starts = fixed_starts + non_fixed_starts[:remaining_capacity]
         for day, hour in ordered_starts:
             violates_availability = False
@@ -2255,6 +2270,11 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, hour + block)):
                         violates_availability = True
                         break
+
+            if teacher_avail_enabled and teacher_avail_hard and violates_availability:
+                if debug_labs and _is_lab_subject(subj):
+                    logger.debug("[solve_instance] skipping lab candidate due to hard availability: %s at %d,%d", combo_id, day, hour)
+                continue
 
             var = model.NewBoolVar(f"x_{combo_id}_{day}_{hour}")
             x[(combo_id, day, hour)] = var
@@ -2342,7 +2362,9 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
         combo = combo_by_id.get(combo_id)
         if not combo:
             continue
-        subj = subject_by_id.get(combo["subject_id"])
+        subj_ref = combo.get("subject")
+        subj = (subj_ref if isinstance(subj_ref, dict) else None) or subject_by_id.get(combo.get("subject_id"))
+
         if not subj:
             continue
         block = lab_block_size if _is_lab_subject(subj) else theory_block_size
@@ -2613,7 +2635,9 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
             class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
             if not class_ids:
                 continue
-            subj = subject_by_id.get(combo["subject_id"])
+            subj_ref = combo.get("subject")
+            subj = (subj_ref if isinstance(subj_ref, dict) else None) or subject_by_id.get(combo.get("subject_id"))
+
             if not subj:
                 continue
             block = lab_block_size if _is_lab_subject(subj) else theory_block_size
@@ -2715,7 +2739,8 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
             subj_id = subj["_id"]
             req = required_hours_by_class_subject[class_id][subj_id]
             pairs = x_by_class_subject.get((class_id, subj_id), [])
-            terms = [var * block for (var, block) in pairs]
+            block = lab_block_size if _is_lab_subject(subj) else theory_block_size
+            terms = [var * b for (var, b) in pairs]
             if debug_labs and req > 0 and str(subj.get("type") or "").lower() == "lab":
                 logger.debug(
                     "[solve_instance] class subject coverage %s",
@@ -2735,7 +2760,35 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
                     model.Add(sum(terms) == 0)
                 continue
             scheduled_terms = sum(terms) if terms else 0
-            if weekly_hours_hard or _is_lab_subject(subj):
+            if _is_lab_subject(subj):
+                # For labs, use high-penalty soft constraints instead of hard equality.
+                # This ensures the solver *tries* its best to place them without failing the whole model.
+                
+                # Minimum: aim for at least (req - 1) or floor to block size
+                min_lab_hours = (req // block) * block
+                if min_lab_hours < req and req > 0:
+                    # If it's something like 3 hours with 2-hour blocks, 
+                    # we still want to allow 2 hours as a fallback, but aim for 4.
+                    pass 
+
+                # Hard lower bound to ensure *some* placement if possible.
+                # This prevents the solver from choosing an empty timetable to avoid soft penalties.
+                if req >= block:
+                    model.Add(scheduled_terms >= block)
+                elif req > 0:
+                    model.Add(scheduled_terms >= 1)
+                
+                # Penalty for shortage (Extremely high)
+                lab_shortage = model.NewIntVar(0, req, f"lab_shortage_{class_id}_{subj_id}")
+                model.Add(lab_shortage >= req - scheduled_terms)
+                objective_terms.append(lab_shortage * 100000)
+                
+                # Penalty for overage (High, but lower than shortage)
+                lab_overage = model.NewIntVar(0, block, f"lab_overage_{class_id}_{subj_id}")
+                model.Add(lab_overage >= scheduled_terms - req)
+                objective_terms.append(lab_overage * 5000)
+                
+            elif weekly_hours_hard:
                 model.Add(scheduled_terms == req)
             else:
                 scheduled = model.NewIntVar(0, req, f"scheduled_{class_id}_{subj_id}")
@@ -3401,7 +3454,9 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
         if solver.Value(var) != 1:
             continue
         combo = combo_by_id[combo_id]
-        subj = subject_by_id[combo["subject_id"]]
+        subj_ref = combo.get("subject")
+        subj = (subj_ref if isinstance(subj_ref, dict) else None) or subject_by_id.get(combo.get("subject_id"))
+
         block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         for h in range(hour, hour + block):
             for class_id in combo.get("class_ids", []):

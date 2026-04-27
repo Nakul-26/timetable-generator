@@ -87,7 +87,7 @@ export function convertNewCollegeInput({
     for (const allocation of labAllocations) {
         const classIds = getUniqueStrings(allocation.classIds);
         const subjectId = String(allocation.subjectId || "").trim();
-        const teacherIds = getUniqueStrings(allocation.teacherIds).slice(0, 1);
+        const teacherIds = getUniqueStrings(allocation.teacherIds);
         const hoursRequired = Number(allocation.hoursPerWeek || 0);
         if (!subjectId || classIds.length === 0 || hoursRequired <= 0) continue;
         explicitLabAllocations.push({

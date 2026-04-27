@@ -17,6 +17,7 @@ def build_variables(
     Dict[Tuple[str, int, int, str], List[cp_model.IntVar]],
     List[cp_model.IntVar],
     Dict[str, List[Tuple[int, int]]],
+    Dict[Tuple[str, str], List[Tuple[cp_model.IntVar, int]]],
 ]:
     """
     Build decision variables for combo placements.
@@ -28,6 +29,7 @@ def build_variables(
         subject_covers: Vars covering class-subject slots
         search_ordered_vars: Vars for solver search order
         combo_candidate_starts: Valid start positions per combo
+        x_by_class_subject: Mapping of (class_id, subject_id) to (var, block)
     """
     # Extract data
     combos = data["combos"]
@@ -60,6 +62,7 @@ def build_variables(
     teacher_covers: Dict[Tuple[str, int, int], List[cp_model.IntVar]] = {}
     subject_covers: Dict[Tuple[str, int, int, str], List[cp_model.IntVar]] = {}
     combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {}
+    x_by_class_subject: Dict[Tuple[str, str], List[Tuple[cp_model.IntVar, int]]] = {}
     search_ordered_vars: List[cp_model.IntVar] = []
 
     def _is_lab_subject(subj: Dict[str, Any]) -> bool:
@@ -75,8 +78,13 @@ def build_variables(
         class_ids = [cid for cid in (combo.get("class_ids") or []) if cid in class_by_id]
         if not class_ids:
             continue
-        subj = subject_by_id.get(combo["subject_id"])
+        # Use inline subject if available, fallback to global map
+        subj_ref = combo.get("subject")
+        subj = (subj_ref if isinstance(subj_ref, dict) else None) or subject_by_id.get(combo.get("subject_id"))
+        
         if not subj:
+            # DO NOT silent continue - log it so the user knows why labs are missing
+            print(f"⚠️ SKIPPING COMBO {combo_id}: Subject {combo.get('subject_id')} not found in payload.")
             continue
         block = lab_block_size if _is_lab_subject(subj) else theory_block_size
         max_days_for_combo = min(
@@ -128,8 +136,12 @@ def build_variables(
                     subject_covers.setdefault((class_id, day, h, combo["subject_id"]), []).append(var)
                 for fid in combo.get("faculty_ids", []):
                     teacher_covers.setdefault((fid, day, h), []).append(var)
+            
+            # Populate x_by_class_subject for weekly hour constraints
+            for class_id in class_ids:
+                x_by_class_subject.setdefault((class_id, combo["subject_id"]), []).append((var, block))
 
-    return x, covers, teacher_covers, subject_covers, search_ordered_vars, combo_candidate_starts
+    return x, covers, teacher_covers, subject_covers, search_ordered_vars, combo_candidate_starts, x_by_class_subject
 
 
 def _is_teacher_unavailable(fid: str, day: int, hour: int, global_unavail: set, by_teacher: Dict[str, set], days_per_week: int, hours_per_day: int, break_hours_set: set) -> bool:
