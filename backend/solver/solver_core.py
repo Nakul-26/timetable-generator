@@ -1,41 +1,19 @@
-# backend/solver/app.py
+from __future__ import annotations
 
-#  cd backend\solver
-#  python -m venv .venv
-#  .\.venv\Scripts\Activate.ps1
-#  pip install -r requirements.txt (only if not working)
-#  uvicorn app:app --host 0.0.0.0 --port 8001 --reload
-
-# FastAPI CP-SAT timetable solver service
-import asyncio
-import copy
-import hashlib
-import json
 import os
-import urllib.request
-import urllib.error
-from pathlib import Path
 import sys
 import threading
-import time
-from typing import Dict, List, Any, Tuple, Optional
-from fastapi import FastAPI, Request
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Optional
 
+# Allow running/importing from repo root as well as from within backend/solver.
 _SOLVER_DIR = Path(__file__).resolve().parent
 if str(_SOLVER_DIR) not in sys.path:
     sys.path.insert(0, str(_SOLVER_DIR))
 
-try:
-    from bson import ObjectId
-except Exception:  # pragma: no cover - fallback for environments without pymongo/bson
-    class ObjectId(str):  # type: ignore[no-redef]
-        pass
-
 from ortools.sat.python import cp_model
 
-from infra.ec2 import maybe_stop_when_idle
-from infra.logging_setup import configure_logging, get_logger
-from infra.mongo import close_client as mongo_close_client, get_client as mongo_get_client
+from infra.logging_setup import get_logger
 from solver_common import (
     BREAK,
     DEFAULT_SOLVER_TIME_LIMIT_SEC,
@@ -47,1327 +25,79 @@ from solver_common import (
     _normalize_teacher_slot_map,
     _to_bool,
 )
-from solver_core import (
-    _SolveProgressCallback,
-    _normalize_id,
-    _required_hours,
-    _solve_with_solution_callback,
-    _stop_search,
-    solve_instance,
-)
 
+logger = get_logger("timetable.solver.core")
 DEBUG = os.getenv("DEBUG_SOLVER", "0").strip().lower() in ("1", "true", "yes", "on")
-LOG_FULL_PAYLOAD = os.getenv("LOG_FULL_PAYLOAD", "0").strip().lower() in ("1", "true", "yes", "on")
-configure_logging(debug=DEBUG)
-logger = get_logger("timetable.solver.app")
-app = FastAPI()
 
 
-def get_adaptive_time_limit(difficulty: str, budget: float) -> float:
-    share_by_difficulty = {
-        "very_hard": 0.80,
-        "hard": 0.60,
-        "medium": 0.45,
-        "easy": 0.35,
-        "unknown": 0.55,
-    }
-    share = share_by_difficulty.get(difficulty, 0.55)
-    return max(30.0, budget * share)
+def _solve_with_solution_callback(solver, model, callback):
+    solve_method = getattr(solver, "SolveWithSolutionCallback", None)
+    if callable(solve_method):
+        return solve_method(model, callback)
 
-DEFAULT_SOLVER_TIME_LIMIT_SEC = 180.0
-DEFAULT_SOLUTION_COUNT = 2
-MONGO_URI = os.getenv("MONGO_URI")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "timetable_jayanth")
-JOB_COLLECTION_NAME = os.getenv("GENERATION_JOB_COLLECTION", "generationjobs")
-TIMETABLE_RESULT_COLLECTION_NAME = os.getenv("TIMETABLE_RESULT_COLLECTION", "timetableresults")
-ACTIVE_JOB_TASKS = set()
+    solve_method = getattr(solver, "solve_with_solution_callback", None)
+    if callable(solve_method):
+        return solve_method(model, callback)
 
-# Polling-based job pickup (backend can just create a pending job and return).
-SOLVER_PULL_INTERVAL_SEC = float(os.getenv("SOLVER_PULL_INTERVAL_SEC", "5"))
-DEBUG_DUMP_PAYLOADS = os.getenv("DEBUG_DUMP_PAYLOADS", "0").strip().lower() in ("1", "true", "yes", "on")
+    solve_method = getattr(solver, "solve", None)
+    if callable(solve_method):
+        return solve_method(model, solution_callback=callback)
+
+    solve_method = getattr(solver, "Solve", None)
+    if callable(solve_method):
+        return solve_method(model, callback)
+
+    raise AttributeError(
+        "CpSolver does not support solution callback solving on this OR-Tools build"
+    )
 
 
-def _json_default(value: Any) -> Any:
-    """Best-effort JSON serializer for debugging/HTTP payloads."""
-    if isinstance(value, ObjectId):
-        return str(value)
-
-    iso = getattr(value, "isoformat", None)
-    if callable(iso):
-        try:
-            return iso()
-        except Exception:
-            pass
-
-    if isinstance(value, (set, tuple)):
-        return list(value)
-
-    return str(value)
-
-
-from typing import Union
-
-def _job_filter(job_id: str) -> Dict[str, Any]:
-    try:
-        from bson import ObjectId
-    except ImportError:
-        ObjectId = str  # type: ignore
-
-
-def _get_jobs_collection():
-    if not MONGO_URI:
-        raise RuntimeError("MONGO_URI is required for solver job processing")
-    client = mongo_get_client(MONGO_URI)
-    return client, client[MONGO_DB_NAME][JOB_COLLECTION_NAME]
-
-
-def _get_timetable_results_collection():
-    if not MONGO_URI:
-        raise RuntimeError("MONGO_URI is required for timetable result persistence")
-    client = mongo_get_client(MONGO_URI)
-    return client, client[MONGO_DB_NAME][TIMETABLE_RESULT_COLLECTION_NAME]
-
-
-def _apply_config_preset(constraint_config: Dict[str, Any], mode: Any) -> Dict[str, Any]:
-    """Compatibility shim for older entrypoints that expected mode-specific presets."""
-    if not isinstance(constraint_config, dict):
-        return {}
-    return copy.deepcopy(constraint_config)
-
-
-async def _resume_pending_jobs():
-    """Resume any jobs that were pending or running when the solver restarted."""
-    try:
-        client, jobs = _get_jobs_collection()
-        pending_jobs = list(jobs.find({
-            "status": {"$in": ["pending", "running"]}
-        }))
-        for job in pending_jobs:
-            job_id = str(job["_id"])
-            payload = job.get("payload") or (job.get("input") or {}).get("payload")
-            if payload:
-                logger.info("Resuming job %s", job_id)
-                _spawn_generation_job(job_id, payload)
-            else:
-                logger.warning("Cannot resume job %s: no payload found", job_id)
-    except Exception as exc:
-        logger.exception("Error resuming jobs: %s", exc)
-
-
-async def _poll_for_pending_jobs() -> None:
-    """Continuously poll MongoDB for new pending jobs and start them.
-
-    This avoids requiring a serverless backend (e.g., Vercel) to call the solver.
-    """
-    while True:
-        try:
-            client, jobs = _get_jobs_collection()
-            pending_jobs = list(jobs.find({"status": "pending"}, {"payload": 1}).limit(10))
-
-            for job in pending_jobs:
-                job_id = str(job.get("_id"))
-                payload = job.get("payload") or (job.get("input") or {}).get("payload")
-                if not payload:
-                    logger.warning("Skipping pending job %s: no payload", job_id)
-                    continue
-
-                # Atomically claim the job to avoid duplicate spawns.
-                try:
-                    client2, jobs2 = _get_jobs_collection()
-                    claimed = jobs2.update_one(
-                        {"_id": job.get("_id"), "status": "pending"},
-                        {"$set": {"status": "running", "phase": "start", "progress": 0}},
-                    )
-
-                    if getattr(claimed, "modified_count", 0) != 1:
-                        continue
-                except Exception as exc:
-                    logger.exception("Failed to claim pending job %s: %s", job_id, exc)
-                    continue
-
-                logger.info("Picked up pending job %s", job_id)
-                _spawn_generation_job(job_id, payload)
-        except Exception as exc:
-            logger.exception("Error polling pending jobs: %s", exc)
-
-        await asyncio.sleep(max(1.0, SOLVER_PULL_INTERVAL_SEC))
-
-
-def _set_job_state(job_id: str, **fields: Any) -> None:
-    client, jobs = _get_jobs_collection()
-    try:
-        fields["updatedAt"] = fields.get("updatedAt") or __import__("datetime").datetime.utcnow()
-        jobs.update_one(_job_filter(job_id), {"$set": fields})
-    finally:
-        pass
-
-
-def _is_cancel_requested(job_id: str) -> bool:
-    client, jobs = _get_jobs_collection()
-    try:
-        doc = jobs.find_one(_job_filter(job_id), {"cancel_requested": 1})
-        return bool(doc and doc.get("cancel_requested"))
-    finally:
-        pass
-
-
-def _persist_completed_timetable(job_id: str, result: Dict[str, Any]) -> None:
-    best_class_timetables = result.get("bestClassTimetables") or result.get("class_timetables")
-    if not isinstance(best_class_timetables, dict) or not best_class_timetables:
+def _stop_search(solver) -> None:
+    stop_method = getattr(solver, "StopSearch", None)
+    if callable(stop_method):
+        stop_method()
         return
 
-    now = __import__("datetime").datetime.utcnow()
-    document = {
-        "name": f"Generated Timetable - {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
-        "source": "generator",
-        "status": "generated",
-        "source_generation_job_id": str(job_id),
-        "class_timetables": best_class_timetables,
-        "faculty_timetables": result.get("bestFacultyTimetables") or result.get("faculty_timetables"),
-        "faculty_daily_hours": result.get("bestFacultyDailyHours") or result.get("faculty_daily_hours"),
-        "score": result.get("bestScore") if result.get("bestScore") is not None else result.get("score"),
-        "objective_value": (
-            result.get("objectiveValue")
-            if result.get("objectiveValue") is not None
-            else result.get("objective_value")
-        ),
-        "generation_batch_id": result.get("generation_batch_id"),
-        "selected_option_id": result.get("selected_option_id"),
-        "generation_options": result.get("generation_options") or [],
-        "combos": result.get("combos"),
-        "allocations_report": result.get("allocations_report"),
-        "config": result.get("config"),
-        "createdAt": now,
-        "updatedAt": now,
-    }
+    stop_method = getattr(solver, "stop_search", None)
+    if callable(stop_method):
+        stop_method()
+        return
 
-    client, results = _get_timetable_results_collection()
-    try:
-        results.update_one(
-            {"source_generation_job_id": str(job_id)},
-            {"$setOnInsert": document},
-            upsert=True,
-        )
-    finally:
-        pass
+    raise AttributeError("CpSolver does not support stop_search on this OR-Tools build")
 
 
-def _objective_from_counts(
-    *,
-    gap_count: int,
-    unmet_count: int,
-    warning_count: int,
-    constraint_config: Dict[str, Any],
-) -> float:
-    weights = _cfg_get(constraint_config, ["solver", "objectiveWeights"], {})
-    if not isinstance(weights, dict):
-        weights = {}
-    gap_weight = float(weights.get("gap") if weights.get("gap") is not None else 1)
-    unmet_weight = float(
-        weights.get("unmet")
-        if weights.get("unmet") is not None
-        else weights.get("unmetRequirement", 1000)
-    )
-    warning_weight = float(weights.get("warning") if weights.get("warning") is not None else 100)
-    return (gap_weight * float(gap_count)) + (unmet_weight * float(unmet_count)) + (warning_weight * float(warning_count))
+class _SolveProgressCallback(cp_model.CpSolverSolutionCallback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.solution_found = False
+        self.solution_count = 0
+        self.first_solution_wall_time_seconds = 0.0
 
+    def on_solution_callback(self) -> None:
+        self.solution_found = True
+        self.solution_count += 1
+        if self.solution_count == 1:
+            self.first_solution_wall_time_seconds = float(self.WallTime())
 
-def _analyze_class_internal_gaps(class_timetables: Dict[str, Any]) -> Dict[str, int]:
-    gap_count = 0
-    if not isinstance(class_timetables, dict):
-        return {"gapCount": 0}
 
-    for rows in class_timetables.values():
-        if not isinstance(rows, list):
-            continue
-        for row in rows:
-            if not isinstance(row, list):
-                continue
-            teaching_slots = [
-                idx
-                for idx, slot in enumerate(row)
-                if slot not in (EMPTY, BREAK, None)
-            ]
-            if len(teaching_slots) <= 1:
-                continue
-            first = teaching_slots[0]
-            last = teaching_slots[-1]
-            for hour in range(first + 1, last):
-                slot = row[hour]
-                if slot in (EMPTY, None):
-                    gap_count += 1
-    return {"gapCount": gap_count}
+def _normalize_id(item: Dict[str, Any]) -> Dict[str, Any]:
+    _id = item.get("_id") or item.get("id")
+    return {**item, "_id": str(_id)}
 
 
-def _stable_serialize(value: Any) -> Any:
-    if isinstance(value, list):
-        return [_stable_serialize(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _stable_serialize(value[key]) for key in sorted(value.keys())}
-    return value
+def _required_hours(class_obj: Dict[str, Any], subject_obj: Dict[str, Any]) -> int:
+    subj_id = subject_obj["_id"]
+    subj_hours = class_obj.get("subject_hours") or {}
+    # When class-specific subject hours are present, they are authoritative:
+    # subjects not listed for the class must be treated as 0 required hours.
+    if isinstance(subj_hours, dict) and len(subj_hours) > 0:
+        if subj_id in subj_hours and subj_hours[subj_id] is not None:
+            return int(subj_hours[subj_id])
+        return 0
+    return int(subject_obj.get("no_of_hours_per_week") or 0)
 
 
-def _hash_timetable(class_timetables: Dict[str, Any]) -> str:
-    if not isinstance(class_timetables, dict):
-        return ""
-    stable = json.dumps(_stable_serialize(class_timetables), separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(stable.encode("utf-8")).hexdigest()
-
-
-def _compare_timetable_difference(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, int]:
-    class_ids = set((left or {}).keys()) | set((right or {}).keys())
-    total_slots = 0
-    different_slots = 0
-    for class_id in class_ids:
-        left_days = left.get(class_id) if isinstance(left, dict) else []
-        right_days = right.get(class_id) if isinstance(right, dict) else []
-        left_days = left_days if isinstance(left_days, list) else []
-        right_days = right_days if isinstance(right_days, list) else []
-        day_count = max(len(left_days), len(right_days))
-        for day in range(day_count):
-            left_row = left_days[day] if day < len(left_days) and isinstance(left_days[day], list) else []
-            right_row = right_days[day] if day < len(right_days) and isinstance(right_days[day], list) else []
-            hour_count = max(len(left_row), len(right_row))
-            for hour in range(hour_count):
-                left_value = left_row[hour] if hour < len(left_row) else None
-                right_value = right_row[hour] if hour < len(right_row) else None
-                total_slots += 1
-                if left_value != right_value:
-                    different_slots += 1
-    return {"totalSlots": total_slots, "differentSlots": different_slots}
-
-
-def _build_option_label(candidate: Dict[str, Any], index: int) -> str:
-    if index == 0:
-        return "Option 1 (Best balanced)"
-    if not candidate.get("unmet_requirements") and not candidate.get("warnings"):
-        return f"Option {index + 1} (Cleanest fit)"
-    if (candidate.get("score") or 0) <= 0:
-        return f"Option {index + 1} (Compact schedule)"
-    if len(candidate.get("warnings") or []) <= 1:
-        return f"Option {index + 1} (Lower friction)"
-    return f"Option {index + 1} (Alternative)"
-
-
-def _build_attempt_constraint_config(
-    base_config: Dict[str, Any],
-    strategy: Dict[str, Any],
-    per_attempt_time_limit_sec: float,
-    adaptive_relax: bool = False,
-    difficulty: str = "unknown",
-) -> Dict[str, Any]:
-    config = copy.deepcopy(base_config) if isinstance(base_config, dict) else {}
-    solver_cfg = config.setdefault("solver", {})
-    user_max_candidates = solver_cfg.get("maxCandidatesPerCombo")
-    user_early_abort = solver_cfg.get("earlyAbortNoSolution")
-    user_abort_ratio = solver_cfg.get("noSolutionAbortRatio")
-    user_abort_min_sec = solver_cfg.get("noSolutionAbortMinSec")
-    solver_cfg["timeLimitSec"] = per_attempt_time_limit_sec
-    # Adaptive search space based on difficulty
-    adaptive_max_candidates = {
-        "very_hard": 0,  # Unlimited
-        "hard": 20,
-        "medium": 15,
-        "easy": 12,
-        "unknown": 15,
-    }.get(difficulty, 15)
-
-    solver_cfg["maxCandidatesPerCombo"] = int(
-        user_max_candidates if user_max_candidates is not None else (strategy.get("maxCandidatesPerCombo") or adaptive_max_candidates)
-    )
-    solver_cfg["earlyAbortNoSolution"] = (
-        bool(user_early_abort)
-        if user_early_abort is not None
-        else bool(strategy.get("earlyAbortNoSolution", True))
-    )
-    solver_cfg["noSolutionAbortRatio"] = float(
-        user_abort_ratio if user_abort_ratio is not None else strategy.get("noSolutionAbortRatio", 0.4)
-    )
-    solver_cfg["noSolutionAbortMinSec"] = float(
-        user_abort_min_sec if user_abort_min_sec is not None else strategy.get("noSolutionAbortMinSec", 10)
-    )
-
-    if strategy.get("relaxSoftConstraints") or adaptive_relax:  # Temporarily disabled adaptive_relax
-        for section_name, weight_scale in (
-            ("teacherContinuity", 0.5),
-            ("classContinuity", 0.5),
-            ("teacherDailyOverload", 0.5),
-            ("teacherRecoveryBreak", 0.4),
-            ("subjectClustering", 0.4),
-            ("subjectDistribution", 0.4),
-            ("highLoadSubjectTiming", 0.3),
-            ("dailyCompactness", 0.35),
-            ("weeklyFrontLoading", 0.35),
-            ("teacherWeeklyLoadBalance", 0.4),
-            ("classDailyMinimumLoad", 0.5),
-            ("teacherBoundaryPreference", 0.4),
-            ("teacherAvailability", 1.0),
-            ("noGaps", 1.0),
-        ):
-            section = config.get(section_name)
-            if not isinstance(section, dict):
-                continue
-            for key, value in list(section.items()):
-                if "weight" not in key.lower() or not isinstance(value, (int, float)):
-                    continue
-                section[key] = max(0, int(round(value * weight_scale)))
-
-    return config
-
-
-def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cancel_check=None) -> Dict[str, Any]:
-    # DEBUG: Log payload summary at start of generation
-    logger.info(
-        "Generation payload summary: inputMode=%s classes=%d subjects=%d faculties=%d combos=%d fixedSlots=%d daysPerWeek=%s hoursPerDay=%s",
-        payload.get("inputMode", "EXPLICIT"),
-        len(payload.get("classes", []) or []),
-        len(payload.get("subjects", []) or []),
-        len(payload.get("faculties", []) or []),
-        len(payload.get("combos", []) or []),
-        len(payload.get("fixedSlots", []) or []),
-        payload.get("DAYS_PER_WEEK"),
-        payload.get("HOURS_PER_DAY"),
-    )
-    if DEBUG or DEBUG_DUMP_PAYLOADS:
-        logger.debug("constraintConfig keys: %s", list((payload.get("constraintConfig") or {}).keys()))
-
-    if DEBUG_DUMP_PAYLOADS:
-        try:
-            with open("generation_payload.json", "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, default=_json_default)
-        except Exception as exc:
-            logger.exception("Failed to dump generation payload: %s", exc)
-
-    classes = payload.get("classes") or []
-    faculties = payload.get("faculties") or []
-    subjects = payload.get("subjects") or []
-    combos = payload.get("combos") or []
-    skip_strict = (
-        len(combos) > 200 or
-        len(classes) > 6 or
-        len(faculties) < len(subjects)
-    )  # Better heuristic
-    fixed_slots = payload.get("fixedSlots") or []
-    days_per_week = int(payload.get("DAYS_PER_WEEK") or 6)
-    hours_per_day = int(payload.get("HOURS_PER_DAY") or 8)
-    constraint_config = payload.get("constraintConfig") or {}
-    mode = payload.get("mode") or "college"
-    constraint_config = _apply_config_preset(constraint_config, mode)
-
-    candidates: List[Dict[str, Any]] = []  # Initialize candidates before feasibility
-
-    solution_count = max(
-        1,
-        min(
-            3 if len(classes) > 5 else 5,
-            int(
-                payload.get("solutionCount")
-                or _cfg_get(constraint_config, ["solver", "solutionCount"], DEFAULT_SOLUTION_COUNT)
-            ),
-        ),
-    )
-
-    def ranked_candidates() -> List[Dict[str, Any]]:
-        return sorted(
-            candidates,
-            key=lambda item: (
-                item["objectiveValue"]
-                if isinstance(item.get("objectiveValue"), (int, float))
-                else (item["score"] if isinstance(item.get("score"), (int, float)) else float("inf")),
-                item.get("seed", 0),
-            ),
-        )
-
-    def build_selected_result(option: Dict[str, Any] | None) -> Dict[str, Any]:
-        ranked = []
-        for index, candidate in enumerate(ranked_candidates()[:solution_count]):
-            item = dict(candidate)
-            item["rank"] = index + 1
-            item["label"] = _build_option_label(candidate, index)
-            ranked.append(item)
-        selected = option or (ranked[0] if ranked else None)
-        return {
-            "ok": bool(selected),
-            "error": None if selected else (
-                (last_failure_result.get("error") if isinstance(last_failure_result, dict) else None)
-                or last_error
-                or "Failed to generate timetable"
-            ),
-            "generation_batch_id": generation_batch_id,
-            "optionsGenerated": len(ranked),
-            "selected_option_id": selected.get("optionId") if selected else None,
-            "score": selected.get("score") if selected else None,
-            "objectiveValue": selected.get("objectiveValue") if selected else None,
-            "class_timetables": selected.get("class_timetables") if selected else (
-                last_failure_result.get("class_timetables") if isinstance(last_failure_result, dict) else None
-            ),
-            "faculty_timetables": selected.get("faculty_timetables") if selected else (
-                last_failure_result.get("faculty_timetables") if isinstance(last_failure_result, dict) else None
-            ),
-            "faculty_daily_hours": selected.get("faculty_daily_hours") if selected else (
-                last_failure_result.get("faculty_daily_hours") if isinstance(last_failure_result, dict) else None
-            ),
-            "classes": selected.get("classes") if selected else (
-                last_failure_result.get("classes") if isinstance(last_failure_result, dict) else classes
-            ),
-            "combos": selected.get("combos") if selected else (
-                last_failure_result.get("combos") if isinstance(last_failure_result, dict) else combos
-            ),
-            "config": selected.get("config") if selected else (
-                last_failure_result.get("config") if isinstance(last_failure_result, dict) else constraint_config
-            ),
-            "allocations_report": selected.get("allocations_report") if selected else None,
-            "unmet_requirements": selected.get("unmet_requirements") if selected else (
-                (last_failure_result.get("unmet_requirements") if isinstance(last_failure_result, dict) else None) or []
-            ),
-            "warnings": selected.get("warnings") if selected else (
-                (last_failure_result.get("warnings") if isinstance(last_failure_result, dict) else None) or []
-            ),
-            "solver_stats": selected.get("solver_stats") if selected else (
-                last_failure_result.get("solver_stats") if isinstance(last_failure_result, dict) else None
-            ),
-            "strategy": selected.get("strategy") if selected else (
-                last_failure_result.get("strategy") if isinstance(last_failure_result, dict) else None
-            ),
-            "diagnostics": selected.get("diagnostics") if selected else (
-                last_failure_result.get("diagnostics") if isinstance(last_failure_result, dict) else None
-            ),
-            "hint": selected.get("hint") if selected else (
-                last_failure_result.get("hint") if isinstance(last_failure_result, dict) else None
-            ),
-            "reason": selected.get("reason") if selected else (
-                last_failure_result.get("reason") if isinstance(last_failure_result, dict) else None
-            ),
-            "preview_stats": selected.get("preview_stats") if selected else (
-                last_failure_result.get("preview_stats") if isinstance(last_failure_result, dict) else None
-            ),
-            "attemptsTried": attempts_run,
-            "generation_options": ranked,
-            "bestClassTimetables": selected.get("class_timetables") if selected else None,
-            "bestFacultyTimetables": selected.get("faculty_timetables") if selected else None,
-            "bestFacultyDailyHours": selected.get("faculty_daily_hours") if selected else None,
-            "bestScore": selected.get("score") if selected else None,
-            "batch_stats": {
-                "attemptsPlanned": max_attempts,
-                "attemptsTried": attempts_run,
-                "uniqueCandidatesFound": len(candidates),
-                "duplicateHashSkips": duplicate_hash_skips,
-                "nearDuplicateSkips": similar_skips,
-                "infeasibleAttempts": infeasible_attempts,
-                "gapRejections": gap_rejections,
-                "stopReason": stop_reason,
-            },
-        }
-
-    # Phase 1: Feasibility - find any valid timetable with relaxed constraints
-    configured_time_limit = float(
-        _cfg_get(constraint_config, ["solver", "timeLimitSec"], payload.get("solver_time_limit_sec") or DEFAULT_SOLVER_TIME_LIMIT_SEC)
-    )
-    feasibility_config = copy.deepcopy(constraint_config)
-    feasibility_config.setdefault("noGaps", {})["hard"] = False
-    feasibility_config.setdefault("teacherAvailability", {})["hard"] = False
-    feasibility_config.setdefault("solver", {})["maxCandidatesPerCombo"] = 0  # Unlimited
-    feasibility_config.setdefault("solver", {})["earlyAbortNoSolution"] = False
-    feasibility_config.setdefault("weeklySubjectHours", {})["hard"] = False  # Allow partial for feasibility
-    # Relax weights
-    for section in feasibility_config:
-        if isinstance(feasibility_config[section], dict):
-            for key in list(feasibility_config[section].keys()):
-                if "weight" in key.lower() and isinstance(feasibility_config[section][key], (int, float)):
-                    feasibility_config[section][key] = max(1, feasibility_config[section][key] // 2)
-
-    progress_callback and progress_callback({"progress": 10, "phase": "feasibility_start"})
-    feasibility_time_limit_sec = max(60.0, min(configured_time_limit, configured_time_limit * 0.25))
-    feasibility_result = solve_instance({
-        "faculties": faculties,
-        "subjects": subjects,
-        "classes": classes,
-        "combos": combos,
-        "DAYS_PER_WEEK": days_per_week,
-        "HOURS_PER_DAY": hours_per_day,
-        "fixedSlots": fixed_slots,
-        "constraintConfig": feasibility_config,
-        "random_seed": 42,  # Fixed seed for feasibility
-        "solver_time_limit_sec": feasibility_time_limit_sec,
-    })
-    if feasibility_result.get("ok") and not (feasibility_result.get("unmet_requirements") or []):
-        progress_callback and progress_callback({"progress": 50, "phase": "feasibility_found"})
-        # Return feasibility result immediately if it works
-        return {
-            "ok": True,
-            "generation_batch_id": f"feasibility_{int(__import__('time').time() * 1000)}",
-            "optionsGenerated": 1,
-            "selected_option_id": "feasibility_solution",
-            "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-            "objectiveValue": feasibility_result.get("objective_value", 0),
-            "class_timetables": feasibility_result.get("class_timetables"),
-            "faculty_timetables": feasibility_result.get("faculty_timetables"),
-            "faculty_daily_hours": feasibility_result.get("faculty_daily_hours"),
-            "classes": feasibility_result.get("classes") or classes,
-            "combos": combos,
-            "config": feasibility_result.get("config") or feasibility_config,
-            "allocations_report": feasibility_result.get("allocations_report"),
-            "unmet_requirements": feasibility_result.get("unmet_requirements") or [],
-            "warnings": feasibility_result.get("warnings") or [],
-            "solver_stats": feasibility_result.get("solver_stats"),
-            "strategy": {"name": "feasibility_relaxed", "phase": "feasibility"},
-            "diagnostics": feasibility_result.get("diagnostics"),
-            "hint": "Feasibility solution found",
-            "reason": "feasibility_success",
-            "preview_stats": feasibility_result.get("preview_stats"),
-            "attemptsTried": 1,
-            "generation_options": [{
-                "optionId": "feasibility_solution",
-                "rank": 1,
-                "label": "Feasibility Solution",
-                "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-                "objectiveValue": feasibility_result.get("objective_value", 0),
-            }],
-            "bestClassTimetables": feasibility_result.get("class_timetables"),
-            "bestFacultyTimetables": feasibility_result.get("faculty_timetables"),
-            "bestFacultyDailyHours": feasibility_result.get("faculty_daily_hours"),
-            "bestScore": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-            "batch_stats": {
-                "attemptsPlanned": 1,
-                "attemptsTried": 1,
-                "uniqueCandidatesFound": 1,
-                "duplicateHashSkips": 0,
-                "nearDuplicateSkips": 0,
-                "infeasibleAttempts": 0,
-                "gapRejections": 0,
-                "stopReason": "feasibility_success",
-            },
-        }
-        # Add feasibility solution to candidates for optimization
-        candidates.append({
-            "optionId": "feasibility_solution",
-            "seed": 42,
-            "score": _analyze_class_internal_gaps(feasibility_result.get("class_timetables") or {}).get("gapCount", 0),
-            "objectiveValue": feasibility_result.get("objective_value", 0),
-            "class_timetables": feasibility_result.get("class_timetables"),
-            "faculty_timetables": feasibility_result.get("faculty_timetables"),
-            "faculty_daily_hours": feasibility_result.get("faculty_daily_hours"),
-            "classes": feasibility_result.get("classes") or classes,
-            "combos": combos,
-            "config": feasibility_result.get("config") or feasibility_config,
-            "allocations_report": feasibility_result.get("allocations_report"),
-            "unmet_requirements": feasibility_result.get("unmet_requirements") or [],
-            "warnings": feasibility_result.get("warnings") or [],
-            "solver_stats": feasibility_result.get("solver_stats"),
-        })
-        if len(candidates) >= solution_count:
-            progress_callback and progress_callback({"progress": 100, "phase": "completed"})
-            return build_selected_result(ranked_candidates()[0] if ranked_candidates() else None)
-    else:
-        progress_callback and progress_callback({"progress": 10, "phase": "feasibility_failed"})
-    attempts = max(12, int(payload.get("attempts") or 12))
-    enforce_hard_no_gaps = False  # Disable gap rejection to avoid over-constraining
-
-    generation_batch_id = f"gen_{int(__import__('time').time() * 1000)}_{os.urandom(3).hex()}"
-    seen_hashes = set()
-    attempts_run = 0
-    last_error = None
-    last_failure_result: Dict[str, Any] | None = None
-    duplicate_hash_skips = 0
-    similar_skips = 0
-    infeasible_attempts = 0
-    gap_rejections = 0
-    adaptive_relax = False  # New: adaptive constraint relaxation
-    stop_reason = "attempt_budget_exhausted"
-    started = __import__("time").time()
-    total_time_limit = max(60.0, configured_time_limit)
-    logger.info(
-        "Configured time limit: %.1fs (%.1f min); total_time_limit=%.1fs (%.1f min)",
-        configured_time_limit,
-        configured_time_limit / 60.0,
-        total_time_limit,
-        total_time_limit / 60.0,
-    )
-    min_solver_time_per_attempt_sec = max(
-        5.0,
-        float(_cfg_get(constraint_config, ["solver", "minTimePerAttemptSec"], 15)),
-    )
-    min_candidate_difference_ratio = min(
-        0.25,
-        max(0.0, float(_cfg_get(constraint_config, ["solver", "minCandidateDifferenceRatio"], 0.005))),
-    )
-    budget_driven_attempt_cap = max(
-        1,
-        int(configured_time_limit // max(5.0, min_solver_time_per_attempt_sec)),
-    )
-    max_attempts = max(12, budget_driven_attempt_cap)
-    strategy_templates = [
-        {
-            "name": "strict",
-            "maxCandidatesPerCombo": 0,  # Unlimited for first attempts
-            "timeShare": 0.4,
-            "earlyAbortNoSolution": False,
-            "noSolutionAbortRatio": 0.45,
-            "noSolutionAbortMinSec": 12,
-            "relaxSoftConstraints": False,
-        },
-        {
-            "name": "relaxed_constraints",
-            "maxCandidatesPerCombo": 15,
-            "timeShare": 0.2,
-            "earlyAbortNoSolution": False,
-            "noSolutionAbortRatio": 0.3,
-            "noSolutionAbortMinSec": 8,
-            "relaxSoftConstraints": True,
-        },
-        {
-            "name": "reduced_search",
-            "maxCandidatesPerCombo": 10,
-            "timeShare": 0.25,
-            "earlyAbortNoSolution": False,
-            "noSolutionAbortRatio": 0.35,
-            "noSolutionAbortMinSec": 10,
-            "relaxSoftConstraints": False,
-        },
-        {
-            "name": "aggressive_fast",
-            "maxCandidatesPerCombo": 8,
-            "timeShare": 0.15,
-            "earlyAbortNoSolution": False,
-            "noSolutionAbortRatio": 0.25,
-            "noSolutionAbortMinSec": 6,
-            "relaxSoftConstraints": True,
-        },
-    ]
-    attempt_plans: List[Dict[str, Any]] = []
-    for attempt_index in range(max_attempts):
-        template = strategy_templates[attempt_index % len(strategy_templates)]
-        if skip_strict and template["name"] == "strict" and attempt_index >= 5:
-            continue
-        cycle = attempt_index // len(strategy_templates)
-        strategy = dict(template)
-        strategy["cycle"] = cycle
-        strategy["attemptIndex"] = attempt_index
-        strategy["seed"] = attempt_index + 1
-        if cycle > 0:
-            strategy["name"] = f"{strategy['name']}_cycle_{cycle + 1}"
-        attempt_plans.append(strategy)
-    total_time_share = sum(float(plan.get("timeShare") or 0) for plan in attempt_plans) or 1.0
-
-    def is_good_enough(candidate: Dict[str, Any], difficulty: str) -> bool:
-        good = _cfg_get(constraint_config, ["solver", "goodEnough"], {})
-        if not isinstance(good, dict):
-            good = {}
-        max_score = int(good.get("maxScore") if good.get("maxScore") is not None else 0)
-        max_warnings = int(good.get("maxWarnings") if good.get("maxWarnings") is not None else 0)
-        max_unmet = int(
-            good.get("maxUnmetRequirements")
-            if good.get("maxUnmetRequirements") is not None
-            else 0
-        )
-
-        unmet_count = len(candidate.get("unmet_requirements") or [])
-        warning_count = len(candidate.get("warnings") or [])
-        score = int(candidate.get("score") or 0)
-        return (unmet_count <= max_unmet) and (warning_count <= max_warnings) and (score <= max_score)
-
-    for attempt, strategy in enumerate(attempt_plans):
-        if cancel_check and cancel_check():
-            stop_reason = "cancel_requested"
-            return {
-                "ok": False,
-                "error": "Generation cancelled",
-                "generation_options": ranked_candidates()[:solution_count],
-            }
-
-        elapsed_sec = __import__("time").time() - started
-        if elapsed_sec > total_time_limit:
-            stop_reason = "global_timeout"
-            break
-
-        # Adaptive difficulty analysis and constraint adjustment - DISABLED for fast version
-        # difficulty = analyze_difficulty(
-        #     infeasible_attempts,
-        #     attempts_run,
-        #     len(candidates),
-        #     elapsed_sec
-        # )
-        # adaptive_config = adapt_constraints(
-        #     constraint_config,
-        #     difficulty,
-        #     attempt
-        # )
-        difficulty = "unknown"
-        adaptive_config = constraint_config
-
-        remaining_budget_sec = configured_time_limit - elapsed_sec
-        if remaining_budget_sec <= 0:
-            last_error = "Solver time budget exhausted"
-            stop_reason = "time_budget_exhausted"
-            break
-
-        remaining_attempts = max_attempts - attempt
-        remaining_share = sum(
-            float(plan.get("timeShare") or 0) for plan in attempt_plans[attempt:]
-        ) or 1.0
-        target_time_share = float(strategy.get("timeShare") or 0) / remaining_share
-        per_attempt_time_limit_sec = min(
-            get_adaptive_time_limit(difficulty, configured_time_limit),  # Adaptive time limit scales with the configured budget
-            max(
-                min_solver_time_per_attempt_sec,
-                min(
-                    configured_time_limit * (float(strategy.get("timeShare") or 0) / total_time_share),
-                    remaining_budget_sec * target_time_share,
-                ),
-            ),
-        )
-        if per_attempt_time_limit_sec > remaining_budget_sec:
-            stop_reason = "insufficient_remaining_budget_for_attempt"
-            break
-
-        progress_start = int((attempt * 100) / max(1, max_attempts))
-        progress_end = int(((attempt + 1) * 100) / max(1, max_attempts))
-        attempts_run += 1
-        seed = attempt + 1
-        progress_callback and progress_callback({"progress": progress_start, "phase": "start"})
-        attempt_constraint_config = _build_attempt_constraint_config(
-            adaptive_config,  # Use adaptive config
-            strategy,
-            per_attempt_time_limit_sec,
-            False,  # adaptive_relax disabled
-            difficulty,
-        )
-
-        expected_ms = max(15_000, int(per_attempt_time_limit_sec * 1000))
-        progress_span = max(1, progress_end - progress_start)
-        cap_before_done = min(99, max(progress_start, progress_end - 1))
-        heartbeat_stop = threading.Event()
-        attempt_started_at = time.time()
-        current_progress = progress_start
-
-        def emit_progress(value: float, phase: str = "running") -> None:
-            nonlocal current_progress
-            clamped = max(progress_start, min(cap_before_done, round(value)))
-            current_progress = max(current_progress, clamped)
-            progress_callback and progress_callback({"progress": clamped, "phase": phase})
-
-        def heartbeat() -> None:
-            while not heartbeat_stop.wait(1.0):
-                elapsed_ms = int((time.time() - attempt_started_at) * 1000)
-                ratio = min(1.0, elapsed_ms / max(1, expected_ms))
-                eased = ratio  # Changed to linear progress instead of eased
-                emit_progress(progress_start + eased * progress_span, "running")
-
-        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
-        heartbeat_thread.start()
-
-        try:
-            result = solve_instance(
-                {
-                    "faculties": faculties,
-                    "subjects": subjects,
-                    "classes": classes,
-                    "combos": combos,
-                    "DAYS_PER_WEEK": days_per_week,
-                    "HOURS_PER_DAY": hours_per_day,
-                    "fixedSlots": fixed_slots,
-                    "constraintConfig": attempt_constraint_config,
-                    "random_seed": int(strategy.get("seed") or seed),
-                    "solver_time_limit_sec": per_attempt_time_limit_sec,
-                }
-            )
-        except Exception as exc:
-            last_error = f"Solver crashed: {str(exc) or exc.__class__.__name__}"
-            infeasible_attempts += 1
-            last_failure_result = {
-                "ok": False,
-                "error": last_error,
-                "strategy": strategy.get("name"),
-            }
-            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
-            continue
-        finally:
-            heartbeat_stop.set()
-            heartbeat_thread.join(timeout=0.2)
-
-        if not result.get("ok"):
-            last_error = result.get("error") or "Unknown generator failure"
-            infeasible_attempts += 1
-            if infeasible_attempts > 2:
-                pass  # Removed adaptive_relax
-                # adaptive_relax = True  # Adaptive: relax constraints after 3 failures
-            if infeasible_attempts >= 3 and len(candidates) == 0:
-                # Force relaxation mode on failure spike
-                constraint_config.setdefault("noGaps", {})["hard"] = False
-                constraint_config.setdefault("teacherAvailability", {})["hard"] = False
-            last_failure_result = {
-                **result,
-                "strategy": strategy.get("name"),
-            }
-            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
-            continue
-
-        progress_callback and progress_callback(
-            {"progress": current_progress, "phase": "solver_done"}
-        )
-
-        gap_count = _analyze_class_internal_gaps(result.get("class_timetables") or {}).get("gapCount", 0)
-        if enforce_hard_no_gaps and gap_count > 3:  # Allow up to 3 gaps instead of 0
-            last_error = f"Generated timetable has {gap_count} internal class gaps (threshold: 3)"
-            gap_rejections += 1
-            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
-            continue
-
-        objective_value = result.get("objective_value")
-        if not isinstance(objective_value, (int, float)):
-            unmet_count = len(result.get("unmet_requirements") or [])
-            warning_count = len(result.get("warnings") or [])
-            objective_value = _objective_from_counts(
-                gap_count=gap_count,
-                unmet_count=unmet_count,
-                warning_count=warning_count,
-                constraint_config=constraint_config,
-            )
-
-        timetable_hash = _hash_timetable(result.get("class_timetables") or {})
-        if not timetable_hash or timetable_hash in seen_hashes:
-            duplicate_hash_skips += 1
-            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
-            continue
-
-        is_too_similar = False
-        for candidate in candidates:
-            diff = _compare_timetable_difference(
-                candidate.get("class_timetables") or {},
-                result.get("class_timetables") or {},
-            )
-            if diff["totalSlots"] > 0 and diff["differentSlots"] < max(
-                3, int(diff["totalSlots"] * min_candidate_difference_ratio)
-            ):
-                is_too_similar = True
-                break
-        if is_too_similar and attempts_run >= 5:
-            similar_skips += 1
-            progress_callback and progress_callback({"progress": current_progress, "phase": "running"})
-            continue
-
-        seen_hashes.add(timetable_hash)
-        solver_stats = dict(result.get("solver_stats") or {})
-        solver_stats["attempt_strategy"] = strategy.get("name")
-        solver_stats["attempt_cycle"] = strategy.get("cycle", 0)
-        solver_stats["attempt_time_budget_seconds"] = float(per_attempt_time_limit_sec)
-        candidates.append(
-            {
-                "optionId": f"{generation_batch_id}_opt_{len(candidates) + 1}",
-                "seed": seed,
-                "score": gap_count,
-                "objectiveValue": objective_value,
-                "class_timetables": result.get("class_timetables"),
-                "faculty_timetables": result.get("faculty_timetables"),
-                "faculty_daily_hours": result.get("faculty_daily_hours"),
-                "classes": result.get("classes") or classes,
-                "combos": combos,
-                "config": result.get("config") or attempt_constraint_config,
-                "allocations_report": result.get("allocations_report"),
-                "unmet_requirements": result.get("unmet_requirements") or [],
-                "warnings": result.get("warnings") or [],
-                "solver_stats": solver_stats,
-                "strategy": strategy.get("name"),
-            }
-        )
-
-        min_attempts_before_stop = int(
-            _cfg_get(constraint_config, ["solver", "goodEnoughMinAttempts"], 5)
-        )
-        if is_good_enough(candidates[-1], difficulty) and attempts_run >= max(1, min_attempts_before_stop):
-            stop_reason = "adaptive_good_enough"
-            break
-
-        best = ranked_candidates()[0] if ranked_candidates() else None
-        progress_callback and progress_callback(
-            {
-                "progress": max(current_progress, min(94, round(current_progress + 2))),
-                "phase": "candidate_ready",
-                "partialData": build_selected_result(best),
-            }
-        )
-
-        if len(candidates) >= max(solution_count, solution_count * 3):
-            stop_reason = "target_unique_candidates_reached"
-            break
-
-    best = ranked_candidates()[0] if ranked_candidates() else None
-    elapsed_total = __import__("time").time() - started
-    logger.info(
-        "Solver completed after %.1fs; stop_reason=%s candidates=%d best_score=%s",
-        elapsed_total,
-        stop_reason,
-        len(candidates),
-        (best.get("score") if best else None),
-    )
-    if best:
-        progress_callback and progress_callback({"progress": 100, "phase": "completed"})
-    return build_selected_result(best)
-
-
-async def _process_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
-    last_progress = 0
-
-    def cancel_check() -> bool:
-        return _is_cancel_requested(job_id)
-
-    def progress_callback(message: Dict[str, Any]) -> None:
-        nonlocal last_progress
-        next_progress = max(0, min(100, int(message.get("progress") or 0)))
-        last_progress = max(last_progress, next_progress)
-        update = {
-            "status": "running",
-            "phase": message.get("phase") or "running",
-            "progress": next_progress,
-        }
-        if message.get("partialData") is not None:
-            update["partial_data"] = message.get("partialData")
-        _set_job_state(job_id, **update)
-
-    try:
-        _set_job_state(job_id, status="running", phase="start", progress=0, error=None)
-        result = await asyncio.to_thread(
-            _run_generation_batch,
-            payload,
-            progress_callback,
-            cancel_check,
-        )
-
-        if cancel_check() and not result.get("ok"):
-            _set_job_state(
-                job_id,
-                status="cancelled",
-                phase="cancelled",
-                progress=min(last_progress, 95),
-                error=result.get("error") or "Generation cancelled",
-                result=result,
-            )
-            return
-
-        final_status = "completed" if result.get("ok") else "failed"
-        final_phase = "completed" if result.get("ok") else "error"
-        final_progress = 100 if result.get("ok") else min(last_progress, 95)
-        persistence_error = None
-        if result.get("ok"):
-            try:
-                await asyncio.to_thread(_persist_completed_timetable, job_id, result)
-            except Exception as exc:
-                persistence_error = str(exc) or "Failed to persist completed timetable"
-        _set_job_state(
-            job_id,
-            status=final_status,
-            phase=final_phase,
-            progress=final_progress,
-            result=result,
-            partial_data=(
-                result
-                if (
-                    result.get("ok")
-                    or result.get("partialData") is not None
-                    or result.get("preview_stats") is not None
-                    or isinstance(result.get("class_timetables"), dict)
-                )
-                else None
-            ),
-            error=(
-                persistence_error
-                if result.get("ok") and persistence_error
-                else (None if result.get("ok") else (result.get("error") or "Generation failed"))
-            ),
-        )
-
-    except Exception as exc:
-        _set_job_state(
-            job_id,
-            status="failed",
-            phase="error",
-            progress=min(last_progress, 95),
-            error=str(exc) or "Generation failed",
-        )
-
-
-def _spawn_generation_job(job_id: str, payload: Dict[str, Any]) -> None:
-    task = asyncio.create_task(_process_generation_job(job_id, payload))
-    ACTIVE_JOB_TASKS.add(task)
-
-    def _on_done(done):
-        ACTIVE_JOB_TASKS.discard(done)
-        maybe_stop_when_idle(active_tasks=ACTIVE_JOB_TASKS)
-
-    task.add_done_callback(_on_done)
-
-def _solver_loop_exception_handler(loop, context):
-    exc = context.get("exception")
-    if isinstance(exc, ConnectionResetError):
-        # Ignore noisy Windows socket shutdown resets from disconnected clients.
-        if getattr(exc, "winerror", None) == 10054:
-            return
-    loop.default_exception_handler(context)
-
-
-def _cfg_get(cfg: Dict[str, Any], path: List[str], default: Any) -> Any:
-    node: Any = cfg
-    for key in path:
-        if not isinstance(node, dict) or key not in node:
-            return default
-        node = node[key]
-    return node
-
-
-def _to_bool(value: Any, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in ("true", "1", "yes", "y", "on"):
-            return True
-        if v in ("false", "0", "no", "n", "off"):
-            return False
-    return default
-
-
-@app.on_event("startup")
-async def _install_loop_handler():
-    loop = asyncio.get_running_loop()
-    loop.set_exception_handler(_solver_loop_exception_handler)
-    # Resume any pending or running jobs on startup
-    await _resume_pending_jobs()
-    # Also keep picking up new pending jobs.
-    asyncio.create_task(_poll_for_pending_jobs())
-
-
-@app.on_event("shutdown")
-async def _shutdown_resources():
-    try:
-        mongo_close_client()
-    except Exception:
-        logger.exception("Failed to close Mongo client")
-    finally:
-        pass
-
-
-@app.get("/health")
-def health() -> Dict[str, str]:
-    return {"ok": "true"}
-
-
-@app.post("/jobs")
-async def start_job(request: Request) -> Dict[str, Any]:
-    logger.info("/jobs endpoint called")
-    # Import the JSON module under a local alias so this function never depends
-    # on the module name staying unshadowed by future edits.
-    import json as json_module
-
-    body = await request.json()
-    logger.debug("/jobs body received")
-
-    # Log received payload summary
-    payload_data = body.get("payload", {})
-    logger.info(
-        "Job payload summary: jobId=%s collegeId=%s inputMode=%s classes=%d subjects=%d faculties=%d combos=%d fixedSlots=%d daysPerWeek=%s hoursPerDay=%s",
-        body.get("jobId"),
-        payload_data.get("collegeId"),
-        payload_data.get("inputMode"),
-        len(payload_data.get("classes", []) or []),
-        len(payload_data.get("subjects", []) or []),
-        len(payload_data.get("faculties", []) or []),
-        len(payload_data.get("combos", []) or []),
-        len(payload_data.get("fixedSlots", []) or []),
-        payload_data.get("DAYS_PER_WEEK"),
-        payload_data.get("HOURS_PER_DAY"),
-    )
-
-    # Persist a lightweight summary for quick debugging (even when full dumps are disabled).
-    try:
-        subjects_list = payload_data.get("subjects", []) or []
-        classes_list = payload_data.get("classes", []) or []
-        combos_list = payload_data.get("combos", []) or []
-
-        def _try_int(value: Any) -> Optional[int]:
-            try:
-                return int(value)
-            except Exception:
-                return None
-
-        subject_by_id = {str(s.get("_id") or s.get("id")): s for s in subjects_list if isinstance(s, dict)}
-        combo_count_by_pair: Dict[Tuple[str, str], int] = {}
-        for combo in combos_list:
-            if not isinstance(combo, dict):
-                continue
-            subject_id = str(combo.get("subject_id") or combo.get("subjectId") or "")
-            class_ids = combo.get("class_ids") or combo.get("classIds") or []
-            if not isinstance(class_ids, list):
-                class_ids = [class_ids]
-            for class_id in [str(cid) for cid in class_ids if cid is not None and str(cid).strip()]:
-                key = (class_id, subject_id)
-                combo_count_by_pair[key] = combo_count_by_pair.get(key, 0) + 1
-
-        missing_lab_combos: List[Dict[str, Any]] = []
-        missing_required_combos: List[Dict[str, Any]] = []
-        required_summary: List[Dict[str, Any]] = []
-        for cls in classes_list:
-            if not isinstance(cls, dict):
-                continue
-            class_id = str(cls.get("_id") or cls.get("id") or "")
-            class_name = cls.get("name") or class_id
-            class_days_raw = cls.get("days_per_week")
-            if class_days_raw is None:
-                class_days_raw = cls.get("daysPerWeek")
-            class_days_parsed = _try_int(class_days_raw)
-            subj_hours = cls.get("subject_hours")
-            if not isinstance(subj_hours, dict):
-                continue
-
-            required_pairs_for_class: List[Dict[str, Any]] = []
-            total_required_hours = 0.0
-            for subject_id, hours in subj_hours.items():
-                try:
-                    required = float(hours or 0)
-                except Exception:
-                    required = 0
-                if required <= 0:
-                    continue
-                total_required_hours += required
-                subj = subject_by_id.get(str(subject_id)) or {}
-                subj_type = str(subj.get("type") or "").strip().lower()
-                subj_name = subj.get("name") or str(subject_id)
-                eligible = combo_count_by_pair.get((class_id, str(subject_id)), 0)
-
-                required_pairs_for_class.append({
-                    "subjectId": str(subject_id),
-                    "subjectName": subj_name,
-                    "subjectType": subj_type or None,
-                    "requiredHours": required,
-                    "eligibleCombos": eligible,
-                })
-
-                if eligible <= 0:
-                    missing_required_combos.append({
-                        "classId": class_id,
-                        "className": class_name,
-                        "subjectId": str(subject_id),
-                        "subjectName": subj_name,
-                        "subjectType": subj_type or None,
-                        "requiredHours": required,
-                    })
-                if subj_type != "lab":
-                    continue
-                if eligible <= 0:
-                    missing_lab_combos.append({
-                        "classId": class_id,
-                        "className": class_name,
-                        "subjectId": str(subject_id),
-                        "subjectName": subj_name,
-                        "requiredHours": required,
-                    })
-
-            required_pairs_for_class.sort(key=lambda x: (-float(x.get("requiredHours") or 0), str(x.get("subjectName") or "")))
-            required_summary.append({
-                "classId": class_id,
-                "className": class_name,
-                "classDaysPerWeekRaw": class_days_raw,
-                "classDaysPerWeekParsed": class_days_parsed,
-                "requiredSubjectCount": len(required_pairs_for_class),
-                "totalRequiredHours": total_required_hours,
-                "topRequired": required_pairs_for_class[:12],
-            })
-
-        combos_summary = []
-        for combo in (combos_list or [])[:25]:
-            if not isinstance(combo, dict):
-                continue
-            subject_id = str(combo.get("subject_id") or combo.get("subjectId") or "")
-            subj = subject_by_id.get(subject_id) or {}
-            combos_summary.append({
-                "comboId": str(combo.get("_id") or combo.get("id") or ""),
-                "subjectId": subject_id,
-                "subjectName": subj.get("name") or subject_id,
-                "subjectType": str(subj.get("type") or "").strip().lower() or None,
-                "classIds": combo.get("class_ids") or combo.get("classIds") or [],
-                "facultyIds": combo.get("faculty_ids") or combo.get("facultyIds") or [],
-            })
-
-        summary = {
-            "jobId": body.get("jobId"),
-            "collegeId": payload_data.get("collegeId"),
-            "inputMode": payload_data.get("inputMode"),
-            "schedule": {
-                "daysPerWeek": payload_data.get("DAYS_PER_WEEK"),
-                "hoursPerDay": payload_data.get("HOURS_PER_DAY"),
-                "breakHours": payload_data.get("BREAK_HOURS"),
-            },
-            "counts": {
-                "classes": len(classes_list),
-                "subjects": len(subjects_list),
-                "faculties": len(payload_data.get("faculties", []) or []),
-                "combos": len(combos_list),
-            },
-            "missingLabCombos": missing_lab_combos,
-            "missingRequiredCombos": missing_required_combos[:50],
-            "requiredSummary": required_summary[:10],
-            "combosSummary": combos_summary,
-        }
-        tmp_path = "last_job_payload_summary.json.tmp"
-        out_path = "last_job_payload_summary.json"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json_module.dump(summary, f, indent=2, default=_json_default)
-        os.replace(tmp_path, out_path)
-        if missing_lab_combos:
-            logger.warning(
-                "[jobs] Missing lab combos for %d class-subject pairs; see last_job_payload_summary.json",
-                len(missing_lab_combos),
-            )
-    except Exception as exc:
-        logger.exception(
-            "[jobs] Failed to write payload summary: %s: %s",
-            type(exc).__name__,
-            exc,
-        )
-        try:
-            import traceback
-            with open("last_job_payload_summary_error.txt", "w", encoding="utf-8") as ef:
-                ef.write(f"{type(exc).__name__}: {exc}\n")
-                ef.write(traceback.format_exc())
-        except Exception:
-            pass
-
-    if DEBUG_DUMP_PAYLOADS or LOG_FULL_PAYLOAD or DEBUG:
-        logger.debug("Full /jobs payload (may be large) follows")
-        try:
-            logger.debug(json_module.dumps(body, indent=2, default=_json_default))
-        except Exception as e:
-            logger.debug("Error serializing payload: %s", e)
-            logger.debug("Raw body: %s", body)
-
-    if DEBUG_DUMP_PAYLOADS:
-        try:
-            with open("received_payload.json", "w", encoding="utf-8") as f:
-                json_module.dump(body, f, indent=2, default=_json_default)
-        except Exception as exc:
-            logger.exception("Failed to dump received payload: %s", exc)
-
-    # DEBUG: Quick counts (already in summary)
-    # payload_data = body.get("payload", {})
-    # print("classes:", len(payload_data.get("classes", [])))
-    # print("subjects:", len(payload_data.get("subjects", [])))
-    # print("faculties:", len(payload_data.get("faculties", [])))
-    # print("combos:", len(payload_data.get("combos", [])))
-
-    job_id = str(body.get("jobId") or "").strip()
-    payload = body.get("payload") or {}
-    if not job_id:
-        return {"ok": False, "error": "jobId is required"}
-
-    _set_job_state(job_id, status="pending", phase="queued", progress=0, error=None)
-    _spawn_generation_job(job_id, payload)
-    return {"ok": True, "jobId": job_id}
-
-
-def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
+def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(
         "solve_instance started: keys=%d combos=%d classes=%d subjects=%d faculties=%d inputMode=%s daysPerWeek=%s hoursPerDay=%s",
         len(list(payload.keys() or [])),
@@ -1556,9 +286,7 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
     teacher_cont_max = max(
         1, int(_cfg_get(constraint_config, ["teacherContinuity", "maxConsecutive"], 3))
     )
-    teacher_cont_weight = max(
-        0, int(_cfg_get(constraint_config, ["teacherContinuity", "weight"], 100))
-    )
+    teacher_cont_weight = max(0, int(_cfg_get(constraint_config, ["teacherContinuity", "weight"], 100)))
 
     class_cont_enabled = _to_bool(
         _cfg_get(constraint_config, ["classContinuity", "enabled"], False), False
@@ -1566,23 +294,16 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
     class_cont_max = max(
         1, int(_cfg_get(constraint_config, ["classContinuity", "maxConsecutive"], 3))
     )
-    class_cont_weight = max(
-        0, int(_cfg_get(constraint_config, ["classContinuity", "weight"], 80))
-    )
+    class_cont_weight = max(0, int(_cfg_get(constraint_config, ["classContinuity", "weight"], 80)))
 
-    no_gaps_hard = _to_bool(_cfg_get(constraint_config, ["noGaps", "hard"], False), False)
+    no_gaps_hard = _to_bool(_cfg_get(constraint_config, ["noGaps", "hard"], False), False)  # Changed default from True to False
     no_gaps_weight = max(0, int(_cfg_get(constraint_config, ["noGaps", "weight"], 500)))
 
     teacher_daily_enabled = _to_bool(
         _cfg_get(constraint_config, ["teacherDailyOverload", "enabled"], True), True
     )
-    teacher_daily_max = max(
-        0, int(_cfg_get(constraint_config, ["teacherDailyOverload", "max"], 6))
-    )
-    teacher_daily_weight = max(
-        0, int(_cfg_get(constraint_config, ["teacherDailyOverload", "weight"], 120))
-    )
-
+    teacher_daily_max = max(0, int(_cfg_get(constraint_config, ["teacherDailyOverload", "max"], 6)))
+    teacher_daily_weight = max(0, int(_cfg_get(constraint_config, ["teacherDailyOverload", "weight"], 120)))
     teacher_recovery_enabled = _to_bool(
         _cfg_get(constraint_config, ["teacherRecoveryBreak", "enabled"], False), False
     )
@@ -1599,12 +320,8 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
     subject_cluster_enabled = _to_bool(
         _cfg_get(constraint_config, ["subjectClustering", "enabled"], False), False
     )
-    subject_cluster_max = max(
-        1, int(_cfg_get(constraint_config, ["subjectClustering", "maxPerDay"], 3))
-    )
-    subject_cluster_weight = max(
-        0, int(_cfg_get(constraint_config, ["subjectClustering", "weight"], 50))
-    )
+    subject_cluster_max = max(1, int(_cfg_get(constraint_config, ["subjectClustering", "maxPerDay"], 3)))
+    subject_cluster_weight = max(0, int(_cfg_get(constraint_config, ["subjectClustering", "weight"], 50)))
     subject_distribution_enabled = _to_bool(
         _cfg_get(constraint_config, ["subjectDistribution", "enabled"], False), False
     )
@@ -1616,7 +333,6 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
     subject_distribution_weight = max(
         0, int(_cfg_get(constraint_config, ["subjectDistribution", "weight"], 70))
     )
-
     high_load_timing_enabled = _to_bool(
         _cfg_get(constraint_config, ["highLoadSubjectTiming", "enabled"], False), False
     )
@@ -1633,10 +349,22 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     daily_compactness_enabled = _to_bool(
-        _cfg_get(constraint_config, ["dailyCompactness", "enabled"], False), False
+        _cfg_get(
+            constraint_config,
+            ["dailyCompactness", "enabled"],
+            False,
+        ),
+        False,
     )
     daily_compactness_weight = max(
-        0, int(_cfg_get(constraint_config, ["dailyCompactness", "weight"], 400))
+        0,
+        int(
+            _cfg_get(
+                constraint_config,
+                ["dailyCompactness", "weight"],
+                400,
+            )
+        ),
     )
     daily_compactness_transition_weight = max(
         0,
@@ -1668,7 +396,6 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
         ),
     )
-
     weekly_front_loading_enabled = _to_bool(
         _cfg_get(
             constraint_config,
@@ -3475,12 +2202,3 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
             "early_abort_triggered": bool(early_abort_state["triggered"]),
         },
     }
-
-
-solve_instance = solve_instance_legacy
-
-
-@app.post("/solve")
-async def solve(request: Request) -> Dict[str, Any]:
-    payload = await request.json()
-    return solve_instance(payload)
