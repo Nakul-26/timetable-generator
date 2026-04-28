@@ -104,6 +104,10 @@ async function callCpSatSolver({
     emitProgress(progressStart + eased * progressSpan, "running");
   }, 2000);
 
+  console.log("#############################################################################################################")
+  console.log("lab block size sent to solver is", constraintConfig?.labBlockSize);
+  console.log("lab block size sent to solver is", constraintConfig?.structural?.labBlockSize);
+
   try {
     const requestBody = {
       faculties,

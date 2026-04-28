@@ -450,7 +450,36 @@ protectedRouter.delete("/teaching-allocations", async (req, res) => {
       return res.status(404).json({ error: "Allocation not found." });
     }
 
-    res.json({ ok: true, message: "Allocation deleted." });
+    // Clean up Class.faculties: remove teachers from class if they have no other allocations in that class
+    const teacherIds = uniqueStrings(extractAllocationPairs(allocation).map(p => p.teacher));
+    const classIds = Array.isArray(allocation.classIds) ? allocation.classIds : [];
+
+    for (const classId of classIds) {
+      for (const teacherId of teacherIds) {
+        if (!teacherId) continue;
+        
+        // Check if this teacher has any OTHER allocations for this class
+        const otherAllocations = await TeachingAllocation.findOne({
+          collegeId: req.collegeId,
+          classIds: classId,
+          $or: [
+            { teacher: teacherId },
+            { teachers: teacherId },
+            { "subjects.teacher": teacherId }
+          ]
+        }).lean();
+
+        if (!otherAllocations) {
+          // No other allocations, remove teacher from class
+          await ClassModel.findOneAndUpdate(
+            { _id: classId, collegeId: req.collegeId },
+            { $pull: { faculties: teacherId } }
+          );
+        }
+      }
+    }
+
+    res.json({ ok: true, message: "Allocation deleted and class faculties synced." });
   } catch (e) {
     console.error("[DELETE /teaching-allocations] Error:", e);
     res.status(500).json({ error: "Internal Server Error" });

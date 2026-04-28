@@ -1,7 +1,6 @@
 import React, { useContext, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/axios";
-import AssignModal from "./AssignModal";
 import DataContext from "../../context/DataContext";
 import * as XLSX from "xlsx";
 
@@ -15,10 +14,6 @@ function ManageClass() {
   const [selectedClassIds, setSelectedClassIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef(null);
-
-  // State for the assignment modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedClass, setSelectedClass] = useState(null);
 
   // State variables for editing a class
   const [editName, setEditName] = useState("");
@@ -187,11 +182,6 @@ function ManageClass() {
 
   const handleAddClass = () => {
     navigate("/class/add");
-  };
-
-  const handleOpenModal = (klass) => {
-    setSelectedClass(klass);
-    setIsModalOpen(true);
   };
 
   const handleDelete = async (id) => {
@@ -506,12 +496,6 @@ function ManageClass() {
                     ) : (
                       <div className="actions-buttons">
                         <button
-                          onClick={() => handleOpenModal(classItem)}
-                          className="secondary-btn"
-                        >
-                          Assignments
-                        </button>
-                        <button
                           onClick={() => handleEdit(classItem)}
                           className="primary-btn"
                           disabled={Boolean(mutationMessage)}
@@ -532,17 +516,6 @@ function ManageClass() {
               ))}
           </tbody>
         </table>
-      )}
-      {isModalOpen && (
-        <AssignModal
-            klass={selectedClass}
-            subjects={subjects}
-            faculties={faculties}
-            onClose={() => setIsModalOpen(false)}
-            onSave={() => {
-                setIsModalOpen(false);
-            }}
-        />
       )}
     </div>
   );

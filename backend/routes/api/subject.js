@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Subject from '../../models/Subject.js';
 import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import ClassSubject from '../../models/ClassSubject.js';
+import TeachingAllocation from '../../models/TeachingAllocation.js';
 import auth from '../../middleware/auth.js';
 
 const parseOptionalPositiveNumber = (value, label, { allowNull = false } = {}) => {
@@ -91,6 +92,28 @@ protectedRouter.put('/subjects/:id', async (req, res) => {
     if (!updatedSubject) {
       return res.status(404).json({ error: "Subject not found." });
     }
+
+    // If classesPerWeek changed, sync with ClassSubject and TeachingAllocation
+    if (Object.prototype.hasOwnProperty.call(req.body, 'classesPerWeek') && update.classesPerWeek) {
+      // 1. Update ClassSubject
+      await ClassSubject.updateMany(
+        { subject: id, collegeId: req.collegeId },
+        { $set: { hoursPerWeek: update.classesPerWeek } }
+      );
+
+      // 2. Update TeachingAllocation
+      await TeachingAllocation.updateMany(
+        {
+          collegeId: req.collegeId,
+          $or: [
+            { subject: id },
+            { "subjects.subject": id }
+          ]
+        },
+        { $set: { hoursPerWeek: update.classesPerWeek } }
+      );
+    }
+
     res.json(updatedSubject);
   } catch (e) {
     res.status(400).json({ error: e.message || 'Bad Request' });
@@ -111,6 +134,17 @@ protectedRouter.delete('/subjects/:id', async (req, res) => {
 
     // Delete associated class-subject assignments
     await ClassSubject.deleteMany({ subject: id, collegeId: req.collegeId });
+
+    // Delete associated teaching allocations
+    // For NORMAL and LAB, it matches the subject field
+    // For ELECTIVE, it might be in the subjects array
+    await TeachingAllocation.deleteMany({
+      collegeId: req.collegeId,
+      $or: [
+        { subject: id },
+        { "subjects.subject": id }
+      ]
+    });
 
     res.json({ message: "Subject deleted successfully." });
   } catch (e) {

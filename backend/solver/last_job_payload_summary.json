@@ -1,10 +1,10 @@
 {
-  "jobId": "69ef452a3c55d96ee502f06e",
+  "jobId": "69f0b5aebb9063053d3ca93b",
   "collegeId": "2",
   "inputMode": "EXPLICIT",
   "schedule": {
-    "daysPerWeek": 5,
-    "hoursPerDay": 7,
+    "daysPerWeek": 6,
+    "hoursPerDay": 8,
     "breakHours": null
   },
   "counts": {

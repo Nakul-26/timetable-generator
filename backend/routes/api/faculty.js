@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Faculty from '../../models/Faculty.js';
 import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import ClassModel from '../../models/Class.js';
+import TeachingAllocation from '../../models/TeachingAllocation.js';
 import auth from '../../middleware/auth.js';
 import { normalizeAvailabilitySlots } from '../../utils/teacherAvailability.js';
 import { normalizeTeacherPreferences } from '../../utils/teacherPreferences.js';
@@ -178,6 +179,26 @@ protectedRouter.delete('/faculties/:id', async (req, res) => {
 
     // Remove faculty from all classes
     await ClassModel.updateMany({ collegeId: req.collegeId }, { $pull: { faculties: id } });
+
+    // Handle TeachingAllocations
+    // 1. For allocations where this teacher is the main teacher (NORMAL/LAB)
+    await TeachingAllocation.updateMany(
+      { collegeId: req.collegeId, teacher: id },
+      { $set: { teacher: null } }
+    );
+
+    // 2. For allocations where this teacher is in the teachers array (LAB/ELECTIVE)
+    await TeachingAllocation.updateMany(
+      { collegeId: req.collegeId, teachers: id },
+      { $pull: { teachers: id } }
+    );
+
+    // 3. For elective allocations where this teacher is assigned to a specific subject
+    await TeachingAllocation.updateMany(
+      { collegeId: req.collegeId, "subjects.teacher": id },
+      { $set: { "subjects.$[elem].teacher": null } },
+      { arrayFilters: [{ "elem.teacher": id }] }
+    );
 
     console.log("[DELETE /faculties/:id] Deleted faculty and associated data:", deletedFaculty);
     res.json({ message: 'Faculty deleted successfully.' });

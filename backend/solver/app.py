@@ -92,6 +92,7 @@ ACTIVE_JOB_TASKS = set()
 # Polling-based job pickup (backend can just create a pending job and return).
 SOLVER_PULL_INTERVAL_SEC = float(os.getenv("SOLVER_PULL_INTERVAL_SEC", "5"))
 DEBUG_DUMP_PAYLOADS = os.getenv("DEBUG_DUMP_PAYLOADS", "0").strip().lower() in ("1", "true", "yes", "on")
+SAVE_PAYLOAD_SUMMARY = os.getenv("SAVE_PAYLOAD_SUMMARY", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _json_default(value: Any) -> Any:
@@ -1320,14 +1321,21 @@ async def start_job(request: Request) -> Dict[str, Any]:
             "requiredSummary": required_summary[:10],
             "combosSummary": combos_summary,
         }
-        tmp_path = "last_job_payload_summary.json.tmp"
-        out_path = "last_job_payload_summary.json"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json_module.dump(summary, f, indent=2, default=_json_default)
-        os.replace(tmp_path, out_path)
-        if missing_lab_combos:
+        if SAVE_PAYLOAD_SUMMARY:
+            tmp_path = "last_job_payload_summary.json.tmp"
+            out_path = "last_job_payload_summary.json"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json_module.dump(summary, f, indent=2, default=_json_default)
+            os.replace(tmp_path, out_path)
+        
+        if missing_lab_combos and SAVE_PAYLOAD_SUMMARY:
             logger.warning(
                 "[jobs] Missing lab combos for %d class-subject pairs; see last_job_payload_summary.json",
+                len(missing_lab_combos),
+            )
+        elif missing_lab_combos:
+            logger.warning(
+                "[jobs] Missing lab combos for %d class-subject pairs",
                 len(missing_lab_combos),
             )
     except Exception as exc:

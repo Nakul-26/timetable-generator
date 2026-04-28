@@ -300,6 +300,7 @@ function TimetableSettings() {
   const updateConfig = (updater) => {
     setSelectedPreset("custom");
     const newConfig = normalizeConstraintConfig(updater(config));
+    // console.log("Updated config:", newConfig);
     setConfig(newConfig);
     api.put("/timetable-settings", { constraintConfig: newConfig }).catch(() => {
       /* ignore */

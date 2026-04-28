@@ -345,10 +345,15 @@ protectedRouter.post('/generate', async (req, res) => {
         );
       }
 
+      console.log("33333333333333333333333333333333333333333333333333333333333333333");
+
       const normalizedSolutionCount = Math.max(
         1,
         Math.min(5, Number(solutionCount) || Number(constraintConfig?.solver?.solutionCount) || 5)
       );
+
+      console.log("44444444444444444444444444444444444444444444444444444444444444");
+
       const job = await GenerationJob.create({
         collegeId: req.collegeId,
         status: "pending",
@@ -380,12 +385,15 @@ protectedRouter.post('/generate', async (req, res) => {
         },
       });
 
+      console.log("555555555555555555555555555555555555555555555555555555555555555555555");
       // IMPORTANT (Vercel/serverless): avoid keeping the event loop alive with long-running
       // fire-and-forget requests. Default to "pull" mode on Vercel: solver polls MongoDB
       // for pending jobs and starts them itself.
       const solverStartMode = String(
         process.env.SOLVER_JOB_START_MODE || (process.env.VERCEL ? "pull" : "push")
       ).toLowerCase();
+
+      console.log("666666666666666666666666666666666666666666666666666666666666");
 
       if (solverStartMode === "push") {
         // If an EC2 instance id is provided and we're in production, ensure the instance is running before calling the solver
@@ -406,10 +414,23 @@ protectedRouter.post('/generate', async (req, res) => {
           }
         }
 
+        console.log("77777777777777777777777777777777777777777777777777777777777777");
+
         const requestBody = {
           jobId: String(job._id),
           payload: job.payload,
         };
+
+        console.log("**************************************************************************************[POST /generate] Sending job to solver with payload:", {
+          jobId: requestBody.jobId,
+          payloadSummary: {
+            collegeId: requestBody.payload.collegeId,
+            inputMode: requestBody.payload.inputMode,
+            solutionCount: requestBody.payload.solutionCount,
+          },
+          constraintConfig: requestBody.payload.constraintConfig,
+          completePayload: requestBody.payload, // This can be very large; be cautious when logging in production
+        });
 
         // Best-effort push with a short timeout; do not block the response.
         try {

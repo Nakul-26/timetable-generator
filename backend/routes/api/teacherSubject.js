@@ -2,6 +2,7 @@ import { Router } from 'express';
 import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import Faculty from '../../models/Faculty.js';
 import Subject from '../../models/Subject.js';
+import TeachingAllocation from '../../models/TeachingAllocation.js';
 import auth from '../../middleware/auth.js';
 import { validateOwnership } from '../../utils/validateTenantRefs.js';
 
@@ -44,6 +45,39 @@ protectedRouter.delete('/teacher-subject-combos/:id', async (req, res) => {
     if (!deletedCombo) {
       return res.status(404).json({ error: 'Combination not found.' });
     }
+
+    // Handle TeachingAllocations: If an allocation exists for this specific (Teacher, Subject), nullify the teacher
+    // 1. NORMAL/LAB where teacher and subject match
+    await TeachingAllocation.updateMany(
+      {
+        collegeId: req.collegeId,
+        teacher: deletedCombo.faculty,
+        subject: deletedCombo.subject
+      },
+      { $set: { teacher: null } }
+    );
+
+    // 2. teachers array (LAB/ELECTIVE)
+    await TeachingAllocation.updateMany(
+      {
+        collegeId: req.collegeId,
+        subject: deletedCombo.subject,
+        teachers: deletedCombo.faculty
+      },
+      { $pull: { teachers: deletedCombo.faculty } }
+    );
+
+    // 3. elective subjects array
+    await TeachingAllocation.updateMany(
+      {
+        collegeId: req.collegeId,
+        "subjects.subject": deletedCombo.subject,
+        "subjects.teacher": deletedCombo.faculty
+      },
+      { $set: { "subjects.$[elem].teacher": null } },
+      { arrayFilters: [{ "elem.subject": deletedCombo.subject, "elem.teacher": deletedCombo.faculty }] }
+    );
+
     res.json({ message: 'Combination deleted successfully.' });
   } catch (e) {
     res.status(500).json({ error: 'Internal Server Error' });

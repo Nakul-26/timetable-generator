@@ -3,6 +3,7 @@ import ClassModel from '../../models/Class.js';
 import ClassSubject from '../../models/ClassSubject.js';
 import Faculty from '../../models/Faculty.js';
 import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
+import TeachingAllocation from '../../models/TeachingAllocation.js';
 import auth from '../../middleware/auth.js';
 import { validateOwnership, validateOwnershipMany } from '../../utils/validateTenantRefs.js';
 
@@ -93,6 +94,19 @@ protectedRouter.delete('/classes/:id', async (req, res) => {
     // Delete associated class-subject assignments
     await ClassSubject.deleteMany({ class: id, collegeId: req.collegeId });
 
+    // Handle TeachingAllocations
+    // 1. Delete allocations where this is the only class
+    await TeachingAllocation.deleteMany({
+      collegeId: req.collegeId,
+      classIds: { $size: 1, $all: [id] }
+    });
+
+    // 2. Pull this class from allocations with multiple classes (combined classes)
+    await TeachingAllocation.updateMany(
+      { collegeId: req.collegeId, classIds: id },
+      { $pull: { classIds: id } }
+    );
+
     res.json({ message: 'Class deleted successfully.' });
   } catch (e) {
     res.status(500).json({ error: 'Internal Server Error' });
@@ -135,6 +149,27 @@ protectedRouter.delete('/classes/:classId/faculties/:facultyId', async (req, res
         if (!updatedClass) {
             return res.status(404).json({ error: 'Class not found.' });
         }
+
+        // Handle TeachingAllocations
+        // 1. NORMAL/LAB where teacher matches
+        await TeachingAllocation.updateMany(
+            { collegeId: req.collegeId, classIds: classId, teacher: facultyId },
+            { $set: { teacher: null } }
+        );
+
+        // 2. teachers array (LAB/ELECTIVE)
+        await TeachingAllocation.updateMany(
+            { collegeId: req.collegeId, classIds: classId, teachers: facultyId },
+            { $pull: { teachers: facultyId } }
+        );
+
+        // 3. elective subjects array
+        await TeachingAllocation.updateMany(
+            { collegeId: req.collegeId, classIds: classId, "subjects.teacher": facultyId },
+            { $set: { "subjects.$[elem].teacher": null } },
+            { arrayFilters: [{ "elem.teacher": facultyId }] }
+        );
+
         res.json(updatedClass);
     } catch (e) {
         res.status(400).json({ error: 'Bad Request' });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import ClassSubject from '../../models/ClassSubject.js';
 import ClassModel from '../../models/Class.js';
 import Subject from '../../models/Subject.js';
+import TeachingAllocation from '../../models/TeachingAllocation.js';
 import auth from '../../middleware/auth.js';
 import { validateOwnership } from '../../utils/validateTenantRefs.js';
 
@@ -47,6 +48,34 @@ protectedRouter.post('/class-subjects', async (req, res) => {
 
         const assignment = new ClassSubject({ collegeId: req.collegeId, class: classDoc._id, subject: subjectDoc._id, hoursPerWeek: effectiveHours });
         await assignment.save();
+
+        // Create a TeachingAllocation (teacher: null initially)
+        // This ensures the Class-Subject combo shows up in the Teaching Allocation management page immediately.
+        const subjectType = String(subjectDoc.type || "").toLowerCase();
+        const allocationType = subjectType === 'lab' ? 'LAB' : 'NORMAL';
+
+        await TeachingAllocation.findOneAndUpdate(
+            { 
+                collegeId: req.collegeId, 
+                classIds: [classDoc._id], 
+                subject: subjectDoc._id,
+                combinedClassGroupId: null 
+            },
+            {
+                $setOnInsert: {
+                    collegeId: req.collegeId,
+                    classIds: [classDoc._id],
+                    subject: subjectDoc._id,
+                    type: allocationType,
+                    hoursPerWeek: effectiveHours,
+                    teacher: null,
+                    teachers: [],
+                    subjects: [{ subject: subjectDoc._id, teacher: null }]
+                }
+            },
+            { upsert: true }
+        );
+
         res.json(assignment);
     } catch (e) {
         res.status(e.status || 400).json({ error: e.message || 'Bad Request' });
@@ -66,6 +95,20 @@ protectedRouter.put('/class-subjects/:id', async (req, res) => {
         if (!updatedAssignment) {
             return res.status(404).json({ error: 'Assignment not found.' });
         }
+
+        // Sync with TeachingAllocation
+        await TeachingAllocation.updateMany(
+            {
+                collegeId: req.collegeId,
+                classIds: updatedAssignment.class,
+                $or: [
+                    { subject: updatedAssignment.subject },
+                    { "subjects.subject": updatedAssignment.subject }
+                ]
+            },
+            { $set: { hoursPerWeek: updatedAssignment.hoursPerWeek } }
+        );
+
         res.json(updatedAssignment);
     } catch (e) {
         res.status(400).json({ error: 'Bad Request' });
@@ -80,6 +123,17 @@ protectedRouter.delete('/class-subjects/:id', async (req, res) => {
         if (!deletedAssignment) {
             return res.status(404).json({ error: 'Assignment not found.' });
         }
+
+        // Delete associated teaching allocations
+        await TeachingAllocation.deleteMany({
+            collegeId: req.collegeId,
+            classIds: deletedAssignment.class,
+            $or: [
+                { subject: deletedAssignment.subject },
+                { "subjects.subject": deletedAssignment.subject }
+            ]
+        });
+
         res.json({ message: 'Assignment deleted successfully.' });
     } catch (e) {
         res.status(500).json({ error: 'Internal Server Error' });
