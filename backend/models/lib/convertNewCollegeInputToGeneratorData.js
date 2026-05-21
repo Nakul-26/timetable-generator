@@ -84,6 +84,7 @@ export function convertNewCollegeInput({
     const teachersByCategory = new Map();
     const explicitAllocations = [];
     const explicitLabAllocations = [];
+    const explicitElectiveAllocations = [];
     for (const allocation of labAllocations) {
         const classIds = getUniqueStrings(allocation.classIds);
         const subjectId = String(allocation.subjectId || "").trim();
@@ -106,6 +107,39 @@ export function convertNewCollegeInput({
             : combo.teacherId
                 ? [String(combo.teacherId)]
                 : [];
+        const comboType = String(combo.type || "").toUpperCase();
+        if (comboType === "ELECTIVE") {
+            const classIds = getUniqueStrings(combo.classIds);
+            const subjectTeacherPairs = (Array.isArray(combo.subjectTeacherPairs) ? combo.subjectTeacherPairs : [])
+                .map((pair) => ({
+                    subjectId: String(pair?.subjectId || pair?.subject || "").trim(),
+                    teacherId: String(pair?.teacherId || pair?.teacher || "").trim(),
+                }))
+                .filter((pair) => pair.subjectId && pair.teacherId);
+            const groupTeacherIds = getUniqueStrings([
+                ...teacherIds,
+                ...subjectTeacherPairs.map((pair) => pair.teacherId),
+            ]);
+            const hoursRequired = Number(combo.hoursPerWeek || 0);
+            if (classIds.length > 0 && subjectTeacherPairs.length > 0 && hoursRequired > 0) {
+                explicitElectiveAllocations.push({
+                    classIds,
+                    subjectId: subjectIdStr,
+                    teacherIds: groupTeacherIds,
+                    subjectTeacherPairs,
+                    hoursPerWeek: hoursRequired,
+                    electiveGroupId: String(combo.electiveGroupId || combo.combinedClassGroupId || subjectTeacherPairs.map((pair) => pair.subjectId).join("_")),
+                    combinedClassGroupId: combo.combinedClassGroupId || null,
+                });
+            }
+            subjectTeacherPairs.forEach((pair) => {
+                if (!teachersByCategory.has(pair.subjectId)) {
+                    teachersByCategory.set(pair.subjectId, []);
+                }
+                teachersByCategory.get(pair.subjectId).push(pair.teacherId);
+            });
+            continue;
+        }
         if (Array.isArray(combo.classIds) && combo.classIds.length > 0) {
             explicitAllocations.push({
                 teacherId: teacherIds[0] || null,
@@ -145,6 +179,7 @@ export function convertNewCollegeInput({
     // 1. Create Virtual Subjects for Electives
     //------------------------------------------------------------
     const virtualSubjects = [], electiveGroupsByClass = new Map(), realSubjectsInElectives = new Set();
+    const explicitElectiveGroupsByClass = new Map();
     for (const setting of classElectiveSubjects) {
         const classId = String(setting.classId);
         const requirements = setting.teacherCategoryRequirements || {};
@@ -179,6 +214,44 @@ export function convertNewCollegeInput({
             requirements,
         });
     }
+    for (const allocation of explicitElectiveAllocations) {
+        const classIds = getUniqueStrings(allocation.classIds);
+        const teacherIds = getUniqueStrings(allocation.teacherIds);
+        const subjectTeacherPairs = allocation.subjectTeacherPairs || [];
+        const hoursRequired = Number(allocation.hoursPerWeek || 0);
+        if (!classIds.length || !teacherIds.length || !subjectTeacherPairs.length || hoursRequired <= 0) continue;
+
+        const subjectIds = getUniqueStrings(subjectTeacherPairs.map((pair) => pair.subjectId)).sort();
+        const subjectNames = subjectIds
+            .map(id => subjectById.get(String(id))?.name)
+            .filter(Boolean)
+            .join(" + ");
+        const groupId = String(allocation.electiveGroupId || subjectIds.join("_"));
+        const virtualSubjectId = `VIRTUAL_DIRECT_ELECTIVE_${classIds.join("_")}_${groupId}_${subjectIds.join("_")}`;
+        const virtualSub = {
+            _id: virtualSubjectId,
+            name: subjectNames ? `Elective Block (${subjectNames})` : `Elective Block ${groupId}`,
+            no_of_hours_per_week: hoursRequired,
+            type: "theory",
+            isVirtual: true,
+        };
+        virtualSubjects.push(virtualSub);
+        classIds.forEach((classId) => {
+            subjectIds.forEach((subjectId) => realSubjectsInElectives.add(`${classId}|${subjectId}`));
+        });
+        const classKey = classIds.join("|");
+        if (!explicitElectiveGroupsByClass.has(classKey)) {
+            explicitElectiveGroupsByClass.set(classKey, []);
+        }
+        explicitElectiveGroupsByClass.get(classKey).push({
+            classIds,
+            facultyIds: teacherIds,
+            virtualSubjectId,
+            hours: hoursRequired,
+            combinedClassGroupId: allocation.combinedClassGroupId || null,
+            groupId,
+        });
+    }
 
     const subjectsOut = [...subjects, ...virtualSubjects], combos = [];
     const subjectOutById = new Map(subjectsOut.map(subject => [String(subject._id), subject]));
@@ -199,6 +272,24 @@ export function convertNewCollegeInput({
 
     const explicitAllocationKeys = new Set();
     const explicitCoveredClassSubjectKeys = new Set();
+    for (const electiveGroups of explicitElectiveGroupsByClass.values()) {
+        for (const electiveGroup of electiveGroups) {
+            const classIds = [...electiveGroup.classIds].sort();
+            classIds.forEach((classId) => explicitCoveredClassSubjectKeys.add(`${classId}|${electiveGroup.virtualSubjectId}`));
+            combos.push({
+                _id: "C" + comboIndex++,
+                faculty_ids: [...electiveGroup.facultyIds].sort(),
+                subject_id: electiveGroup.virtualSubjectId,
+                subject: buildComboSubject(electiveGroup.virtualSubjectId),
+                class_ids: classIds,
+                combined_class_group_id: electiveGroup.combinedClassGroupId,
+                elective_group_id: electiveGroup.groupId,
+                hours_per_week: electiveGroup.hours,
+                hours_per_class: Object.fromEntries(classIds.map((classId) => [classId, electiveGroup.hours])),
+                combo_name: `ELECTIVE_GROUP_${electiveGroup.groupId}_${classIds.join("_")}`,
+            });
+        }
+    }
     for (const allocation of explicitAllocations) {
         const classIds = [...new Set((allocation.classIds || []).map(String))].sort();
         const subjectId = String(allocation.subjectId);
@@ -246,6 +337,15 @@ export function convertNewCollegeInput({
         const eligibleTeachers = teachersForClass.length > 0
             ? teachersForSubject.filter(tid => teachersForClass.includes(tid))
             : teachersForSubject;
+        const subjectType = String(subjectById.get(subjectId)?.type || "").toLowerCase();
+        if (subjectType === "no_teacher") {
+            combos.push({
+                _id: "C" + comboIndex++, faculty_ids: [], subject_id: subjectId, subject: buildComboSubject(subjectId), class_ids: [classId],
+                hours_per_week: hoursRequired, hours_per_class: { [classId]: hoursRequired },
+                combo_name: `NT_S${subjectId}_C${classId}`
+            });
+            continue;
+        }
         for (const teacherId of eligibleTeachers) {
             combos.push({
                 _id: "C" + comboIndex++, faculty_ids: [teacherId], subject_id: subjectId, subject: buildComboSubject(subjectId), class_ids: [classId],
@@ -323,6 +423,13 @@ export function convertNewCollegeInput({
         (electiveGroupsByClass.get(classId) || []).forEach(eg => {
             subject_hours[eg.virtualSubjectId] = eg.hours;
         });
+        for (const electiveGroups of explicitElectiveGroupsByClass.values()) {
+            electiveGroups
+                .filter((eg) => eg.classIds.includes(classId))
+                .forEach((eg) => {
+                    subject_hours[eg.virtualSubjectId] = eg.hours;
+                });
+        }
 
         return {
             _id: classId,

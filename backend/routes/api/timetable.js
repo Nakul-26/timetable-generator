@@ -492,6 +492,56 @@ protectedRouter.post('/health-check', async (req, res) => {
     }
 });
 
+protectedRouter.post('/audit', async (req, res) => {
+    try {
+      // Load user settings to get inputMode
+      const userSettings = await TimetableUserSettings.findOne({
+        collegeId: req.collegeId,
+        userId: req.user?._id,
+      }).lean();
+
+      const { fixedSlots, constraintConfig = {} } = req.body || {};
+      const inputMode = userSettings?.inputMode || "EXPLICIT";
+      const daysPerWeek = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
+      const hoursPerDay = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
+
+      const generatorData = await prepareGeneratorData(req.collegeId, inputMode);
+      const filteredGeneratorData = filterGeneratorDataForSolver(generatorData);
+      
+      const mergedConstraintConfig = mergeTeacherPreferenceConstraintConfig(
+        mergeTeacherAvailabilityConstraintConfig(
+          constraintConfig,
+          filteredGeneratorData.faculties || []
+        ),
+        filteredGeneratorData.faculties || []
+      );
+
+      const requestBody = {
+        payload: {
+          collegeId: req.collegeId,
+          inputMode,
+          ...filteredGeneratorData,
+          fixedSlots,
+          DAYS_PER_WEEK: daysPerWeek,
+          HOURS_PER_DAY: hoursPerDay,
+          constraintConfig: mergedConstraintConfig,
+        },
+      };
+
+      const response = await fetch(`${SOLVER_BASE_URL}/audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      const auditResult = await response.json();
+      res.json(auditResult);
+    } catch (e) {
+      console.error("Error in /audit:", e);
+      res.status(500).json({ ok: false, error: "Internal Server Error" });
+    }
+});
+
 protectedRouter.get('/elective-settings/:classId', async (req, res) => {
     try {
         const { classId } = req.params;

@@ -35,7 +35,7 @@ def main() -> int:
         ("teach-1", 0, 1): [x1, x2],
     }
 
-    add_class_slot_exclusivity(
+    class_slot_result = add_class_slot_exclusivity(
         model=model,
         classes=classes,
         covers=covers,
@@ -43,7 +43,7 @@ def main() -> int:
         break_hours_set={0},
         class_days_per_week=class_days_per_week,
     )
-    add_teacher_slot_exclusivity(
+    teacher_slot_result = add_teacher_slot_exclusivity(
         model=model,
         faculty_ids=faculty_ids,
         teacher_covers=teacher_covers,
@@ -51,7 +51,7 @@ def main() -> int:
         hours_per_day=4,
         break_hours_set={0},
     )
-    class_occ = build_class_occupancy_vars(
+    class_occ, class_occ_result = build_class_occupancy_vars(
         model=model,
         classes=classes,
         covers=covers,
@@ -59,7 +59,7 @@ def main() -> int:
         break_hours_set={0},
         class_days_per_week=class_days_per_week,
     )
-    teacher_occ = build_teacher_occupancy_vars(
+    teacher_occ, teacher_occ_result = build_teacher_occupancy_vars(
         model=model,
         faculty_ids=faculty_ids,
         teacher_covers=teacher_covers,
@@ -79,6 +79,18 @@ def main() -> int:
         return 1
     if ("teach-1", 0, 0) in teacher_occ:
         print("Break hour should not create teacher occupancy")
+        return 1
+    if class_slot_result.constraints_added != 2:
+        print(f"Expected 2 class slot constraints, got {class_slot_result.constraints_added}")
+        return 1
+    if teacher_slot_result.constraints_added != 1:
+        print(f"Expected 1 teacher slot constraint, got {teacher_slot_result.constraints_added}")
+        return 1
+    if class_occ_result.variables_created != 6 or class_occ_result.constraints_added != 6:
+        print(f"Unexpected class occupancy result: {class_occ_result}")
+        return 1
+    if teacher_occ_result.variables_created != 6 or teacher_occ_result.constraints_added != 6:
+        print(f"Unexpected teacher occupancy result: {teacher_occ_result}")
         return 1
 
     constraint_count = len(model.Proto().constraints)

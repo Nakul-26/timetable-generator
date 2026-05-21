@@ -7,6 +7,7 @@ import ClassSubject from "../../models/ClassSubject.js";
 import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
 import TeachingAllocation from "../../models/TeachingAllocation.js";
 import { validateOwnership, validateOwnershipMany } from "../../utils/validateTenantRefs.js";
+import { buildTeachingAllocationKey } from "../../utils/allocationKey.js";
 
 const protectedRouter = Router();
 protectedRouter.use(auth);
@@ -223,6 +224,31 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     if (teacherIdsForValidation.length > 0) {
       await validateOwnershipMany(Faculty, teacherIdsForValidation, req.collegeId, "teacherIds");
     }
+    const allocationSubjects = upsertPairs.map((pair) => ({
+      subject: pair.subject?._id || pair.subjectId || pair.subject,
+      teacher: pair.teacher?._id || pair.teacherId || pair.teacher || null,
+    }));
+    const allocationKey = buildTeachingAllocationKey({
+      collegeId: req.collegeId,
+      type: effectiveType,
+      classIds,
+      subjectId: effectiveType === "ELECTIVE"
+        ? [...subjectIdsForValidation].sort().join("+")
+        : subjectId,
+      teacherIds,
+      subjects: allocationSubjects,
+      combinedClassGroupId,
+      electiveGroupId: effectiveType === "ELECTIVE"
+        ? [...subjectIdsForValidation].sort().join("+")
+        : null,
+    });
+    const existingAllocation = await TeachingAllocation.findOne({
+      collegeId: req.collegeId,
+      allocationKey,
+    }).select("_id").lean();
+    if (existingAllocation) {
+      return res.status(409).json({ error: "This teaching allocation already exists." });
+    }
 
     await Promise.all(
       upsertPairs.map((pair) =>
@@ -272,12 +298,10 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       subject: subjectId,
       teacher: teacherIds.length === 1 ? teacherIds[0] : null,
       teachers: teacherIds,
-      subjects: upsertPairs.map((pair) => ({
-        subject: pair.subject?._id || pair.subjectId || pair.subject,
-        teacher: pair.teacher?._id || pair.teacherId || pair.teacher || null,
-      })),
+      subjects: allocationSubjects,
       hoursPerWeek,
       combinedClassGroupId,
+      allocationKey,
     });
 
     const populatedAllocation = await TeachingAllocation.findOne({ _id: allocation._id, collegeId: req.collegeId })
@@ -296,6 +320,9 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     });
   } catch (e) {
     console.error("[POST /teaching-allocations] Error:", e);
+    if (e?.code === 11000) {
+      return res.status(409).json({ error: "This teaching allocation already exists." });
+    }
     res.status(e.status || 500).json({ error: e.message || "Internal Server Error" });
   }
 });
@@ -366,13 +393,23 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
         const hoursPerWeek = hoursByClassSubject.get(`${classId}|${subjectId}`) || Number(subject?.classesPerWeek || 1) || 1;
 
         if (subjectType === "lab" && comboTeacherIds.length > 0) {
+          const allocationSubjects = comboTeacherIds.map((teacherId) => ({
+            subject: subjectId,
+            teacher: teacherId,
+          }));
+          const allocationKey = buildTeachingAllocationKey({
+            collegeId: req.collegeId,
+            type: "LAB",
+            classIds: [klass._id],
+            subjectId,
+            teacherIds: comboTeacherIds,
+            subjects: allocationSubjects,
+            combinedClassGroupId: null,
+          });
           await TeachingAllocation.findOneAndUpdate(
             {
               collegeId: req.collegeId,
-              classIds: [klass._id],
-              subject: subjectId,
-              type: "LAB",
-              combinedClassGroupId: null,
+              allocationKey,
             },
             {
               $set: {
@@ -384,6 +421,8 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
                 type: "LAB",
                 hoursPerWeek,
                 combinedClassGroupId: null,
+                subjects: allocationSubjects,
+                allocationKey,
               },
             },
             { upsert: true, new: true }
@@ -393,13 +432,20 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
         }
 
         for (const combo of subjectCombos) {
+          const allocationSubjects = [{ subject: combo.subject, teacher: combo.faculty }];
+          const allocationKey = buildTeachingAllocationKey({
+            collegeId: req.collegeId,
+            type: "NORMAL",
+            classIds: [klass._id],
+            subjectId: combo.subject,
+            teacherIds: [combo.faculty],
+            subjects: allocationSubjects,
+            combinedClassGroupId: null,
+          });
           await TeachingAllocation.findOneAndUpdate(
             {
               collegeId: req.collegeId,
-              classIds: [klass._id],
-              subject: combo.subject,
-              teacher: combo.faculty,
-              combinedClassGroupId: null,
+              allocationKey,
             },
             {
               $set: {
@@ -409,6 +455,8 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
                 collegeId: req.collegeId,
                 hoursPerWeek,
                 combinedClassGroupId: null,
+                subjects: allocationSubjects,
+                allocationKey,
               },
             },
             { upsert: true, new: true }

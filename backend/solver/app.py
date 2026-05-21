@@ -1167,6 +1167,14 @@ def health() -> Dict[str, str]:
     return {"ok": "true"}
 
 
+@app.post("/audit")
+async def audit_payload(request: Request) -> Dict[str, Any]:
+    logger.info("/audit endpoint called")
+    body = await request.json()
+    summary = build_job_payload_summary(body)
+    return summary
+
+
 @app.post("/jobs")
 async def start_job(request: Request) -> Dict[str, Any]:
     logger.info("/jobs endpoint called")

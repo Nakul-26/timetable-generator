@@ -13,7 +13,9 @@
     "tenant-assign:dry-run": "node scripts/assignLegacyCollege.mjs",
     "tenant-assign:apply": "node scripts/assignLegacyCollege.mjs --apply",
     "tenant-migration:dry-run": "node scripts/migrateCollegeIds.mjs",
-    "tenant-migration:apply": "node scripts/migrateCollegeIds.mjs --apply"
+    "tenant-migration:apply": "node scripts/migrateCollegeIds.mjs --apply",
+    "allocation-keys:dry-run": "node scripts/backfillAllocationKeys.mjs",
+    "allocation-keys:apply": "node scripts/backfillAllocationKeys.mjs --apply"
   },
   "keywords": [],
   "author": "",

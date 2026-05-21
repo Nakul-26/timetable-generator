@@ -13,6 +13,8 @@ if str(_SOLVER_DIR) not in sys.path:
 
 from ortools.sat.python import cp_model
 
+from constraints.availability_constraints import add_teacher_availability_constraints
+from constraints.fixed_slot_constraints import add_fixed_slot_constraints
 from constraints.slot_constraints import (
     add_class_slot_exclusivity,
     add_teacher_slot_exclusivity,
@@ -725,7 +727,7 @@ def solve_instance(
             )
 
     # Validate fixed slots early (non-fatal): keep only valid ones and continue.
-    valid_fixed_slots, fixed_slot_warnings = validate_fixed_slots(
+    valid_fixed_slots, fixed_slot_diagnostics = validate_fixed_slots(
         fixed_slots=fixed_slots,
         class_by_id=class_by_id,
         combo_by_id=combo_by_id,
@@ -740,6 +742,11 @@ def solve_instance(
         theory_block_size=theory_block_size,
         lab_block_size=lab_block_size,
     )
+    fixed_slot_warnings = [d["message"] for d in fixed_slot_diagnostics]
+
+    # Initialize diagnostics list
+    all_diagnostics: List[Diagnostic] = []
+    all_diagnostics.extend(fixed_slot_diagnostics)
 
     model = cp_model.CpModel()
 
@@ -762,6 +769,8 @@ def solve_instance(
         fixed_slot_keys=fixed_slot_keys,
         max_candidates_per_combo=max_candidates_per_combo,
     )
+    # Collect variable prep diagnostics if any (currently none)
+    
     combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {
         combo_id: [(slot.day, slot.hour) for slot in slots]
         for combo_id, slots in variable_prep.combo_candidate_starts.items()
@@ -909,7 +918,7 @@ def solve_instance(
                 for fid in combo.get("faculty_ids", []):
                     teacher_covers.setdefault((fid, day, h), []).append(var)
 
-    add_class_slot_exclusivity(
+    class_slot_result = add_class_slot_exclusivity(
         model=model,
         classes=classes,
         covers=covers,
@@ -917,7 +926,7 @@ def solve_instance(
         break_hours_set=break_hours_set,
         class_days_per_week=_class_days_per_week,
     )
-    add_teacher_slot_exclusivity(
+    teacher_slot_result = add_teacher_slot_exclusivity(
         model=model,
         faculty_ids=faculty_ids,
         teacher_covers=teacher_covers,
@@ -925,8 +934,26 @@ def solve_instance(
         hours_per_day=HOURS_PER_DAY,
         break_hours_set=break_hours_set,
     )
+    availability_result = None
+    if teacher_avail_enabled and teacher_avail_hard:
+        availability_result = add_teacher_availability_constraints(
+            model=model,
+            teacher_covers=teacher_covers,
+            availability_by_faculty=model_context.availability_by_faculty,
+            days_per_week=DAYS_PER_WEEK,
+            hours_per_day=HOURS_PER_DAY,
+            break_hours_set=break_hours_set,
+        )
+        if availability_result.diagnostics:
+            all_diagnostics.extend(availability_result.diagnostics)
+        if availability_result.constraints_added or availability_result.diagnostics:
+            logger.info(
+                "Teacher availability constraints: constraints=%d diagnostics=%s",
+                availability_result.constraints_added,
+                [d.message for d in availability_result.diagnostics],
+            )
 
-    class_occ = build_class_occupancy_vars(
+    class_occ, class_occ_result = build_class_occupancy_vars(
         model=model,
         classes=classes,
         covers=covers,
@@ -934,7 +961,7 @@ def solve_instance(
         break_hours_set=break_hours_set,
         class_days_per_week=_class_days_per_week,
     )
-    teacher_occ = build_teacher_occupancy_vars(
+    teacher_occ, teacher_occ_result = build_teacher_occupancy_vars(
         model=model,
         faculty_ids=faculty_ids,
         teacher_covers=teacher_covers,
@@ -942,6 +969,17 @@ def solve_instance(
         hours_per_day=HOURS_PER_DAY,
         break_hours_set=break_hours_set,
     )
+    if DEBUG:
+        logger.debug(
+            "Base constraint build counts: classSlot=%d teacherSlot=%d classOcc=%d/%d teacherOcc=%d/%d availability=%s",
+            class_slot_result.constraints_added,
+            teacher_slot_result.constraints_added,
+            class_occ_result.constraints_added,
+            class_occ_result.variables_created,
+            teacher_occ_result.constraints_added,
+            teacher_occ_result.variables_created,
+            availability_result.constraints_added if availability_result else None,
+        )
 
     # Weekly subject hours: configurable hard/soft behavior.
     x_by_class_subject: Dict[Tuple[str, str], List[Tuple[cp_model.IntVar, int]]] = {}
@@ -1478,19 +1516,18 @@ def solve_instance(
                 elif no_gaps_weight > 0:
                     objective_terms.append(gap * no_gaps_weight)
 
-    # Fixed slots
-    for fs in valid_fixed_slots:
-        class_id = str(fs.get("class"))
-        day = int(fs.get("day"))
-        hour = int(fs.get("hour"))
-        combo_id = str(fs.get("combo"))
-        var = x.get((combo_id, day, hour))
-        if var is None:
-            fixed_slot_warnings.append(
-                f"Fixed slot invalid for class {class_id} combo {combo_id} at {day},{hour}"
-            )
-            continue
-        model.Add(var == 1)
+    fixed_slot_result, fixed_slot_enforcement_warnings = add_fixed_slot_constraints(
+        model=model,
+        fixed_slots=valid_fixed_slots,
+        assignment_vars=x,
+    )
+    fixed_slot_warnings.extend(fixed_slot_enforcement_warnings)
+    if fixed_slot_result.constraints_added or fixed_slot_result.diagnostics:
+        logger.info(
+            "Fixed slot constraints: constraints=%d diagnostics=%s",
+            fixed_slot_result.constraints_added,
+            fixed_slot_result.diagnostics,
+        )
 
     # Soft cap: teacher daily load.
     if teacher_daily_enabled and teacher_daily_weight > 0:
@@ -1939,6 +1976,7 @@ def solve_instance(
         if early_abort_thread is not None:
             early_abort_thread.join(timeout=0.2)
 
+    diagnostics_dicts = [d.to_dict() for d in all_diagnostics]
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and not progress_callback.solution_found:
         failure_diagnostics = _build_failure_diagnostics()
         partial_preview = _build_partial_preview()
@@ -1971,7 +2009,8 @@ def solve_instance(
                 "warnings": fixed_slot_warnings,
                 "config": applied_config,
                 "solver_stats": solver_stats,
-                "diagnostics": failure_diagnostics,
+                "diagnostics": diagnostics_dicts,
+                "failure_analysis": failure_diagnostics,
                 "preview_stats": partial_preview.get("preview_stats"),
             }
         return {
@@ -1985,7 +2024,8 @@ def solve_instance(
             "warnings": fixed_slot_warnings,
             "config": applied_config,
             "solver_stats": solver_stats,
-            "diagnostics": failure_diagnostics,
+            "diagnostics": diagnostics_dicts,
+            "failure_analysis": failure_diagnostics,
             "preview_stats": partial_preview.get("preview_stats"),
         }
 
@@ -2083,6 +2123,7 @@ def solve_instance(
         "warnings": fixed_slot_warnings,
         "config": applied_config,
         "objective_value": float(solver.ObjectiveValue()) if objective_terms else 0.0,
+        "diagnostics": diagnostics_dicts,
         "solver_stats": {
             "candidate_start_count": len(x),
             "combo_count": len(combos),

@@ -32,7 +32,7 @@ def main() -> int:
         {"class": "class-1", "combo": "combo-1", "day": 9, "hour": 2},
     ]
 
-    valid_slots, warnings = validate_fixed_slots(
+    valid_slots, diagnostics = validate_fixed_slots(
         fixed_slots=fixed_slots,
         class_by_id=class_by_id,
         combo_by_id=combo_by_id,
@@ -46,13 +46,14 @@ def main() -> int:
         lab_block_size=2,
     )
 
+    actual_warnings = [d["message"] for d in diagnostics]
     expected_valid = []
     expected_warnings = [
-        "Fixed slot violates teacher availability for class class-1 at 1,2",
-        "Fixed slot day out of range for class class-1: 9",
+        "Fixed slot violates teacher availability for class class-1 at Day 1, Hour 2.",
+        "Fixed slot day 9 out of range for class class-1.",
     ]
 
-    if valid_slots != expected_valid or warnings != expected_warnings:
+    if valid_slots != expected_valid or actual_warnings != expected_warnings:
         print("Expected valid slots:")
         print(json.dumps(expected_valid, indent=2, sort_keys=True))
         print("Actual valid slots:")
@@ -60,7 +61,7 @@ def main() -> int:
         print("Expected warnings:")
         print(json.dumps(expected_warnings, indent=2, sort_keys=True))
         print("Actual warnings:")
-        print(json.dumps(warnings, indent=2, sort_keys=True))
+        print(json.dumps(actual_warnings, indent=2, sort_keys=True))
         return 1
 
     print("OK: validate_fixed_slots")

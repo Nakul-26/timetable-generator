@@ -1,0 +1,71 @@
+{
+  "classes": [
+    {
+      "_id": "class-1",
+      "name": "CSE 1A",
+      "days_per_week": 1,
+      "subject_hours": {
+        "subj-1": 1
+      },
+      "assigned_teacher_subject_combos": [
+        "combo-1"
+      ]
+    }
+  ],
+  "subjects": [
+    {
+      "_id": "subj-1",
+      "name": "Physics",
+      "type": "theory",
+      "no_of_hours_per_week": 1
+    }
+  ],
+  "faculties": [
+    {
+      "_id": "teach-1",
+      "name": "Teacher One",
+      "unavailableSlots": [
+        {
+          "day": 0,
+          "hour": 0
+        }
+      ]
+    }
+  ],
+  "combos": [
+    {
+      "_id": "combo-1",
+      "subject_id": "subj-1",
+      "faculty_ids": [
+        "teach-1"
+      ],
+      "class_ids": [
+        "class-1"
+      ]
+    }
+  ],
+  "fixedSlots": [],
+  "constraintConfig": {
+    "schedule": {
+      "daysPerWeek": 1,
+      "hoursPerDay": 1,
+      "breakHours": []
+    },
+    "structural": {
+      "theoryBlockSize": 1,
+      "labBlockSize": 2
+    },
+    "teacherAvailability": {
+      "enabled": true,
+      "hard": true
+    },
+    "weeklySubjectHours": {
+      "hard": true
+    }
+  },
+  "solutionCount": 1,
+  "solver_time_limit_sec": 5,
+  "inputMode": "EXPLICIT",
+  "mode": "test"
+}
+

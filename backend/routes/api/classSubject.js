@@ -5,6 +5,7 @@ import Subject from '../../models/Subject.js';
 import TeachingAllocation from '../../models/TeachingAllocation.js';
 import auth from '../../middleware/auth.js';
 import { validateOwnership } from '../../utils/validateTenantRefs.js';
+import { buildTeachingAllocationKey } from '../../utils/allocationKey.js';
 
 const toPositiveNumber = (value) => {
     const parsedValue = Number(value);
@@ -53,13 +54,21 @@ protectedRouter.post('/class-subjects', async (req, res) => {
         // This ensures the Class-Subject combo shows up in the Teaching Allocation management page immediately.
         const subjectType = String(subjectDoc.type || "").toLowerCase();
         const allocationType = subjectType === 'lab' ? 'LAB' : 'NORMAL';
+        const allocationSubjects = [{ subject: subjectDoc._id, teacher: null }];
+        const allocationKey = buildTeachingAllocationKey({
+            collegeId: req.collegeId,
+            type: allocationType,
+            classIds: [classDoc._id],
+            subjectId: subjectDoc._id,
+            teacherIds: [],
+            subjects: allocationSubjects,
+            combinedClassGroupId: null,
+        });
 
         await TeachingAllocation.findOneAndUpdate(
             { 
                 collegeId: req.collegeId, 
-                classIds: [classDoc._id], 
-                subject: subjectDoc._id,
-                combinedClassGroupId: null 
+                allocationKey,
             },
             {
                 $setOnInsert: {
@@ -70,7 +79,8 @@ protectedRouter.post('/class-subjects', async (req, res) => {
                     hoursPerWeek: effectiveHours,
                     teacher: null,
                     teachers: [],
-                    subjects: [{ subject: subjectDoc._id, teacher: null }]
+                    subjects: allocationSubjects,
+                    allocationKey,
                 }
             },
             { upsert: true }

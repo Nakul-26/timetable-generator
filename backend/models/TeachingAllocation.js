@@ -69,6 +69,12 @@ const TeachingAllocationSchema = new Schema(
       default: null,
       trim: true,
     },
+    allocationKey: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -76,6 +82,13 @@ const TeachingAllocationSchema = new Schema(
 TeachingAllocationSchema.index(
   { collegeId: 1, teacher: 1, subject: 1, combinedClassGroupId: 1 },
   { partialFilterExpression: { type: "NORMAL" } }
+);
+TeachingAllocationSchema.index(
+  { collegeId: 1, allocationKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { allocationKey: { $type: "string" } },
+  }
 );
 
 export default mongoose.model("TeachingAllocation", TeachingAllocationSchema);

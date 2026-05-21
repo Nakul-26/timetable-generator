@@ -5,12 +5,12 @@ from typing import Any, Dict
 from model.entities import NormalizedSolverInput
 
 
-def build_solver_diagnostics(
+def build_solver_stats(
     payload: Dict[str, Any] | NormalizedSolverInput,
     result: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Compact solver diagnostics for logs and debugging surfaces.
+    Compact solver statistics for logs and debugging surfaces.
     """
     if isinstance(payload, NormalizedSolverInput):
         summary = payload.summary()

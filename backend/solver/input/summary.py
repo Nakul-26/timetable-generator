@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from input.normalize import normalize_solver_payload
+from input.audit import audit_solver_input
+from model.builder import build_solver_model_context
 
 
 def build_job_payload_summary(body: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -17,6 +19,10 @@ def build_job_payload_summary(body: Dict[str, Any] | None) -> Dict[str, Any]:
     normalized = normalize_solver_payload(payload if isinstance(payload, dict) else {})
     raw_payload = payload if isinstance(payload, dict) else {}
 
+    # Build model context to reuse its indexing logic for audit
+    context = build_solver_model_context(normalized)
+    diagnostics = audit_solver_input(context)
+
     subject_by_id = {subject.id: subject for subject in normalized.subjects}
     combo_count_by_pair: Dict[Tuple[str, str], int] = {}
 
@@ -30,6 +36,24 @@ def build_job_payload_summary(body: Dict[str, Any] | None) -> Dict[str, Any]:
     missing_lab_combos: List[Dict[str, Any]] = []
     missing_required_combos: List[Dict[str, Any]] = []
     required_summary: List[Dict[str, Any]] = []
+
+    # Map diagnostics back to the existing fields for backward compatibility
+    for d in diagnostics:
+        if d["code"] == "MISSING_COMBO":
+            # Find the subject name/type from the message if possible, or leave it thin
+            missing_required_combos.append({
+                "classId": d["entityId"],
+                "className": d["entityName"],
+                "message": d["message"],
+                "severity": d["severity"]
+            })
+        elif d["code"] == "NO_FACULTY_ASSIGNED" and "lab" in d["message"].lower():
+             missing_lab_combos.append({
+                "classId": d["entityId"],
+                "className": d["entityName"],
+                "message": d["message"],
+                "severity": d["severity"]
+            })
 
     for class_entity in normalized.classes:
         required_pairs_for_class: List[Dict[str, Any]] = []
@@ -55,32 +79,6 @@ def build_job_payload_summary(body: Dict[str, Any] | None) -> Dict[str, Any]:
                     "eligibleCombos": eligible,
                 }
             )
-
-            if eligible <= 0:
-                missing_required_combos.append(
-                    {
-                        "classId": class_entity.id,
-                        "className": class_entity.name,
-                        "subjectId": subject_id,
-                        "subjectName": subject_name,
-                        "subjectType": subject_type,
-                        "requiredHours": required,
-                    }
-                )
-
-            if subject_type != "lab":
-                continue
-
-            if eligible <= 0:
-                missing_lab_combos.append(
-                    {
-                        "classId": class_entity.id,
-                        "className": class_entity.name,
-                        "subjectId": subject_id,
-                        "subjectName": subject_name,
-                        "requiredHours": required,
-                    }
-                )
 
         required_pairs_for_class.sort(
             key=lambda item: (
@@ -124,6 +122,7 @@ def build_job_payload_summary(body: Dict[str, Any] | None) -> Dict[str, Any]:
             "breakHours": raw_payload.get("BREAK_HOURS"),
         },
         "counts": summary["counts"],
+        "diagnostics": diagnostics,
         "missingLabCombos": missing_lab_combos,
         "missingRequiredCombos": missing_required_combos[:50],
         "requiredSummary": required_summary[:10],

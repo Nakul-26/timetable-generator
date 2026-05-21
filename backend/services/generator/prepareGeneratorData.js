@@ -90,6 +90,30 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
       }))
       .filter((pair) => pair.subjectId);
 
+    if (isElectiveAllocation) {
+      const subjectTeacherPairs = normalizedPairs.filter((pair) => pair.teacherId);
+      const teacherIds = [...new Set(subjectTeacherPairs.map((pair) => pair.teacherId))];
+      if (classIds.length > 0 && subjectTeacherPairs.length > 0) {
+        teacherSubjectCombos.push({
+          type: "ELECTIVE",
+          electiveGroupId: String(allocation._id || allocation.combinedClassGroupId || subjectTeacherPairs.map((pair) => pair.subjectId).join("_")),
+          subjectId: String(allocation.subject || subjectTeacherPairs[0]?.subjectId || ""),
+          subjectTeacherPairs,
+          teacherIds,
+          classIds,
+          hoursPerWeek: allocation.hoursPerWeek,
+          combinedClassGroupId: allocation.combinedClassGroupId || null,
+        });
+      }
+      classIds.forEach((classId) => {
+        subjectTeacherPairs.forEach((pair) => {
+          explicitClassTeacherKeys.add(`${classId}|${pair.teacherId}`);
+          classTeachers.push({ classId, teacherId: pair.teacherId });
+        });
+      });
+      return;
+    }
+
     if (isLabAllocation) {
       const teacherIds = [...new Set(
         (Array.isArray(allocation.teachers) && allocation.teachers.length > 0
@@ -97,18 +121,8 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
           : normalizedPairs.map((pair) => pair.teacherId).filter(Boolean)
         ).map((teacherId) => String(teacherId).trim()).filter(Boolean)
       )];
-      const primaryTeacherId = teacherIds[0] || null;
-      if (primaryTeacherId && normalizedPairs.length > 0) {
+      if (teacherIds.length > 0 && normalizedPairs.length > 0) {
         const subjectId = normalizedPairs[0].subjectId;
-        teacherSubjectCombos.push({
-          teacherId: primaryTeacherId,
-          teacherIds: [primaryTeacherId],
-          subjectId,
-          classIds,
-          hoursPerWeek: allocation.hoursPerWeek,
-          combinedClassGroupId: allocation.combinedClassGroupId || null,
-          type: "LAB",
-        });
         labAllocations.push({
           classIds,
           subjectId,
@@ -117,8 +131,10 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
           combinedClassGroupId: allocation.combinedClassGroupId || null,
         });
         classIds.forEach((classId) => {
-          explicitClassTeacherKeys.add(`${classId}|${primaryTeacherId}`);
-          classTeachers.push({ classId, teacherId: primaryTeacherId });
+          teacherIds.forEach((teacherId) => {
+            explicitClassTeacherKeys.add(`${classId}|${teacherId}`);
+            classTeachers.push({ classId, teacherId });
+          });
         });
       }
     } else {
