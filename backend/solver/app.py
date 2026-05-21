@@ -60,8 +60,10 @@ from solver_core import (
     _required_hours,
     _solve_with_solution_callback,
     _stop_search,
-    solve_instance,
 )
+from model.precheck import validate_fixed_slots
+from solve import solve_instance as run_solver_instance
+from input.summary import build_job_payload_summary
 
 DEBUG = os.getenv("DEBUG_SOLVER", "0").strip().lower() in ("1", "true", "yes", "on")
 LOG_FULL_PAYLOAD = os.getenv("LOG_FULL_PAYLOAD", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -588,7 +590,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
 
     progress_callback and progress_callback({"progress": 10, "phase": "feasibility_start"})
     feasibility_time_limit_sec = max(60.0, min(configured_time_limit, configured_time_limit * 0.25))
-    feasibility_result = solve_instance({
+    feasibility_result = run_solver_instance({
         "faculties": faculties,
         "subjects": subjects,
         "classes": classes,
@@ -867,7 +869,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         heartbeat_thread.start()
 
         try:
-            result = solve_instance(
+            result = run_solver_instance(
                 {
                     "faculties": faculties,
                     "subjects": subjects,
@@ -1174,183 +1176,44 @@ async def start_job(request: Request) -> Dict[str, Any]:
 
     body = await request.json()
     logger.debug("/jobs body received")
-
-    # Log received payload summary
-    payload_data = body.get("payload", {})
+    summary = build_job_payload_summary(body)
     logger.info(
         "Job payload summary: jobId=%s collegeId=%s inputMode=%s classes=%d subjects=%d faculties=%d combos=%d fixedSlots=%d daysPerWeek=%s hoursPerDay=%s",
-        body.get("jobId"),
-        payload_data.get("collegeId"),
-        payload_data.get("inputMode"),
-        len(payload_data.get("classes", []) or []),
-        len(payload_data.get("subjects", []) or []),
-        len(payload_data.get("faculties", []) or []),
-        len(payload_data.get("combos", []) or []),
-        len(payload_data.get("fixedSlots", []) or []),
-        payload_data.get("DAYS_PER_WEEK"),
-        payload_data.get("HOURS_PER_DAY"),
+        summary.get("jobId"),
+        summary.get("collegeId"),
+        summary.get("inputMode"),
+        summary.get("counts", {}).get("classes", 0),
+        summary.get("counts", {}).get("subjects", 0),
+        summary.get("counts", {}).get("faculties", 0),
+        summary.get("counts", {}).get("combos", 0),
+        summary.get("counts", {}).get("fixedSlots", 0),
+        summary.get("schedule", {}).get("daysPerWeek"),
+        summary.get("schedule", {}).get("hoursPerDay"),
     )
-
-    # Persist a lightweight summary for quick debugging (even when full dumps are disabled).
-    try:
-        subjects_list = payload_data.get("subjects", []) or []
-        classes_list = payload_data.get("classes", []) or []
-        combos_list = payload_data.get("combos", []) or []
-
-        def _try_int(value: Any) -> Optional[int]:
-            try:
-                return int(value)
-            except Exception:
-                return None
-
-        subject_by_id = {str(s.get("_id") or s.get("id")): s for s in subjects_list if isinstance(s, dict)}
-        combo_count_by_pair: Dict[Tuple[str, str], int] = {}
-        for combo in combos_list:
-            if not isinstance(combo, dict):
-                continue
-            subject_id = str(combo.get("subject_id") or combo.get("subjectId") or "")
-            class_ids = combo.get("class_ids") or combo.get("classIds") or []
-            if not isinstance(class_ids, list):
-                class_ids = [class_ids]
-            for class_id in [str(cid) for cid in class_ids if cid is not None and str(cid).strip()]:
-                key = (class_id, subject_id)
-                combo_count_by_pair[key] = combo_count_by_pair.get(key, 0) + 1
-
-        missing_lab_combos: List[Dict[str, Any]] = []
-        missing_required_combos: List[Dict[str, Any]] = []
-        required_summary: List[Dict[str, Any]] = []
-        for cls in classes_list:
-            if not isinstance(cls, dict):
-                continue
-            class_id = str(cls.get("_id") or cls.get("id") or "")
-            class_name = cls.get("name") or class_id
-            class_days_raw = cls.get("days_per_week")
-            if class_days_raw is None:
-                class_days_raw = cls.get("daysPerWeek")
-            class_days_parsed = _try_int(class_days_raw)
-            subj_hours = cls.get("subject_hours")
-            if not isinstance(subj_hours, dict):
-                continue
-
-            required_pairs_for_class: List[Dict[str, Any]] = []
-            total_required_hours = 0.0
-            for subject_id, hours in subj_hours.items():
-                try:
-                    required = float(hours or 0)
-                except Exception:
-                    required = 0
-                if required <= 0:
-                    continue
-                total_required_hours += required
-                subj = subject_by_id.get(str(subject_id)) or {}
-                subj_type = str(subj.get("type") or "").strip().lower()
-                subj_name = subj.get("name") or str(subject_id)
-                eligible = combo_count_by_pair.get((class_id, str(subject_id)), 0)
-
-                required_pairs_for_class.append({
-                    "subjectId": str(subject_id),
-                    "subjectName": subj_name,
-                    "subjectType": subj_type or None,
-                    "requiredHours": required,
-                    "eligibleCombos": eligible,
-                })
-
-                if eligible <= 0:
-                    missing_required_combos.append({
-                        "classId": class_id,
-                        "className": class_name,
-                        "subjectId": str(subject_id),
-                        "subjectName": subj_name,
-                        "subjectType": subj_type or None,
-                        "requiredHours": required,
-                    })
-                if subj_type != "lab":
-                    continue
-                if eligible <= 0:
-                    missing_lab_combos.append({
-                        "classId": class_id,
-                        "className": class_name,
-                        "subjectId": str(subject_id),
-                        "subjectName": subj_name,
-                        "requiredHours": required,
-                    })
-
-            required_pairs_for_class.sort(key=lambda x: (-float(x.get("requiredHours") or 0), str(x.get("subjectName") or "")))
-            required_summary.append({
-                "classId": class_id,
-                "className": class_name,
-                "classDaysPerWeekRaw": class_days_raw,
-                "classDaysPerWeekParsed": class_days_parsed,
-                "requiredSubjectCount": len(required_pairs_for_class),
-                "totalRequiredHours": total_required_hours,
-                "topRequired": required_pairs_for_class[:12],
-            })
-
-        combos_summary = []
-        for combo in (combos_list or [])[:25]:
-            if not isinstance(combo, dict):
-                continue
-            subject_id = str(combo.get("subject_id") or combo.get("subjectId") or "")
-            subj = subject_by_id.get(subject_id) or {}
-            combos_summary.append({
-                "comboId": str(combo.get("_id") or combo.get("id") or ""),
-                "subjectId": subject_id,
-                "subjectName": subj.get("name") or subject_id,
-                "subjectType": str(subj.get("type") or "").strip().lower() or None,
-                "classIds": combo.get("class_ids") or combo.get("classIds") or [],
-                "facultyIds": combo.get("faculty_ids") or combo.get("facultyIds") or [],
-            })
-
-        summary = {
-            "jobId": body.get("jobId"),
-            "collegeId": payload_data.get("collegeId"),
-            "inputMode": payload_data.get("inputMode"),
-            "schedule": {
-                "daysPerWeek": payload_data.get("DAYS_PER_WEEK"),
-                "hoursPerDay": payload_data.get("HOURS_PER_DAY"),
-                "breakHours": payload_data.get("BREAK_HOURS"),
-            },
-            "counts": {
-                "classes": len(classes_list),
-                "subjects": len(subjects_list),
-                "faculties": len(payload_data.get("faculties", []) or []),
-                "combos": len(combos_list),
-            },
-            "missingLabCombos": missing_lab_combos,
-            "missingRequiredCombos": missing_required_combos[:50],
-            "requiredSummary": required_summary[:10],
-            "combosSummary": combos_summary,
-        }
-        if SAVE_PAYLOAD_SUMMARY:
+    if SAVE_PAYLOAD_SUMMARY:
+        try:
             tmp_path = "last_job_payload_summary.json.tmp"
             out_path = "last_job_payload_summary.json"
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json_module.dump(summary, f, indent=2, default=_json_default)
             os.replace(tmp_path, out_path)
-        
-        if missing_lab_combos and SAVE_PAYLOAD_SUMMARY:
-            logger.warning(
-                "[jobs] Missing lab combos for %d class-subject pairs; see last_job_payload_summary.json",
-                len(missing_lab_combos),
+        except Exception as exc:
+            logger.exception(
+                "[jobs] Failed to write payload summary: %s: %s",
+                type(exc).__name__,
+                exc,
             )
-        elif missing_lab_combos:
-            logger.warning(
-                "[jobs] Missing lab combos for %d class-subject pairs",
-                len(missing_lab_combos),
-            )
-    except Exception as exc:
-        logger.exception(
-            "[jobs] Failed to write payload summary: %s: %s",
-            type(exc).__name__,
-            exc,
+    missing_lab_combos = summary.get("missingLabCombos") or []
+    if missing_lab_combos and SAVE_PAYLOAD_SUMMARY:
+        logger.warning(
+            "[jobs] Missing lab combos for %d class-subject pairs; see last_job_payload_summary.json",
+            len(missing_lab_combos),
         )
-        try:
-            import traceback
-            with open("last_job_payload_summary_error.txt", "w", encoding="utf-8") as ef:
-                ef.write(f"{type(exc).__name__}: {exc}\n")
-                ef.write(traceback.format_exc())
-        except Exception:
-            pass
+    elif missing_lab_combos:
+        logger.warning(
+            "[jobs] Missing lab combos for %d class-subject pairs",
+            len(missing_lab_combos),
+        )
 
     if DEBUG_DUMP_PAYLOADS or LOG_FULL_PAYLOAD or DEBUG:
         logger.debug("Full /jobs payload (may be large) follows")
@@ -2004,70 +1867,19 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     # Validate fixed slots early (non-fatal): keep only valid ones and continue.
-    valid_fixed_slots: List[Dict[str, Any]] = []
-    fixed_slot_warnings: List[str] = []
-    for fs in fixed_slots:
-        class_id = str(fs.get("class"))
-        combo_id = str(fs.get("combo"))
-        try:
-            day = int(fs.get("day"))
-            hour = int(fs.get("hour"))
-        except Exception:
-            fixed_slot_warnings.append(f"Fixed slot has non-numeric day/hour: {fs}")
-            continue
-
-        if class_id not in class_by_id:
-            fixed_slot_warnings.append(f"Fixed slot class not found: {class_id}")
-            continue
-        if combo_id not in combo_by_id:
-            fixed_slot_warnings.append(f"Fixed slot combo not found: {combo_id}")
-            continue
-        if day < 0 or day >= _class_days_per_week(class_by_id[class_id]):
-            fixed_slot_warnings.append(
-                f"Fixed slot day out of range for class {class_id}: {day}"
-            )
-            continue
-        if hour < 0 or hour >= HOURS_PER_DAY:
-            fixed_slot_warnings.append(f"Fixed slot hour out of range: {hour}")
-            continue
-        if hour in break_hours_set:
-            fixed_slot_warnings.append(
-                f"Fixed slot falls in break hour for class {class_id} at {day},{hour}"
-            )
-            continue
-        combo = combo_by_id.get(combo_id)
-        combo_class_ids = combo.get("class_ids", []) if combo else []
-        if combo and combo_class_ids and class_id not in combo_class_ids:
-            fixed_slot_warnings.append(
-                f"Fixed slot class {class_id} is not part of combo {combo_id}"
-            )
-            continue
-        if combo and any(
-            day >= _class_days_per_week(class_by_id[cid])
-            for cid in combo_class_ids
-            if cid in class_by_id
-        ):
-            fixed_slot_warnings.append(
-                f"Fixed slot day out of range for one or more classes in combo {combo_id}: {day}"
-            )
-            continue
-        if teacher_avail_enabled and teacher_avail_hard:
-            if combo:
-                subj = subject_by_id.get(combo.get("subject_id"))
-                block = lab_block_size if subj and _is_lab_subject(subj) else theory_block_size
-                availability_conflict = False
-                for fid in combo.get("faculty_ids", []):
-                    if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, min(HOURS_PER_DAY, hour + block))):
-                        availability_conflict = True
-                        break
-                if availability_conflict:
-                    fixed_slot_warnings.append(
-                        f"Fixed slot violates teacher availability for class {class_id} at {day},{hour}"
-                    )
-                    continue
-        valid_fixed_slots.append(
-            {"class": class_id, "day": day, "hour": hour, "combo": combo_id}
-        )
+    valid_fixed_slots, fixed_slot_warnings = validate_fixed_slots(
+        fixed_slots=fixed_slots,
+        class_by_id=class_by_id,
+        combo_by_id=combo_by_id,
+        subject_by_id=subject_by_id,
+        hours_per_day=HOURS_PER_DAY,
+        break_hours_set=break_hours_set,
+        class_days_per_week=_class_days_per_week,
+        is_lab_subject=lambda subj: _is_lab_subject(subj) if subj else False,
+        teacher_unavailable=_is_teacher_unavailable if teacher_avail_enabled and teacher_avail_hard else None,
+        theory_block_size=theory_block_size,
+        lab_block_size=lab_block_size,
+    )
 
     model = cp_model.CpModel()
 
@@ -3540,10 +3352,7 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-solve_instance = solve_instance_legacy
-
-
 @app.post("/solve")
 async def solve(request: Request) -> Dict[str, Any]:
     payload = await request.json()
-    return solve_instance(payload)
+    return run_solver_instance(payload)

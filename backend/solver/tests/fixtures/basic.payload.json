@@ -1,0 +1,59 @@
+{
+  "classes": [
+    {
+      "_id": "class-1",
+      "name": "CSE 1A",
+      "days_per_week": "6",
+      "subject_hours": {
+        "subj-1": "4"
+      },
+      "assigned_teacher_subject_combos": ["combo-1"]
+    }
+  ],
+  "subjects": [
+    {
+      "_id": "subj-1",
+      "name": "Mathematics",
+      "type": "theory",
+      "no_of_hours_per_week": "4"
+    }
+  ],
+  "faculties": [
+    {
+      "_id": "teach-1",
+      "name": "Teacher One",
+      "unavailableSlots": [
+        {
+          "day": 1,
+          "hour": 2
+        }
+      ]
+    }
+  ],
+  "combos": [
+    {
+      "_id": "combo-1",
+      "subject_id": "subj-1",
+      "faculty_ids": ["teach-1"],
+      "class_ids": ["class-1"]
+    }
+  ],
+  "fixedSlots": [
+    {
+      "class": "class-1",
+      "combo": "combo-1",
+      "day": 0,
+      "hour": 0
+    }
+  ],
+  "constraintConfig": {
+    "schedule": {
+      "daysPerWeek": 6,
+      "hoursPerDay": 8
+    },
+    "solver": {
+      "solutionCount": 2,
+      "timeLimitSec": 180
+    }
+  }
+}

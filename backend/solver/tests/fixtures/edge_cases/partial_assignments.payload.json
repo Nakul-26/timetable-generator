@@ -1,0 +1,29 @@
+{
+  "classes": [
+    {
+      "_id": "class-5",
+      "name": "ME 1A",
+      "days_per_week": 6,
+      "subject_hours": {
+        "subj-5": 4
+      }
+    }
+  ],
+  "subjects": [
+    {
+      "_id": "subj-5",
+      "name": "Thermodynamics",
+      "type": "theory",
+      "no_of_hours_per_week": 4
+    }
+  ],
+  "faculties": [],
+  "combos": [
+    {
+      "_id": "combo-5",
+      "class_ids": ["class-5"]
+    }
+  ],
+  "fixedSlots": [],
+  "constraintConfig": {}
+}

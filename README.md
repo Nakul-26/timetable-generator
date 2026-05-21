@@ -1,144 +1,169 @@
-# Timetable Generator (ERP)
+# Timetable Generator
 
-Comprehensive summary and developer reference for the Timetable Generator project.
+Full-stack timetable management and generation system for colleges and institutions.
 
-This is a full-stack application that generates timetables for educational institutions while providing a management UI for faculties, subjects, classes, and assignments. It supports a multi-tenant/workspace model (colleges) and provides a small superadmin layer for managing colleges and admins.
+The app lets college admins manage faculties, subjects, classes, teacher-subject mappings, and teaching allocations, then generate and manually refine timetables with constraint-aware rules. A superadmin layer can manage colleges and admins across workspaces.
 
-Table of contents
-- Overview
-- Features
-- Architecture & file structure
-- Key flows and components
-- Running the project (development)
-- Environment variables
-- Migration and utility scripts
-- Troubleshooting & notes
+## What It Does
 
-Overview
---------
-The project comprises a React + Vite frontend and a Node.js + Express backend with MongoDB (Mongoose). The backend exposes REST APIs; the frontend consumes those endpoints and provides an admin UI. Timetable generation logic lives in backend services and optionally in a solver worker.
+- College-scoped admin workflow with JWT-based login
+- Superadmin workspace for managing colleges and admins
+- Faculty, subject, and class CRUD
+- Teacher-subject combinations and teaching allocations
+- Class-subject, class-faculty, and elective subject assignment screens
+- Timetable generation with configurable constraints
+- Constraint health checks before generation
+- Fixed slots and manual timetable editing
+- Saved timetable history, viewing, and Excel export
+- Generation payload inspection for debugging
 
-Features
---------
-- User authentication (JWT cookie-based)
-- Roles: `superadmin` and `admin` (college-scoped)
-- Superadmin: manage colleges and admins (CRUD) and act-as a college
-- Admin: manage faculties, subjects, classes, teacher-subject combos, assignments
-- Timetable generation: enforce hard/soft constraints, save results
-- Export/Import helpers, Excel templates for bulk data
-- Lightweight migration utilities to convert legacy college IDs to `College` documents
+## Main Areas
 
-Architecture & file structure
------------------------------
-- `frontend/` — React + Vite application (UI)
-	- `src/api/axios.jsx` — centralized axios instance (adds `x-college-id` header)
-	- `src/components/` — shared components (Navbar, PrivateRoute, etc.)
-	- `src/pages/` — route pages (faculties, subjects, classes, assignments, timetable, superadmin)
-	- `src/pages/HomePage.jsx` — landing/home guidance page
-	- `src/styles/` and `src/App.css` — global styles and theme variables
+### Frontend
 
-- `backend/` — Express server and REST API
-	- `server.js` / `app.js` — main express bootstrap
-	- `models/` — Mongoose models (`Admin`, `College`, `Faculty`, `Class`, `Subject`, `TimetableResult`, etc.)
-	- `routes/` — API routes (prefixed with `/api`) plus `/api/superadmin`
-	- `middleware/` — auth, college-scope enforcement, superadmin guard
-	- `services/` — generator, export, worker manager
-	- `scripts/` — migration and DB helper scripts (inspect, migrate_create_colleges, link_college_admins, fix_admin_roles_and_link)
+- React + Vite app in `frontend/`
+- Main navigation and route protection in `frontend/src/App.jsx`
+- Home page quick-start guide in `frontend/src/pages/HomePage.jsx`
+- Timetable generation UI in `frontend/src/pages/Timetable.jsx`
+- Timetable settings UI in `frontend/src/pages/TimetableSettings.jsx`
+- Manual timetable editor in `frontend/src/pages/manual/ManualTimetable.jsx`
+- Saved timetable list in `frontend/src/pages/SavedTimetables.jsx`
 
-- `backend/solver/` — optional Python solver, containers, or worker configs
+### Backend
 
-Key flows and components
-------------------------
-- Authentication
-	- Login issues a JWT stored in an HTTP-only cookie; `auth` middleware validates tokens and sets `req.user`.
-	- Admin tokens contain a `collegeId` (for normal admins). Superadmin tokens have no default collegeId and must supply `x-college-id` header when acting-as a college.
+- Express API in `backend/`
+- Mongoose models for colleges, admins, faculties, subjects, classes, allocations, settings, and timetable results
+- College-scoped API middleware
+- Superadmin routes mounted separately under `/api/superadmin`
+- Generator data preparation in `backend/services/generator/prepareGeneratorData.js`
+- Timetable generation endpoints in `backend/routes/api/timetable.js`
+- Manual timetable endpoints in `backend/routes/timetableManual.js`
+- Optional solver code under `backend/solver/`
 
-- Superadmin / act-as
-	- Superadmins use the navbar selector to select a `collegeId`; the frontend stores this in `localStorage.selectedCollegeId` and the axios instance attaches it as `x-college-id` to requests so tenant-scoped endpoints receive a college context.
-	- Superadmin routes are mounted under `/api/superadmin` on the backend.
+## Key User Flows
 
-- Timetable data flow
-	- Admins create classes, subjects, faculties, and teacher-subject combos; assignments map classes to subjects and teachers.
-	- Run generator via backend service which enforces constraints and returns a `TimetableResult` persisted to DB.
+1. Log in as an admin or superadmin.
+2. Add master data: faculties, subjects, and classes.
+3. Create teacher-subject combinations and teaching allocations.
+4. Configure timetable constraints on the settings page.
+5. Run health checks and generate a timetable.
+6. Review one or more generated options.
+7. Save the selected timetable or open it in the manual editor.
+8. Export or revisit saved timetables later.
 
-Running the project (development)
---------------------------------
-Prerequisites
-- Node.js 18+ and npm
-- MongoDB instance (local or Atlas)
+## Superadmin Flow
 
-Backend
-1. Configure env (see `backend/env.js` or set environment variables):
-	 - `MONGO_URI` connection string
-	 - `MONGO_DB_NAME` (optional)
-	 - `JWT_SECRET` (for token signing)
+Superadmins can:
 
-2. Start backend
+- Create and manage colleges
+- Create and manage admins
+- Use the navbar "Act as" selector to work inside a specific college context
+
+When acting as a college, the frontend stores the selected college id and sends it with API requests so tenant-scoped endpoints receive the correct context.
+
+## Timetable Generation Features
+
+The timetable screen supports:
+
+- Per-user, per-college generation settings
+- Constraint presets and advanced solver tuning
+- Teacher availability and preference merging
+- Fixed slots
+- Multiple generated options
+- Class and faculty timetable views
+- Progress tracking for async generation jobs
+- Saved result persistence
+
+The manual timetable editor supports:
+
+- Drag-and-drop slot movement
+- Slot validation before moves
+- Locking and unlocking slots
+- Auto-fill for a class
+- Saving changes back to a timetable record
+
+## Project Structure
+
+- `frontend/` - UI
+- `backend/` - API, data models, generator services, and manual timetable tools
+- `backend/solver/` - Python solver and worker utilities
+- `backend/scripts/` - migration and admin/college setup helpers
+
+## Development Setup
+
+### Prerequisites
+
+- Node.js 18+
+- npm
+- MongoDB
+
+### Backend
+
+Backend env vars:
+
+- `MONGO_URI` - MongoDB connection string
+- `MONGO_DB_NAME` - optional database name
+- `JWT_SECRET` - JWT signing secret
+- `CORS_ORIGINS` - optional comma-separated allowed frontend origins
+- `SOLVER_URL` - optional solver service base URL
+
+Backend scripts live in `backend/package.json`:
+
 ```powershell
 cd backend
 npm install
 npm run dev
 ```
 
-Frontend
-1. Configure `VITE_BACKEND_URL` in `.env` or your shell (should include `/api` suffix if desired):
-	 - Example: `VITE_BACKEND_URL=http://localhost:5000/api`
+### Frontend
 
-2. Start frontend
+Frontend env vars:
+
+- `VITE_BACKEND_URL` - API base URL, usually `http://localhost:5000/api`
+
+Frontend scripts live in `frontend/package.json`:
+
 ```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Open the Vite URL (commonly `http://localhost:5173`).
+Then open the Vite app, usually at `http://localhost:5173`.
 
-Environment variables
----------------------
-- `MONGO_URI` — MongoDB connection string
-- `MONGO_DB_NAME` — optional DB name (overrides default)
-- `JWT_SECRET` — JWT signing secret
-- `VITE_BACKEND_URL` — frontend runtime API base URL
+## API Highlights
 
-Migration & helper scripts
---------------------------
-Scripts under `backend/scripts/` help migrate legacy data and inspect DB. They generally default to a dry-run. Examples:
-- `inspect_db.mjs` — list collections, counts and sample docs
-- `migrate_create_colleges.mjs --apply` — find distinct `collegeId` values found in data and create `College` records
-- `fix_admin_roles_and_link.mjs --apply` — set missing admin roles and link colleges to admin `createdBy`
+- `/api/login`, `/api/logout`, `/api/me`
+- `/api/faculties`, `/api/subjects`, `/api/classes`
+- `/api/teacher-subject-combos`
+- `/api/class-subjects`, `/api/class-faculties`
+- `/api/teaching-allocations`
+- `/api/timetable-settings`
+- `/api/process-new-input`
+- `/api/generate`
+- `/api/health-check`
+- `/api/result/latest`
+- `/api/timetables`
+- `/api/timetable/:id`
+- `/api/timetable/:id/export/excel`
+- `/api/manual/*` for the manual editor
+- `/api/superadmin/*` for cross-college administration
 
-Important developer notes
--------------------------
-- Tokens: Superadmin tokens do not include `collegeId`. When a superadmin needs to act as a tenant, the frontend must set `selectedCollegeId` and axios will send `x-college-id`.
-- Middleware: `collegeScope` enforces the presence of a college context for tenant routes, but allows safe superadmin routes like `/api/superadmin`, `/api/me` and `/api/logout`.
-- Router mounting: superadmin API routes are mounted under `/api/superadmin` so tenant middleware does not block them.
+## Notes
 
-Troubleshooting
----------------
-- If tenant pages show empty results: ensure `selectedCollegeId` in localStorage and verify `College` records exist with matching `collegeId` values.
-- If login redirects unexpectedly: frontend `Login.jsx` now redirects to `/` (home) after successful login.
-- If CORS/403 issues appear: verify backend `auth` and `collegeScope` middleware logs and ensure `x-college-id` is present for superadmin requests.
+- The app uses cookie-based authentication.
+- Tenant routes are college-scoped, so superadmin requests must include a selected college context.
+- Timetable generation is async and stores job/result data in MongoDB.
+- The README intentionally reflects the current implementation in the repo rather than a generic product description.
 
-Contributing
-------------
-- Make feature branches off `main` and open PRs with clear descriptions.
-- Add small focused changes and update README or migration scripts when changing DB schema.
+## Related Files
 
-Appendix — Files of interest
----------------------------
-- Frontend:
-	- `frontend/src/api/axios.jsx` — axios instance & interceptors
-	- `frontend/src/components/Navbar2.jsx` — navbar and superadmin Act-as selector
-	- `frontend/src/pages/*` — pages and route components
-- Backend:
-	- `backend/models/` — Mongoose models
-	- `backend/middleware/` — auth and tenant enforcement
-	- `backend/routes/` — API routes (look for `superadmin.js` under `routes/api`)
+- [frontend/src/App.jsx](frontend/src/App.jsx)
+- [frontend/src/pages/HomePage.jsx](frontend/src/pages/HomePage.jsx)
+- [frontend/src/pages/Timetable.jsx](frontend/src/pages/Timetable.jsx)
+- [frontend/src/pages/TimetableSettings.jsx](frontend/src/pages/TimetableSettings.jsx)
+- [frontend/src/pages/manual/ManualTimetable.jsx](frontend/src/pages/manual/ManualTimetable.jsx)
+- [backend/routes/api/timetable.js](backend/routes/api/timetable.js)
+- [backend/services/generator/prepareGeneratorData.js](backend/services/generator/prepareGeneratorData.js)
 
-If you'd like, I can:
-- Remove other unused files and tidy imports.
-- Start the frontend dev server and confirm the UI changes locally.
-- Add a short `CONTRIBUTING.md` with common dev commands.
-
----
-Updated: April 13, 2026
+Updated: May 14, 2026

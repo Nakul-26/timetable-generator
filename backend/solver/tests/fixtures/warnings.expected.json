@@ -1,0 +1,23 @@
+{
+  "counts": {
+    "classes": 1,
+    "subjects": 1,
+    "faculties": 0,
+    "combos": 1,
+    "fixedSlots": 0
+  },
+  "schedule": {
+    "daysPerWeek": 6,
+    "hoursPerDay": 8,
+    "breakHours": []
+  },
+  "solver": {
+    "solutionCount": 2,
+    "timeLimitSec": 180.0
+  },
+  "warnings": [
+    "No faculties were supplied to the solver.",
+    "Combo combo-2 has no subject id and may be ignored.",
+    "Class ECE 2A has no assigned teacher-subject combos."
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "classes": [
+    {
+      "_id": "class-3",
+      "name": "CSE 3A",
+      "days_per_week": 5,
+      "subject_hours": {
+        "subj-3": 2,
+        "subj-4": 3
+      },
+      "assigned_teacher_subject_combos": ["combo-3", "combo-4"]
+    },
+    {
+      "_id": "class-4",
+      "name": "CSE 3B",
+      "days_per_week": "5",
+      "subject_hours": {
+        "subj-3": "1"
+      },
+      "assigned_teacher_subject_combos": ["combo-3"]
+    }
+  ],
+  "subjects": [
+    {
+      "_id": "subj-3",
+      "name": "Physics Lab",
+      "type": "lab",
+      "no_of_hours_per_week": 2
+    },
+    {
+      "_id": "subj-4",
+      "name": "Algorithms",
+      "type": "theory",
+      "no_of_hours_per_week": 3
+    }
+  ],
+  "faculties": [
+    {
+      "_id": "teach-3",
+      "name": "Teacher Three"
+    },
+    {
+      "_id": "teach-4",
+      "name": "Teacher Four"
+    }
+  ],
+  "combos": [
+    {
+      "_id": "combo-3",
+      "subject_id": "subj-3",
+      "faculty_ids": ["teach-3"],
+      "class_ids": ["class-3", "class-4"]
+    },
+    {
+      "_id": "combo-4",
+      "subject_id": "subj-4",
+      "faculty_ids": ["teach-4"],
+      "class_ids": ["class-3"]
+    }
+  ],
+  "fixedSlots": [],
+  "constraintConfig": {
+    "schedule": {
+      "daysPerWeek": 5,
+      "hoursPerDay": 8
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "counts": {
+    "classes": 1,
+    "subjects": 1,
+    "faculties": 1,
+    "combos": 1,
+    "fixedSlots": 1
+  },
+  "schedule": {
+    "daysPerWeek": 6,
+    "hoursPerDay": 8,
+    "breakHours": []
+  },
+  "solver": {
+    "solutionCount": 2,
+    "timeLimitSec": 180.0
+  },
+  "warnings": []
+}

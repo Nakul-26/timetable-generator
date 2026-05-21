@@ -1,0 +1,29 @@
+{
+  "classes": [
+    {
+      "_id": "class-2",
+      "name": "ECE 2A",
+      "days_per_week": 5,
+      "subject_hours": {
+        "subj-2": 3
+      }
+    }
+  ],
+  "subjects": [
+    {
+      "_id": "subj-2",
+      "name": "Signals",
+      "type": "theory",
+      "no_of_hours_per_week": 3
+    }
+  ],
+  "faculties": [],
+  "combos": [
+    {
+      "_id": "combo-2",
+      "class_ids": ["class-2"]
+    }
+  ],
+  "fixedSlots": [],
+  "constraintConfig": {}
+}

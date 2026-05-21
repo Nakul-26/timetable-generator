@@ -13,7 +13,16 @@ if str(_SOLVER_DIR) not in sys.path:
 
 from ortools.sat.python import cp_model
 
+from constraints.slot_constraints import (
+    add_class_slot_exclusivity,
+    add_teacher_slot_exclusivity,
+    build_class_occupancy_vars,
+    build_teacher_occupancy_vars,
+)
 from infra.logging_setup import get_logger
+from input.normalize import normalize_solver_payload
+from model.builder import SolverModelContext, build_solver_model_context, build_variable_preparation
+from model.precheck import validate_fixed_slots
 from solver_common import (
     BREAK,
     DEFAULT_SOLVER_TIME_LIMIT_SEC,
@@ -97,7 +106,13 @@ def _required_hours(class_obj: Dict[str, Any], subject_obj: Dict[str, Any]) -> i
     return int(subject_obj.get("no_of_hours_per_week") or 0)
 
 
-def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
+def solve_instance(
+    payload: Dict[str, Any],
+    model_context: Optional[SolverModelContext] = None,
+) -> Dict[str, Any]:
+    if model_context is None:
+        model_context = build_solver_model_context(normalize_solver_payload(payload))
+
     logger.info(
         "solve_instance started: keys=%d combos=%d classes=%d subjects=%d faculties=%d inputMode=%s daysPerWeek=%s hoursPerDay=%s",
         len(list(payload.keys() or [])),
@@ -202,11 +217,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     HOURS_PER_DAY = int(
         _cfg_get(constraint_config, ["schedule", "hoursPerDay"], payload.get("HOURS_PER_DAY") or 8)
     )
-    BREAK_HOURS = [
-        int(h) for h in (
-            _cfg_get(constraint_config, ["schedule", "breakHours"], payload.get("BREAK_HOURS") or [])
-        )
-    ]
+    BREAK_HOURS = sorted({slot.hour for slot in model_context.break_slots})
     break_hours_set = set(BREAK_HOURS)
 
     def _safe_int(value: Any) -> Optional[int]:
@@ -714,70 +725,21 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     # Validate fixed slots early (non-fatal): keep only valid ones and continue.
-    valid_fixed_slots: List[Dict[str, Any]] = []
-    fixed_slot_warnings: List[str] = []
-    for fs in fixed_slots:
-        class_id = str(fs.get("class"))
-        combo_id = str(fs.get("combo"))
-        try:
-            day = int(fs.get("day"))
-            hour = int(fs.get("hour"))
-        except Exception:
-            fixed_slot_warnings.append(f"Fixed slot has non-numeric day/hour: {fs}")
-            continue
-
-        if class_id not in class_by_id:
-            fixed_slot_warnings.append(f"Fixed slot class not found: {class_id}")
-            continue
-        if combo_id not in combo_by_id:
-            fixed_slot_warnings.append(f"Fixed slot combo not found: {combo_id}")
-            continue
-        if day < 0 or day >= _class_days_per_week(class_by_id[class_id]):
-            fixed_slot_warnings.append(
-                f"Fixed slot day out of range for class {class_id}: {day}"
-            )
-            continue
-        if hour < 0 or hour >= HOURS_PER_DAY:
-            fixed_slot_warnings.append(f"Fixed slot hour out of range: {hour}")
-            continue
-        if hour in break_hours_set:
-            fixed_slot_warnings.append(
-                f"Fixed slot falls in break hour for class {class_id} at {day},{hour}"
-            )
-            continue
-        combo = combo_by_id.get(combo_id)
-        combo_class_ids = combo.get("class_ids", []) if combo else []
-        if combo and combo_class_ids and class_id not in combo_class_ids:
-            fixed_slot_warnings.append(
-                f"Fixed slot class {class_id} is not part of combo {combo_id}"
-            )
-            continue
-        if combo and any(
-            day >= _class_days_per_week(class_by_id[cid])
-            for cid in combo_class_ids
-            if cid in class_by_id
-        ):
-            fixed_slot_warnings.append(
-                f"Fixed slot day out of range for one or more classes in combo {combo_id}: {day}"
-            )
-            continue
-        if teacher_avail_enabled and teacher_avail_hard:
-            if combo:
-                subj = subject_by_id.get(combo.get("subject_id"))
-                block = lab_block_size if subj and _is_lab_subject(subj) else theory_block_size
-                availability_conflict = False
-                for fid in combo.get("faculty_ids", []):
-                    if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, min(HOURS_PER_DAY, hour + block))):
-                        availability_conflict = True
-                        break
-                if availability_conflict:
-                    fixed_slot_warnings.append(
-                        f"Fixed slot violates teacher availability for class {class_id} at {day},{hour}"
-                    )
-                    continue
-        valid_fixed_slots.append(
-            {"class": class_id, "day": day, "hour": hour, "combo": combo_id}
-        )
+    valid_fixed_slots, fixed_slot_warnings = validate_fixed_slots(
+        fixed_slots=fixed_slots,
+        class_by_id=class_by_id,
+        combo_by_id=combo_by_id,
+        subject_by_id=subject_by_id,
+        hours_per_day=HOURS_PER_DAY,
+        break_hours_set=break_hours_set,
+        class_days_per_week=_class_days_per_week,
+        is_lab_subject=_is_lab_subject,
+        teacher_unavailable=(
+            _is_teacher_unavailable if teacher_avail_enabled and teacher_avail_hard else None
+        ),
+        theory_block_size=theory_block_size,
+        lab_block_size=lab_block_size,
+    )
 
     model = cp_model.CpModel()
 
@@ -788,17 +750,22 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
     subject_covers: Dict[Tuple[str, int, int, str], List[cp_model.IntVar]] = {}
     unmet_requirements: List[Dict[str, Any]] = []
     objective_terms: List[cp_model.LinearExpr] = []
-    valid_hours = [h for h in range(HOURS_PER_DAY) if h not in break_hours_set]
+    valid_hours = [slot.hour for slot in model_context.slots_by_day.get(0, ()) if slot.hour not in break_hours_set]
     hour_rank = {h: i for i, h in enumerate(valid_hours)}
     valid_hour_count = len(valid_hours)
     fixed_slot_keys = {
         (str(fs.get("combo")), int(fs.get("day")), int(fs.get("hour")))
         for fs in valid_fixed_slots
     }
-    combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {}
-    combo_search_rank: Dict[str, int] = {}
-    class_slot_pressure: Dict[Tuple[str, int, int], int] = {}
-    teacher_slot_pressure: Dict[Tuple[str, int, int], int] = {}
+    variable_prep = build_variable_preparation(
+        model_context,
+        fixed_slot_keys=fixed_slot_keys,
+        max_candidates_per_combo=max_candidates_per_combo,
+    )
+    combo_candidate_starts: Dict[str, List[Tuple[int, int]]] = {
+        combo_id: [(slot.day, slot.hour) for slot in slots]
+        for combo_id, slots in variable_prep.combo_candidate_starts.items()
+    }
 
     for combo in combos:
         combo_id = combo["_id"]
@@ -828,27 +795,17 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                     required_hours_list,
                 )
             continue
-        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
-        max_days_for_combo = min(
-            [_class_days_per_week(class_by_id[cid]) for cid in class_ids] or [DAYS_PER_WEEK]
-        )
-        candidate_starts: List[Tuple[int, int]] = []
-        rejected_break = 0
-        rejected_overflow = 0
-        rejected_split_break = 0
-        for day in range(max_days_for_combo):
-            for hour in range(HOURS_PER_DAY):
-                if hour in break_hours_set:
-                    rejected_break += 1
-                    continue
-                if hour + block > HOURS_PER_DAY:
-                    rejected_overflow += 1
-                    continue
-                if any(h in break_hours_set for h in range(hour, hour + block)):
-                    rejected_split_break += 1
-                    continue
-
-                candidate_starts.append((day, hour))
+        candidate_info = model_context.candidates_by_combo.get(combo_id)
+        if candidate_info is None:
+            if DEBUG:
+                logger.debug("[solve_instance] Skipping combo %s: no prepared candidates", combo_id)
+            continue
+        block = candidate_info.block_size
+        max_days_for_combo = candidate_info.max_days
+        candidate_starts = [(slot.day, slot.hour) for slot in candidate_info.candidate_starts]
+        rejected_break = candidate_info.rejected_break_starts
+        rejected_overflow = candidate_info.rejected_overflow_starts
+        rejected_split_break = candidate_info.rejected_split_break_starts
 
         if debug_labs and _is_lab_subject(subj):
             logger.debug(
@@ -885,47 +842,7 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
             continue
 
-        combo_candidate_starts[combo_id] = candidate_starts
-        for day, hour in candidate_starts:
-            for h in range(hour, hour + block):
-                for class_id in class_ids:
-                    key = (class_id, day, h)
-                    class_slot_pressure[key] = class_slot_pressure.get(key, 0) + 1
-                for fid in combo.get("faculty_ids", []):
-                    key = (fid, day, h)
-                    teacher_slot_pressure[key] = teacher_slot_pressure.get(key, 0) + 1
-
-        required_hours = min(
-            [required_hours_by_class_subject[cid].get(combo["subject_id"], 0) for cid in class_ids] or [0]
-        )
-        availability_slots = sum(
-            1
-            for fid in combo.get("faculty_ids", [])
-            for day, hour in candidate_starts
-            if any(_is_teacher_unavailable(fid, day, h) for h in range(hour, hour + block))
-        )
-        fixed_bonus = sum(
-            1 for day, hour in candidate_starts if (combo_id, day, hour) in fixed_slot_keys
-        )
-        is_lab = _is_lab_subject(subj)
-        combo_search_rank[combo_id] = (
-            (10000 if is_lab else 0)
-            + (9000 if fixed_bonus > 0 else 0)
-            + (7000 if len(class_ids) > 1 else 0)
-            + (6000 if len(combo.get("faculty_ids", [])) <= 1 else 0)
-            + (required_hours * 200)
-            + (availability_slots * 25)
-            - (len(candidate_starts) * 10)
-        )
-
-    sorted_combos = sorted(
-        combos,
-        key=lambda combo: (
-            -combo_search_rank.get(combo["_id"], -10**9),
-            len(combo_candidate_starts.get(combo["_id"], [])),
-            combo["_id"],
-        ),
-    )
+    sorted_combos = [combo_by_id[combo_id] for combo_id in variable_prep.sorted_combo_ids if combo_id in combo_by_id]
 
     search_ordered_vars: List[cp_model.IntVar] = []
     for combo in sorted_combos:
@@ -949,36 +866,14 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if not subj:
             continue
-        block = lab_block_size if _is_lab_subject(subj) else theory_block_size
-        ordered_starts = sorted(
-            candidate_starts,
-            key=lambda slot: (
-                -int((combo_id, slot[0], slot[1]) in fixed_slot_keys),
-                -sum(
-                    class_slot_pressure.get((class_id, slot[0], h), 0)
-                    for h in range(slot[1], slot[1] + block)
-                    for class_id in class_ids
-                ),
-                -sum(
-                    teacher_slot_pressure.get((fid, slot[0], h), 0)
-                    for h in range(slot[1], slot[1] + block)
-                    for fid in combo.get("faculty_ids", [])
-                ),
-                slot[0],
-                hour_rank.get(slot[1], slot[1]),
-            ),
-        )
-        # Ensure labs have a full search space regardless of global limits
-        actual_max = 0 if _is_lab_subject(subj) else max_candidates_per_combo
-        if actual_max > 0 and len(ordered_starts) > actual_max:
-            fixed_starts = [
-                slot for slot in ordered_starts if (combo_id, slot[0], slot[1]) in fixed_slot_keys
-            ]
-            non_fixed_starts = [
-                slot for slot in ordered_starts if (combo_id, slot[0], slot[1]) not in fixed_slot_keys
-            ]
-            remaining_capacity = max(0, actual_max - len(fixed_starts))
-            ordered_starts = fixed_starts + non_fixed_starts[:remaining_capacity]
+        candidate_info = model_context.candidates_by_combo.get(combo_id)
+        if candidate_info is None:
+            continue
+        block = candidate_info.block_size
+        ordered_starts = [
+            (slot.day, slot.hour)
+            for slot in variable_prep.ordered_starts_by_combo.get(combo_id, ())
+        ]
         for day, hour in ordered_starts:
             violates_availability = False
             if teacher_avail_enabled:
@@ -1014,58 +909,39 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
                 for fid in combo.get("faculty_ids", []):
                     teacher_covers.setdefault((fid, day, h), []).append(var)
 
-    # Constraint: at most one lesson per class per hour
-    for cls in classes:
-        class_id = cls["_id"]
-        days = _class_days_per_week(cls)
-        for day in range(days):
-            for hour in range(HOURS_PER_DAY):
-                if hour in break_hours_set:
-                    continue
-                vars_here = covers.get((class_id, day, hour), [])
-                if vars_here:
-                    model.AddAtMostOne(vars_here)
+    add_class_slot_exclusivity(
+        model=model,
+        classes=classes,
+        covers=covers,
+        hours_per_day=HOURS_PER_DAY,
+        break_hours_set=break_hours_set,
+        class_days_per_week=_class_days_per_week,
+    )
+    add_teacher_slot_exclusivity(
+        model=model,
+        faculty_ids=faculty_ids,
+        teacher_covers=teacher_covers,
+        days_per_week=DAYS_PER_WEEK,
+        hours_per_day=HOURS_PER_DAY,
+        break_hours_set=break_hours_set,
+    )
 
-    # Constraint: teacher clash
-    for fid in faculty_ids:
-        for day in range(DAYS_PER_WEEK):
-            for hour in range(HOURS_PER_DAY):
-                if hour in break_hours_set:
-                    continue
-                vars_here = teacher_covers.get((fid, day, hour), [])
-                if vars_here:
-                    model.AddAtMostOne(vars_here)
-
-    # Occupancy variables per class and faculty per slot (0/1)
-    class_occ: Dict[Tuple[str, int, int], cp_model.IntVar] = {}
-    for cls in classes:
-        class_id = cls["_id"]
-        days = _class_days_per_week(cls)
-        for day in range(days):
-            for hour in range(HOURS_PER_DAY):
-                if hour in break_hours_set:
-                    continue
-                occ = model.NewBoolVar(f"class_occ_{class_id}_{day}_{hour}")
-                vars_here = covers.get((class_id, day, hour), [])
-                if vars_here:
-                    model.Add(occ == sum(vars_here))
-                else:
-                    model.Add(occ == 0)
-                class_occ[(class_id, day, hour)] = occ
-
-    teacher_occ: Dict[Tuple[str, int, int], cp_model.IntVar] = {}
-    for fid in faculty_ids:
-        for day in range(DAYS_PER_WEEK):
-            for hour in range(HOURS_PER_DAY):
-                if hour in break_hours_set:
-                    continue
-                occ = model.NewBoolVar(f"teacher_occ_{fid}_{day}_{hour}")
-                vars_here = teacher_covers.get((fid, day, hour), [])
-                if vars_here:
-                    model.Add(occ == sum(vars_here))
-                else:
-                    model.Add(occ == 0)
-                teacher_occ[(fid, day, hour)] = occ
+    class_occ = build_class_occupancy_vars(
+        model=model,
+        classes=classes,
+        covers=covers,
+        hours_per_day=HOURS_PER_DAY,
+        break_hours_set=break_hours_set,
+        class_days_per_week=_class_days_per_week,
+    )
+    teacher_occ = build_teacher_occupancy_vars(
+        model=model,
+        faculty_ids=faculty_ids,
+        teacher_covers=teacher_covers,
+        days_per_week=DAYS_PER_WEEK,
+        hours_per_day=HOURS_PER_DAY,
+        break_hours_set=break_hours_set,
+    )
 
     # Weekly subject hours: configurable hard/soft behavior.
     x_by_class_subject: Dict[Tuple[str, str], List[Tuple[cp_model.IntVar, int]]] = {}
@@ -1353,24 +1229,10 @@ def solve_instance(payload: Dict[str, Any]) -> Dict[str, Any]:
             candidate_starts = combo_candidate_starts.get(combo_id, [])
             if not candidate_starts:
                 continue
-            ordered_starts = sorted(
-                candidate_starts,
-                key=lambda slot: (
-                    -int((combo_id, slot[0], slot[1]) in fixed_slot_keys),
-                    -sum(
-                        class_slot_pressure.get((class_id, slot[0], h), 0)
-                        for h in range(slot[1], slot[1] + block)
-                        for class_id in class_ids
-                    ),
-                    -sum(
-                        teacher_slot_pressure.get((fid, slot[0], h), 0)
-                        for h in range(slot[1], slot[1] + block)
-                        for fid in combo.get("faculty_ids", [])
-                    ),
-                    slot[0],
-                    hour_rank.get(slot[1], slot[1]),
-                ),
-            )
+            ordered_starts = [
+                (slot.day, slot.hour)
+                for slot in variable_prep.ordered_starts_by_combo.get(combo_id, ())
+            ]
 
             while min(
                 remaining_hours.get(class_id, {}).get(combo["subject_id"], 0)
