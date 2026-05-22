@@ -192,13 +192,20 @@ export async function saveTimetable({
   collegeId,
   userId = null,
   savedTimetableId = null,
+  isBuffer = false,
 }) {
   const isEditedDraft = !!state.generatedFromId;
+  const status = isBuffer
+    ? "session_buffer"
+    : isEditedDraft
+      ? "edited"
+      : state.lifecycleStatus || "draft";
+
   const payload = {
     collegeId,
     name,
     source: "manual",
-    status: isEditedDraft ? "edited" : (state.lifecycleStatus || "draft"),
+    status,
     generated_from_id: state.generatedFromId || null,
     parent_timetable_id: state.parentTimetableId || null,
     edit_version: state.editVersion || 1,
@@ -213,6 +220,20 @@ export async function saveTimetable({
     config: state.config,
     version: state.version,
   };
+
+  if (isBuffer && userId) {
+    // If we are saving a buffer, try to find an existing buffer for this user and source
+    return TimetableResult.findOneAndUpdate(
+      {
+        collegeId,
+        created_by: userId,
+        generated_from_id: state.generatedFromId || null,
+        status: "session_buffer",
+      },
+      payload,
+      { upsert: true, new: true }
+    );
+  }
 
   if (savedTimetableId) {
     const updated = await TimetableResult.findOneAndUpdate(

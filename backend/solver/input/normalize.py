@@ -118,7 +118,7 @@ def _normalize_subject_id(raw: Dict[str, Any]) -> str:
     return _clean_id(raw.get("subject_id") or raw.get("subjectId") or subject_ref)
 
 
-def _normalize_class(raw: Dict[str, Any]) -> ClassEntity:
+def _normalize_class(raw: Dict[str, Any], global_days_per_week: int) -> ClassEntity:
     class_id = _clean_id(raw.get("_id") or raw.get("id"))
     subject_hours_raw = raw.get("subject_hours")
     subject_hours: Dict[str, int] = {}
@@ -132,10 +132,15 @@ def _normalize_class(raw: Dict[str, Any]) -> ClassEntity:
     assigned_combos_raw = raw.get("assigned_teacher_subject_combos") or raw.get("assignedTeacherSubjectCombos")
     faculties_raw = raw.get("faculties") or raw.get("faculty_ids") or raw.get("facultyIds")
 
+    # Fallback to global days if class-specific one is missing or 0
+    days_val = _to_int(raw.get("days_per_week") or raw.get("daysPerWeek"), 0)
+    if days_val <= 0:
+        days_val = global_days_per_week
+
     return ClassEntity(
         id=class_id,
         name=str(raw.get("name") or class_id),
-        days_per_week=max(1, _to_int(raw.get("days_per_week") or raw.get("daysPerWeek"), 0) or 0),
+        days_per_week=max(1, days_val),
         subject_hours=subject_hours,
         assigned_teacher_subject_combos=_dedupe_preserve_order(_as_list(assigned_combos_raw)),
         faculties=_dedupe_preserve_order(_as_list(faculties_raw)),
@@ -222,7 +227,7 @@ def normalize_solver_payload(payload: Dict[str, Any] | None) -> NormalizedSolver
 
     teachers = tuple(_normalize_teacher(item) for item in faculties_raw if isinstance(item, dict))
     subjects = tuple(_normalize_subject(item) for item in subjects_raw if isinstance(item, dict))
-    classes = tuple(_normalize_class(item) for item in classes_raw if isinstance(item, dict))
+    classes = tuple(_normalize_class(item, days_per_week) for item in classes_raw if isinstance(item, dict))
     combos = tuple(_normalize_combo(item) for item in combos_raw if isinstance(item, dict))
     fixed_slots = tuple(_normalize_fixed_slot(item) for item in fixed_slots_raw if isinstance(item, dict))
 

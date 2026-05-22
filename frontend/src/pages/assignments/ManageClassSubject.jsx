@@ -118,6 +118,11 @@ const ManageClassSubject = () => {
     return (
         <div className="manage-container">
             <h2>Manage Class-Subject Assignments</h2>
+            <div className="success-message" style={{ marginBottom: 20, backgroundColor: '#e7f3ff', color: '#004085', border: '1px solid #b8daff' }}>
+                <strong>MAPPING MODE:</strong> Use this page to define bulk mappings. After saving, go to 
+                <a href="/teaching-allocations" style={{ marginLeft: 5, fontWeight: 'bold' }}>Manage Allocations</a> 
+                and click <strong>"Sync from Mappings"</strong> to automatically generate teaching assignments.
+            </div>
 
             <form onSubmit={handleAdd} className="add-form">
                 <h3>Add New Assignment</h3>

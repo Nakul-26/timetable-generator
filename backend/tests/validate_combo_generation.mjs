@@ -137,12 +137,20 @@ function validateCombinedClass() {
     ],
   });
 
-  const combined = data.combos.find((combo) => combo.subject_id === "math");
-  assert(Boolean(combined), "expected combined class combo");
+  const combined = data.combos.find((combo) => String(combo.subject_id).startsWith("VIRTUAL_COMBINED_"));
+  assert(Boolean(combined), "expected combined class combo (virtual)");
   assert(combined.class_ids.join(",") === "class-a,class-b", "combined combo should occupy both classes");
   assert(combined.hours_per_week === 4, "combined combo should preserve weekly hours");
-  assert(findClass(data, "class-a").subject_hours.math === 4, "class-a should require math");
-  assert(findClass(data, "class-b").subject_hours.math === 4, "class-b should require math");
+  
+  const virtualSub = data.subjects.find(s => String(s._id) === String(combined.subject_id));
+  if (!virtualSub) {
+    console.log("Available subjects:", data.subjects.map(s => s._id));
+    assert(false, `could not find virtual subject with ID ${combined.subject_id}`);
+  }
+  assert(virtualSub.name.includes("math-ab"), `virtual subject name should include 'math-ab', got ${virtualSub.name}`);
+  
+  assert(findClass(data, "class-a").subject_hours[combined.subject_id] === 4, "class-a should require virtual math hours");
+  assert(findClass(data, "class-b").subject_hours[combined.subject_id] === 4, "class-b should require virtual math hours");
 }
 
 function validateNoTeacherSubject() {
@@ -157,12 +165,57 @@ function validateNoTeacherSubject() {
   assert(findClass(data, "class-a").subject_hours.library === 1, "class-a should require no-teacher hours");
 }
 
+function validateExplicitNoTeacher() {
+  const data = convert({
+    teacherSubjectCombos: [
+      {
+        teacherId: null,
+        subjectId: "library",
+        classIds: ["class-a", "class-b"],
+        hoursPerWeek: 2,
+        combinedClassGroupId: "lib-ab",
+      },
+    ],
+  });
+
+  const combined = data.combos.find((combo) => String(combo.subject_id).startsWith("VIRTUAL_COMBINED_"));
+  assert(Boolean(combined), "expected explicit no-teacher combo (virtual)");
+  assert(combined.faculty_ids.length === 0, "explicit no-teacher combo should have empty faculty_ids");
+  assert(combined.class_ids.join(",") === "class-a,class-b", "explicit no-teacher combo should occupy both classes");
+}
+
+function validateNoTeacherInElective() {
+  const data = convert({
+    teacherSubjectCombos: [
+      {
+        type: "ELECTIVE",
+        electiveGroupId: "eg-nt",
+        subjectId: "ai",
+        classIds: ["class-a"],
+        hoursPerWeek: 3,
+        subjectTeacherPairs: [
+          { subjectId: "library", teacherId: null }, // library is no_teacher
+          { subjectId: "cloud", teacherId: "teacher-b" },
+        ],
+      },
+    ],
+  });
+
+  const electiveCombos = data.combos.filter((combo) =>
+    String(combo.subject_id).startsWith("VIRTUAL_DIRECT_ELECTIVE_")
+  );
+  assert(electiveCombos.length === 1, `expected one grouped elective combo, got ${electiveCombos.length}`);
+  assert(electiveCombos[0].faculty_ids.join(",") === "teacher-b", "elective combo should only include Teacher B (Library has no teacher)");
+}
+
 for (const validate of [
   validateDirectTheory,
   validateDirectElectiveBlock,
   validateMultiTeacherLab,
   validateCombinedClass,
   validateNoTeacherSubject,
+  validateExplicitNoTeacher,
+  validateNoTeacherInElective,
 ]) {
   validate();
 }

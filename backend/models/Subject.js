@@ -34,14 +34,6 @@ const SubjectSchema = new Schema(
       type: Number,
       min: 1,
       default: null,
-    },
-    combined_classes: {
-      type: [String], // keep as String if you are using class codes
-      default: [],
-    },
-    isElective: { // New field
-      type: Boolean,
-      default: false,
     }
   },
   { timestamps: true }

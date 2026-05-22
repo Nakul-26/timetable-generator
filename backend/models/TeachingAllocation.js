@@ -51,7 +51,7 @@ const TeachingAllocationSchema = new Schema(
     ],
     type: {
       type: String,
-      enum: ["NORMAL", "LAB", "ELECTIVE"],
+      enum: ["NORMAL", "LAB", "ELECTIVE", "ELECTIVE_LAB"],
       default: "NORMAL",
       index: true,
     },
@@ -74,6 +74,16 @@ const TeachingAllocationSchema = new Schema(
       default: null,
       trim: true,
       index: true,
+    },
+    source: {
+      type: String,
+      enum: ["DIRECT", "MAPPING_SYNC"],
+      default: "DIRECT",
+      index: true,
+    },
+    sourceMappings: {
+      classSubjectId: { type: Schema.Types.ObjectId, ref: "ClassSubject" },
+      teacherSubjectIds: [{ type: Schema.Types.ObjectId, ref: "TeacherSubjectCombination" }],
     },
   },
   { timestamps: true }

@@ -56,6 +56,7 @@ function Timetable() {
   const [faculties, setFaculties] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [combos, setCombos] = useState([]);
+  const [fixedSlotCombos, setFixedSlotCombos] = useState([]);
   const [classSubjects, setClassSubjects] = useState([]);
 
   // Filters
@@ -186,7 +187,7 @@ function Timetable() {
 
     for (const classId of allClassIds) {
       const classOptions = [];
-      for (const combo of combos) {
+      for (const combo of fixedSlotCombos) {
         const classIds = Array.isArray(combo.class_ids)
           ? combo.class_ids.map((id) => String(id))
           : [];
@@ -212,7 +213,7 @@ function Timetable() {
     }
 
     return out;
-  }, [classes, combos, subjectById, facultyById]);
+  }, [classes, fixedSlotCombos, subjectById, facultyById]);
 
   const normalizeTableShape = useCallback((table) => {
     if (!table || typeof table !== "object") return null;
@@ -375,18 +376,20 @@ function Timetable() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [classRes, facRes, subRes, comboRes, classSubjectRes] = await Promise.all([
+      const [classRes, facRes, subRes, comboRes, classSubjectRes, fixedComboRes] = await Promise.all([
         axios.get("/classes"),
         axios.get("/faculties"),
         axios.get("/subjects"),
         axios.get("/teacher-subject-combos"),
         axios.get("/class-subjects"),
+        api.get("/fixed-slot-combos"),
       ]);
       setClasses(classRes.data);
       setFaculties(facRes.data);
       setSubjects(subRes.data);
       setCombos(comboRes.data || []);
       setClassSubjects(classSubjectRes.data || []);
+      setFixedSlotCombos(fixedComboRes.data?.combos || []);
     } catch {
       setError("Failed to fetch master data.");
     }
@@ -1177,6 +1180,14 @@ function Timetable() {
                 <tr key={d}>
                   <td>Day {d + 1}</td>
                   {Array.from({ length: HOURS_PER_DAY }).map((_, h) => {
+                    const isBreak = (constraintConfig?.schedule?.breakHours || []).map(Number).includes(h);
+                    if (isBreak) {
+                      return (
+                        <td key={h} className="tt-break-cell">
+                          <span className="tt-break-label">BREAK</span>
+                        </td>
+                      );
+                    }
                     const selected =
                       fixedSlots[classId]?.[d]?.[h] || "";
                     return (
@@ -1343,9 +1354,9 @@ function Timetable() {
     const filteredAssignmentHours = Object.entries(assignmentRequiredHours || {}).reduce(
       (acc, [subjectId, hours]) => {
         const subject = subjectById.get(String(subjectId));
-        if (hasVirtualElectives && subject?.isElective) {
-          return acc;
-        }
+        // If we have virtual electives, we should be careful about double counting
+        // component subjects. For now, we allow them unless we have a better way
+        // to detect components without the isElective flag.
         acc[subjectId] = hours;
         return acc;
       },
@@ -1662,24 +1673,49 @@ function Timetable() {
       </div>
 
       {healthReport ? (
-        <div className="tt-section-card">
-          <h3>Constraint Health Report</h3>
+        <div className="tt-section-card tt-audit-card">
+          <div className="tt-section-header">
+            <h3>Pre-Generation Audit</h3>
+            <span className={`tt-status-badge ${healthReport.ok ? "status-ok" : "status-error"}`}>
+              {healthReport.ok ? "Passed" : "Action Required"}
+            </span>
+          </div>
           <p className="tt-subtext">
-            Status: <b>{healthReport.ok ? "Healthy" : "Needs Attention"}</b>
+            Automatic check of your data health before starting the solver.
           </p>
-          <div className="filters-container">
-            <span>Class Required: {healthReport.summary?.totalClassRequiredHours ?? 0}</span>
-            <span>Class Capacity: {healthReport.summary?.totalClassCapacityHours ?? 0}</span>
-            <span>Errors: {healthReport.summary?.errors ?? 0}</span>
-            <span>Warnings: {healthReport.summary?.warnings ?? 0}</span>
+          
+          <div className="tt-audit-summary-grid">
+             <div className="tt-audit-stat">
+                <span className="tt-audit-label">Required Hours</span>
+                <span className="tt-audit-value">{healthReport.summary?.totalClassRequiredHours ?? 0}</span>
+             </div>
+             <div className="tt-audit-stat">
+                <span className="tt-audit-label">Total Capacity</span>
+                <span className="tt-audit-value">{healthReport.summary?.totalClassCapacityHours ?? 0}</span>
+             </div>
+             <div className="tt-audit-stat">
+                <span className="tt-audit-label">Errors</span>
+                <span className={`tt-audit-value ${healthReport.summary?.errors > 0 ? "text-error" : ""}`}>
+                  {healthReport.summary?.errors ?? 0}
+                </span>
+             </div>
+             <div className="tt-audit-stat">
+                <span className="tt-audit-label">Warnings</span>
+                <span className={`tt-audit-value ${healthReport.summary?.warnings > 0 ? "text-warning" : ""}`}>
+                  {healthReport.summary?.warnings ?? 0}
+                </span>
+             </div>
+          </div>
+
+          <div className="filters-container tt-top-gap">
             <select
               value={healthSeverityFilter}
               onChange={(e) => setHealthSeverityFilter(e.target.value)}
             >
-              <option value="all">All Severities</option>
-              <option value="error">Errors</option>
-              <option value="warning">Warnings</option>
-              <option value="info">Info</option>
+              <option value="all">All Issues</option>
+              <option value="error">Errors Only</option>
+              <option value="warning">Warnings Only</option>
+              <option value="info">Info Only</option>
             </select>
           </div>
           {isGenerateBlockedByHealth ? (

@@ -197,13 +197,19 @@ export function buildConstraintHealthReport({
       classRequired += req;
 
       const eligibleSet = eligibleBySubject.get(subjectId) || new Set();
+      const subjectType = String(subject?.type || "").toLowerCase();
+      const isNoTeacher = subjectType === "no_teacher";
+
       if (eligibleSet.size === 0) {
-        warnings.push({
-          severity: "error",
-          type: "missing_coverage",
-          message: `No eligible teacher-subject combo for class "${cls.name || classId}" subject "${subject.name || subjectId}".`,
-        });
-        continue;
+        const hasCombos = eligibleBySubject.has(subjectId);
+        if (!isNoTeacher || !hasCombos) {
+          warnings.push({
+            severity: "error",
+            type: "missing_coverage",
+            message: `No eligible teacher-subject combo for class "${cls.name || classId}" subject "${subject.name || subjectId}".`,
+          });
+          continue;
+        }
       }
 
       // Upper bound (legacy metric): a teacher might take all required hours if selected.

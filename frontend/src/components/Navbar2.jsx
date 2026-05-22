@@ -71,21 +71,27 @@ const Navbar = () => {
       <div className={`navbar-links ${isMenuOpen ? "open" : ""}`}>
         {showTenantLinks && (
           <>
-            <NavLink to="/" className="nav-item" onClick={() => setIsMenuOpen(false)}>Home</NavLink>
+            <NavLink to="/home" className="nav-item" onClick={() => setIsMenuOpen(false)}>Home</NavLink>
             <NavLink to="/faculties" className="nav-item" onClick={() => setIsMenuOpen(false)}>Faculties</NavLink>
             <NavLink to="/subjects" className="nav-item" onClick={() => setIsMenuOpen(false)}>Subjects</NavLink>
             <NavLink to="/classes" className="nav-item" onClick={() => setIsMenuOpen(false)}>Classes</NavLink>
-            <NavLink to="/class-subjects" className="nav-item" onClick={() => setIsMenuOpen(false)}>Class Subjects</NavLink>
-            <NavLink to="/class-faculties" className="nav-item" onClick={() => setIsMenuOpen(false)}>Class Faculties</NavLink>
-            <NavLink to="/teaching-allocations" className="nav-item" onClick={() => setIsMenuOpen(false)}>Class - Subject - Teacher</NavLink>
-            <NavLink to="/class-elective-subjects" className="nav-item" onClick={() => setIsMenuOpen(false)}>Elective Subjects</NavLink>
-            <NavLink to="/teacher-subject-combos" className="nav-item" onClick={() => setIsMenuOpen(false)}>Teacher Subjects</NavLink>
-            <NavLink to="/teacher-availability" className="nav-item" onClick={() => setIsMenuOpen(false)}>Teacher Availability</NavLink>
-            <NavLink to="/teacher-preferences" className="nav-item" onClick={() => setIsMenuOpen(false)}>Teacher Preferences</NavLink>
-            <NavLink to="/timetable" className="nav-item" onClick={() => setIsMenuOpen(false)}>Timetable</NavLink>
-            <NavLink to="/timetable/settings" className="nav-item" onClick={() => setIsMenuOpen(false)}>Timetable Settings</NavLink>
-            <NavLink to="/generation-payload" className="nav-item" onClick={() => setIsMenuOpen(false)}>Payload Viewer</NavLink>
-            <NavLink to="/saved-timetables" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generated Timetables</NavLink>
+            
+            {/* <div className="nav-section-label">Allocations</div> */}
+            <NavLink to="/teaching-allocations" className="nav-item" onClick={() => setIsMenuOpen(false)}>Manage Allocations</NavLink>
+            
+            {/* <div className="nav-section-label">Mappings (Bulk)</div> */}
+            <NavLink to="/class-subjects" className="nav-item" onClick={() => setIsMenuOpen(false)}>Class-Subjects</NavLink>
+            <NavLink to="/teacher-subject-combos" className="nav-item" onClick={() => setIsMenuOpen(false)}>Teacher-Subjects</NavLink>
+            <NavLink to="/class-faculties" className="nav-item" onClick={() => setIsMenuOpen(false)}>Class-Faculties</NavLink>
+            <NavLink to="/class-elective-subjects" className="nav-item" onClick={() => setIsMenuOpen(false)}>Elective Mappings</NavLink>
+
+            {/* <div className="nav-section-label">Constraints</div> */}
+            <NavLink to="/teacher-availability" className="nav-item" onClick={() => setIsMenuOpen(false)}>Availability</NavLink>
+            <NavLink to="/teacher-preferences" className="nav-item" onClick={() => setIsMenuOpen(false)}>Preferences</NavLink>
+            
+            {/* <div className="nav-section-label">Generation</div> */}
+            <NavLink to="/timetable" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generate Timetable</NavLink>
+            <NavLink to="/saved-timetables" className="nav-item" onClick={() => setIsMenuOpen(false)}>History</NavLink>
           </>
         )}
         {isSuper && (

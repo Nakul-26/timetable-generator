@@ -21,8 +21,6 @@ function ManageSubject() {
   const [editSem, setEditSem] = useState("");
   const [editType, setEditType] = useState("");
   const [editClassesPerWeek, setEditClassesPerWeek] = useState("");
-  const [editCombinedClasses, setEditCombinedClasses] = useState([]);
-  const [editIsElective, setEditIsElective] = useState(false); // New state for isElective
 
   // 🔍 Filter states
   const [showFilters, setShowFilters] = useState(false);
@@ -35,26 +33,6 @@ function ManageSubject() {
   const clearExcelStatus = () => {
     setExcelMessage("");
     setExcelError("");
-  };
-
-  const parseBoolean = (value) => {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "number") return value !== 0;
-    const normalized = String(value || "").trim().toLowerCase();
-    return ["true", "yes", "1", "y"].includes(normalized);
-  };
-
-  const parseCombinedClasses = (value) => {
-    const input = String(value || "").trim();
-    if (!input) return [];
-    const names = input
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const classIdByName = new Map(classes.map((cls) => [String(cls.name || "").toLowerCase(), cls._id]));
-    return names
-      .map((name) => classIdByName.get(name.toLowerCase()))
-      .filter(Boolean);
   };
 
   const getCellValue = (row, keys) => {
@@ -77,8 +55,8 @@ function ManageSubject() {
   const handleDownloadTemplate = () => {
     clearExcelStatus();
     const rows = [
-      ["name", "id", "sem", "type", "classesPerWeek", "isElective", "combinedClasses"],
-      ["", "", "", "theory", "", "false", ""]
+      ["name", "id", "sem", "type", "classesPerWeek"],
+      ["", "", "", "theory", ""]
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
@@ -90,10 +68,6 @@ function ManageSubject() {
   const handleExportSubjects = () => {
     clearExcelStatus();
     const rows = subjects.map((subject) => {
-      const combinedClassNames = (subject.combined_classes || [])
-        .map((classId) => classes.find((c) => c._id === classId)?.name)
-        .filter(Boolean)
-        .join(", ");
       const assignedClassNames = assignments
         .filter((a) => a.subject?._id === subject._id)
         .map((a) => a.class?.name)
@@ -111,8 +85,6 @@ function ManageSubject() {
         sem: subject.sem || "",
         type: subject.type || "theory",
         classesPerWeek: subject.classesPerWeek ?? "",
-        isElective: Boolean(subject.isElective),
-        combinedClasses: combinedClassNames,
         assignedClasses: assignedClassNames,
         assignedFaculties: assignedFacultyNames
       };
@@ -159,8 +131,6 @@ function ManageSubject() {
         const normalizedType = typeRaw.toLowerCase();
         const type = ["lab", "no_teacher"].includes(normalizedType) ? normalizedType : "theory";
         const classesPerWeekRaw = getCellValue(row, ["classesPerWeek", "classes_per_week", "Classes per Week", "hoursPerWeek", "weeklyClasses"]);
-        const isElectiveRaw = getCellValue(row, ["isElective", "elective", "Elective"]);
-        const combinedClassesRaw = getCellValue(row, ["combinedClasses", "combined_classes", "Combined Classes"]);
         const parsedClassesPerWeek = parseOptionalPositiveNumber(classesPerWeekRaw);
 
         if (parsedClassesPerWeek === null) {
@@ -173,8 +143,6 @@ function ManageSubject() {
           sem,
           type,
           classesPerWeek: parsedClassesPerWeek,
-          isElective: parseBoolean(isElectiveRaw),
-          combined_classes: parseCombinedClasses(combinedClassesRaw)
         };
       });
 
@@ -210,8 +178,6 @@ function ManageSubject() {
             sem: row.sem,
             type: row.type,
             classesPerWeek: row.classesPerWeek,
-            combined_classes: row.combined_classes,
-            isElective: row.isElective
           });
           updatedCount += 1;
         } else {
@@ -221,8 +187,6 @@ function ManageSubject() {
             sem: row.sem,
             type: row.type,
             classesPerWeek: row.classesPerWeek,
-            combined_classes: row.combined_classes,
-            isElective: row.isElective
           });
           createdCount += 1;
         }
@@ -284,17 +248,6 @@ function ManageSubject() {
     setEditSem(subject.sem);
     setEditType(subject.type);
     setEditClassesPerWeek(subject.classesPerWeek ?? "");
-    setEditCombinedClasses(subject.combined_classes || []);
-    setEditIsElective(subject.isElective || false); // Initialize new state
-  };
-
-  const handleEditCombinedClassesChange = (e) => {
-    const { value, checked } = e.target;
-    if (checked) {
-      setEditCombinedClasses([...editCombinedClasses, value]);
-    } else {
-      setEditCombinedClasses(editCombinedClasses.filter((id) => id !== value));
-    }
   };
 
   const handleEditSubmit = async (e) => {
@@ -318,8 +271,6 @@ function ManageSubject() {
         sem: editSem,
         type: editType,
         classesPerWeek: classesPerWeekValue,
-        combined_classes: editCombinedClasses,
-        isElective: editIsElective, // Include new state in payload
       };
       await axios.put(`/subjects/${editId}`, updatedSubject);
       setEditId(null);
@@ -328,7 +279,6 @@ function ManageSubject() {
       setEditSem("");
       setEditType("theory");
       setEditClassesPerWeek("");
-      setEditCombinedClasses([]);
       refetchData();
     } catch (err) {
       console.log(`Error: ${err.message}`);
@@ -458,10 +408,8 @@ function ManageSubject() {
               <th>Semester/Class</th>
               <th>Subject Type</th>
               <th>Classes/Week</th>
-              <th>Combined Classes</th>
               <th>Assigned Classes</th>
               <th>Assigned Faculties</th>
-              <th>Elective</th>{/* New table header */}
               <th>Actions</th>
             </tr>
           </thead>
@@ -544,30 +492,6 @@ function ManageSubject() {
                     )}
                   </td>
                   <td>
-                    {editId === subject._id ? (
-                      <div className="edit-checkbox-container">
-                        <div className="form-checkbox-group">
-                          {classes.map((c) => (
-                            <label key={c._id} className="checkbox-label">
-                              <input
-                                type="checkbox"
-                                value={c._id}
-                                checked={editCombinedClasses.includes(c._id)}
-                                onChange={handleEditCombinedClassesChange}
-                              />
-                              {c.name}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      subject.combined_classes?.map(classId => {
-                        const combinedClass = classes.find(c => c._id === classId);
-                        return combinedClass ? combinedClass.name : '';
-                      }).join(', ')
-                    )}
-                  </td>
-                  <td>
                     {assignments
                       .filter(a => a.subject?._id === subject._id)
                       .map(a => (
@@ -580,17 +504,6 @@ function ManageSubject() {
                         .map(c => (
                             <div key={c._id}>{c.faculty?.name}</div>
                         ))}
-                  </td>
-                  <td> {/* New table cell for Elective */}
-                    {editId === subject._id ? (
-                      <input
-                        type="checkbox"
-                        checked={editIsElective}
-                        onChange={(e) => setEditIsElective(e.target.checked)}
-                      />
-                    ) : (
-                      subject.isElective ? "✅ Yes" : "❌ No"
-                    )}
                   </td>
                   <td className="actions-cell">
                     {editId === subject._id ? (

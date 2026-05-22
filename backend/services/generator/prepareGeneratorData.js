@@ -35,6 +35,8 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
     TeachingAllocation.find({ collegeId }).lean(),
   ]);
 
+  const subjectTypeMap = new Map(subjects.map((s) => [String(s._id), String(s.type || "").toLowerCase()]));
+
   // Filter inputs based on inputMode
   let filteredTeachingAllocations = teachingAllocations;
   let filteredClassSubjectsRaw = classSubjectsRaw;
@@ -46,12 +48,12 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
     filteredCombosRaw = [];
     console.log("[prepareGeneratorData] EXPLICIT mode: using only TeachingAllocations, ignoring derived relations");
   } else if (inputMode === "DERIVED") {
-    // DERIVED: Prefer derived relations, but keep explicit LAB allocations.
+    // DERIVED: Prefer derived relations, but keep explicit lab allocations.
     // Labs often need explicit teacher assignment and block-handling; dropping them can
     // yield required lab hours with zero eligible combos.
     filteredTeachingAllocations = (teachingAllocations || []).filter((allocation) => {
       const allocationType = String(allocation?.type || "").toUpperCase();
-      return allocationType === "LAB";
+      return allocationType === "LAB" || allocationType === "ELECTIVE_LAB";
     });
     console.log(
       `[prepareGeneratorData] DERIVED mode: using derived relations + ${filteredTeachingAllocations.length} LAB TeachingAllocations`
@@ -70,7 +72,7 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
   filteredTeachingAllocations.forEach((allocation) => {
     const classIds = (allocation.classIds || []).map((classId) => String(classId));
     const allocationType = String(allocation.type || "").toUpperCase();
-    const isElectiveAllocation = allocationType === "ELECTIVE";
+    const isElectiveAllocation = allocationType === "ELECTIVE" || allocationType === "ELECTIVE_LAB";
     const isLabAllocation = allocationType === "LAB";
     const rawPairs = isElectiveAllocation && Array.isArray(allocation.subjects) && allocation.subjects.length > 0
       ? allocation.subjects
@@ -91,11 +93,14 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
       .filter((pair) => pair.subjectId);
 
     if (isElectiveAllocation) {
-      const subjectTeacherPairs = normalizedPairs.filter((pair) => pair.teacherId);
-      const teacherIds = [...new Set(subjectTeacherPairs.map((pair) => pair.teacherId))];
+      const subjectTeacherPairs = normalizedPairs.filter((pair) => {
+        return pair.teacherId || subjectTypeMap.get(pair.subjectId) === "no_teacher";
+      });
+      const teacherIds = [...new Set(subjectTeacherPairs.map((pair) => pair.teacherId).filter(Boolean))];
       if (classIds.length > 0 && subjectTeacherPairs.length > 0) {
         teacherSubjectCombos.push({
           type: "ELECTIVE",
+          isLab: allocationType === "ELECTIVE_LAB",
           electiveGroupId: String(allocation._id || allocation.combinedClassGroupId || subjectTeacherPairs.map((pair) => pair.subjectId).join("_")),
           subjectId: String(allocation.subject || subjectTeacherPairs[0]?.subjectId || ""),
           subjectTeacherPairs,
@@ -107,8 +112,10 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
       }
       classIds.forEach((classId) => {
         subjectTeacherPairs.forEach((pair) => {
-          explicitClassTeacherKeys.add(`${classId}|${pair.teacherId}`);
-          classTeachers.push({ classId, teacherId: pair.teacherId });
+          if (pair.teacherId) {
+            explicitClassTeacherKeys.add(`${classId}|${pair.teacherId}`);
+            classTeachers.push({ classId, teacherId: pair.teacherId });
+          }
         });
       });
       return;
@@ -121,8 +128,9 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
           : normalizedPairs.map((pair) => pair.teacherId).filter(Boolean)
         ).map((teacherId) => String(teacherId).trim()).filter(Boolean)
       )];
-      if (teacherIds.length > 0 && normalizedPairs.length > 0) {
-        const subjectId = normalizedPairs[0].subjectId;
+      const subjectId = normalizedPairs[0]?.subjectId;
+      const isNoTeacher = subjectTypeMap.get(subjectId) === "no_teacher";
+      if ((teacherIds.length > 0 || isNoTeacher) && normalizedPairs.length > 0) {
         labAllocations.push({
           classIds,
           subjectId,
@@ -139,7 +147,8 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
       }
     } else {
       normalizedPairs.forEach((pair) => {
-        if (!pair.teacherId) return;
+        const isNoTeacher = subjectTypeMap.get(pair.subjectId) === "no_teacher";
+        if (!pair.teacherId && !isNoTeacher) return;
         teacherSubjectCombos.push({
           teacherId: pair.teacherId || null,
           teacherIds: pair.teacherId ? [pair.teacherId] : [],
@@ -216,77 +225,9 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
     classElectiveSubjects
   });
 
-  const generatorCombos = Array.isArray(generatorData?.combos) ? generatorData.combos : [];
-  const generatorClasses = Array.isArray(generatorData?.classes) ? generatorData.classes : [];
-  const comboById = new Map(generatorCombos.map((combo) => [String(combo._id), combo]));
-  let nextComboIndex = generatorCombos.length + 1;
-
-  labAllocations.forEach((allocation) => {
-    const classIds = [...new Set((allocation.classIds || []).map((classId) => String(classId)).filter(Boolean))];
-    const subjectId = String(allocation.subjectId || "").trim();
-    const teacherIds = (allocation.teacherIds || []).map(String).sort();
-    const primaryTeacherId = teacherIds[0] || "";
-    const hoursPerWeek = Number(allocation.hoursPerWeek || 0);
-    if (!classIds.length || !subjectId || !primaryTeacherId || hoursPerWeek <= 0) return;
-
-    const existingCombo = generatorCombos.find((combo) => {
-      const comboClassIds = Array.isArray(combo.class_ids) ? combo.class_ids.map(String).sort() : [];
-      const comboFacultyIds = Array.isArray(combo.faculty_ids) ? combo.faculty_ids.map(String).sort() : [];
-      const targetClassIds = [...classIds].sort();
-      return (
-        comboClassIds.length === targetClassIds.length &&
-        comboClassIds.every((id, idx) => id === targetClassIds[idx]) &&
-        String(combo.subject_id) === subjectId &&
-        comboFacultyIds.length === teacherIds.length &&
-        comboFacultyIds.every((id, idx) => id === teacherIds[idx])
-      );
-    });
-
-    const comboId = existingCombo?._id || `LAB_${subjectId}_${classIds.sort().join("_")}_${teacherIds.sort().join("_")}`;
-    const labCombo = existingCombo || {
-      _id: comboId,
-      faculty_ids: teacherIds,
-      subject_id: subjectId,
-      subject: {
-        _id: subjectId,
-        name: subjects.find((subject) => String(subject._id) === subjectId)?.name || subjectId,
-        type: "lab",
-        isVirtual: false,
-      },
-      class_ids: classIds,
-      combined_class_group_id: allocation.combinedClassGroupId || null,
-      hours_per_week: hoursPerWeek,
-      hours_per_class: Object.fromEntries(classIds.map((classId) => [classId, hoursPerWeek])),
-      combo_name: `LAB_${classIds.sort().join("_")}_${subjectId}_${teacherIds.sort().join("_")}`,
-    };
-
-    if (!existingCombo) {
-      generatorCombos.push(labCombo);
-      comboById.set(String(comboId), labCombo);
-    }
-
-    classIds.forEach((classId) => {
-      const classEntry = generatorClasses.find((klass) => String(klass._id) === classId);
-      if (!classEntry) return;
-      if (!Array.isArray(classEntry.assigned_teacher_subject_combos)) {
-        classEntry.assigned_teacher_subject_combos = [];
-      }
-      if (!classEntry.assigned_teacher_subject_combos.includes(comboId)) {
-        classEntry.assigned_teacher_subject_combos.push(comboId);
-      }
-      if (!classEntry.subject_hours || typeof classEntry.subject_hours !== "object") {
-        classEntry.subject_hours = {};
-      }
-      if (!classEntry.subject_hours[subjectId]) {
-        classEntry.subject_hours[subjectId] = hoursPerWeek;
-      }
-    });
-  });
-
-  generatorData.combos = generatorCombos;
-  generatorData.classes = generatorClasses;
-
   if (debugLabs) {
+    const generatorCombos = Array.isArray(generatorData?.combos) ? generatorData.combos : [];
+    const generatorClasses = Array.isArray(generatorData?.classes) ? generatorData.classes : [];
     const classComboCounts = new Map();
     generatorCombos.forEach((combo) => {
       (combo.class_ids || []).forEach((classId) => {

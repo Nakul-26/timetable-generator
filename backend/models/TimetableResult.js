@@ -20,7 +20,7 @@ const ResultSchema = new Schema(
 
     status: {
       type: String,
-      enum: ['generated', 'draft', 'edited', 'approved', 'locked'],
+      enum: ['generated', 'draft', 'edited', 'approved', 'locked', 'session_buffer'],
       default: 'draft',
     },
 

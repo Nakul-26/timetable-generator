@@ -151,6 +151,30 @@ protectedRouter.get('/timetable-settings', async (req, res) => {
   }
 });
 
+protectedRouter.get('/fixed-slot-combos', async (req, res) => {
+  try {
+    const userSettings = await TimetableUserSettings.findOne({
+      collegeId: req.collegeId,
+      userId: req.user?._id,
+    }).lean();
+    const inputMode = userSettings?.inputMode || "EXPLICIT";
+    const generatorData = filterGeneratorDataForSolver(
+      await prepareGeneratorData(req.collegeId, inputMode)
+    );
+
+    res.json({
+      inputMode,
+      classes: generatorData.classes || [],
+      subjects: generatorData.subjects || [],
+      faculties: generatorData.faculties || [],
+      combos: generatorData.combos || [],
+    });
+  } catch (e) {
+    console.error("[GET /fixed-slot-combos] Error:", e);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 protectedRouter.put('/timetable-settings', async (req, res) => {
   try {
     const { constraintConfig = null, blockGenerateOnHealthErrors = false, fixedSlots = null, inputMode = "EXPLICIT" } =

@@ -399,6 +399,9 @@ async function runGenerate({
 
   const rankCandidates = () =>
     [...candidates].sort((a, b) => {
+      const unmetA = Array.isArray(a.unmet_requirements) ? a.unmet_requirements.length : 0;
+      const unmetB = Array.isArray(b.unmet_requirements) ? b.unmet_requirements.length : 0;
+      if (unmetA !== unmetB) return unmetA - unmetB;
       const objectiveA = Number.isFinite(a.objectiveValue)
         ? a.objectiveValue
         : (Number.isFinite(a.score) ? a.score : Number.POSITIVE_INFINITY);

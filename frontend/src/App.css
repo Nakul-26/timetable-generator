@@ -2050,15 +2050,15 @@ h2 {
 
 .tt-settings-page {
   max-width: 1280px;
-  background: linear-gradient(180deg, #fffefb 0%, #ffffff 220px);
+  background: #ffffff;
 }
 
 .tt-settings-hero {
-  margin-bottom: 14px;
-  padding: 14px 16px;
-  border: 1px solid #ffe3d0;
-  border-radius: 10px;
-  background: #fff8f2;
+  margin-bottom: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .tt-settings-hero h2 {
@@ -2074,6 +2074,7 @@ h2 {
 .tt-settings-actions {
   flex-wrap: wrap;
   justify-content: flex-start;
+  gap: 8px;
 }
 
 .tt-settings-actions .primary-btn,
@@ -2126,10 +2127,11 @@ h2 {
 }
 
 .tt-settings-section {
-  margin-top: 16px;
-  padding: 14px;
-  border: 1px solid #f2f2f2;
-  border-radius: 10px;
+  margin-top: 14px;
+  padding: 16px 0;
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  border-radius: 0;
   background: #fff;
 }
 
@@ -2146,8 +2148,10 @@ h2 {
 
 .tt-settings-row {
   margin: 0;
-  flex-wrap: wrap;
-  align-items: end;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-items: stretch;
 }
 
 .tt-settings-row + .tt-settings-row {
@@ -2155,11 +2159,14 @@ h2 {
 }
 
 .tt-settings-row label {
-  min-width: 200px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(180px, 320px) minmax(240px, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
   color: #374151;
   font-weight: 600;
   font-size: 0.93rem;
@@ -2168,6 +2175,40 @@ h2 {
 .tt-settings-row input,
 .tt-settings-row select {
   width: 100%;
+  min-height: 40px;
+  max-width: 320px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #111827;
+}
+
+.tt-settings-row select {
+  padding-right: 42px;
+  text-overflow: ellipsis;
+}
+
+.tt-settings-row input:disabled,
+.tt-settings-row select:disabled,
+.tt-settings-row textarea:disabled {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.tt-control-help {
+  grid-column: 3;
+  color: #6b7280;
+  font-size: 0.86rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.tt-settings-row input,
+.tt-settings-row select,
+.tt-settings-row button {
+  grid-column: 2;
 }
 
 .tt-settings-json {
@@ -2184,6 +2225,28 @@ h2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
+}
+
+.tt-settings-reference {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+@media (max-width: 900px) {
+  .tt-settings-row label {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .tt-settings-row input,
+  .tt-settings-row select,
+  .tt-settings-row button,
+  .tt-control-help {
+    grid-column: 1;
+    max-width: none;
+  }
 }
 
 .tt-settings-glossary-item {

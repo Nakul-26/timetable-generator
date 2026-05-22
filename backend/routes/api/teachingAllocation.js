@@ -6,6 +6,7 @@ import Faculty from "../../models/Faculty.js";
 import ClassSubject from "../../models/ClassSubject.js";
 import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
 import TeachingAllocation from "../../models/TeachingAllocation.js";
+import AllocationAudit from "../../models/AllocationAudit.js";
 import { validateOwnership, validateOwnershipMany } from "../../utils/validateTenantRefs.js";
 import { buildTeachingAllocationKey } from "../../utils/allocationKey.js";
 
@@ -39,12 +40,17 @@ const extractAllocationPairs = (allocation) => {
 };
 const parseElectivePairs = (rawSubjects, fallbackSubjectId = "") => {
   const entries = Array.isArray(rawSubjects) ? rawSubjects : [];
-  return entries
-    .map((entry) => normalizePair({
-      subjectId: entry?.subjectId || entry?.subject || fallbackSubjectId,
-      teacherId: entry?.teacherId || entry?.teacher || null,
-    }))
-    .filter(Boolean);
+  return entries.flatMap((entry) => {
+    const subjectId = entry?.subjectId || entry?.subject || fallbackSubjectId;
+    const teacherIds = Array.isArray(entry?.teacherIds)
+      ? entry.teacherIds
+      : Array.isArray(entry?.teachers)
+        ? entry.teachers
+        : [entry?.teacherId || entry?.teacher || null];
+    return teacherIds
+      .map((teacherId) => normalizePair({ subjectId, teacherId }))
+      .filter(Boolean);
+  });
 };
 const summarizeAllocation = (allocation) => {
   const pairs = extractAllocationPairs(allocation);
@@ -63,7 +69,7 @@ const summarizeAllocation = (allocation) => {
     classes: Array.isArray(allocation?.classIds) ? allocation.classIds : [],
     class: Array.isArray(allocation?.classIds) && allocation.classIds.length === 1 ? allocation.classIds[0] : null,
     type,
-    isElectiveBlock: type === "ELECTIVE" || (type !== "LAB" && uniqueSubjectIds.length > 1),
+    isElectiveBlock: type === "ELECTIVE" || type === "ELECTIVE_LAB" || (type !== "LAB" && uniqueSubjectIds.length > 1),
     subject,
     subjects: pairs,
     subjectIds,
@@ -81,10 +87,10 @@ protectedRouter.get("/teaching-allocations", async (req, res) => {
   try {
     const allocations = await TeachingAllocation.find({ collegeId: req.collegeId })
       .populate("classIds", "name id sem section")
-      .populate("subject", "name id type isElective")
+      .populate("subject", "name id type")
       .populate("teacher", "name id")
       .populate("teachers", "name id")
-      .populate("subjects.subject", "name id type isElective")
+      .populate("subjects.subject", "name id type")
       .populate("subjects.teacher", "name id")
       .sort({ createdAt: -1 })
       .lean();
@@ -126,11 +132,12 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     const requestedHours = hasRequestedHours ? toPositiveNumber(req.body.hoursPerWeek) : null;
     const combinedClassGroupIdRaw = String(req.body.combinedClassGroupId || "").trim();
     const combinedClassGroupId = combinedClassGroupIdRaw || null;
-    const electivePairs = requestedType === "ELECTIVE"
+    const isRequestedElective = requestedType === "ELECTIVE" || requestedType === "ELECTIVE_LAB";
+    const electivePairs = isRequestedElective
       ? parseElectivePairs(req.body.subjects, req.body.subjectId)
       : [];
     const subjectId = toId(req.body.subjectId || electivePairs[0]?.subject?._id || electivePairs[0]?.subject);
-    const teacherIdsRaw = requestedType === "ELECTIVE"
+    const teacherIdsRaw = isRequestedElective
       ? electivePairs.map((pair) => pair.teacher?._id || pair.teacher || pair.teacherId || null)
       : Array.isArray(req.body.teacherIds)
         ? req.body.teacherIds
@@ -158,13 +165,13 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     const subjectType = String(subject.type || "").toLowerCase();
     const requiresTeacher = subjectType !== "no_teacher";
     const isLab = subjectType === "lab";
-    const isElective = Boolean(subject.isElective);
-    const effectiveType = requestedType === "ELECTIVE"
-      ? "ELECTIVE"
+    const effectiveType = isRequestedElective
+      ? requestedType
       : requestedType === "LAB" || isLab
         ? "LAB"
         : "NORMAL";
-    const allowGroupedTeachers = isLab || isElective || effectiveType === "LAB" || effectiveType === "ELECTIVE";
+    const isEffectiveElective = effectiveType === "ELECTIVE" || effectiveType === "ELECTIVE_LAB";
+    const allowGroupedTeachers = isLab || effectiveType === "LAB" || isEffectiveElective;
     if (hasRequestedHours && !requestedHours) {
       return res.status(400).json({ error: "hoursPerWeek must be a positive number." });
     }
@@ -187,11 +194,11 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       return res.status(400).json({ error: "Multiple teachers in one combo are allowed only for lab or elective subjects." });
     }
 
-    if (effectiveType === "ELECTIVE" && electivePairs.length === 0) {
+    if (isEffectiveElective && electivePairs.length === 0) {
       return res.status(400).json({ error: "subjects is required for elective allocations." });
     }
 
-    const upsertPairs = effectiveType === "ELECTIVE"
+    const upsertPairs = isEffectiveElective
       ? electivePairs
       : effectiveType === "LAB"
         ? teacherIds.map((teacherId) => ({
@@ -214,12 +221,18 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       upsertPairs.map((pair) => pair.teacher?._id || pair.teacherId || pair.teacher)
     );
 
-    if (subjectIdsForValidation.length > 1 && effectiveType !== "ELECTIVE") {
+    if (subjectIdsForValidation.length > 1 && !isEffectiveElective) {
       return res.status(400).json({ error: "A normal allocation can only contain one subject." });
     }
 
     if (subjectIdsForValidation.length > 0) {
-      await validateOwnershipMany(Subject, subjectIdsForValidation, req.collegeId, "subjectIds");
+      const validatedSubjects = await validateOwnershipMany(Subject, subjectIdsForValidation, req.collegeId, "subjectIds");
+      if (effectiveType === "ELECTIVE_LAB") {
+        const nonLabSubject = validatedSubjects.find((item) => String(item.type || "").toLowerCase() !== "lab");
+        if (nonLabSubject) {
+          return res.status(400).json({ error: "Elective lab allocations can contain only lab subjects." });
+        }
+      }
     }
     if (teacherIdsForValidation.length > 0) {
       await validateOwnershipMany(Faculty, teacherIdsForValidation, req.collegeId, "teacherIds");
@@ -232,13 +245,13 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       collegeId: req.collegeId,
       type: effectiveType,
       classIds,
-      subjectId: effectiveType === "ELECTIVE"
+      subjectId: isEffectiveElective
         ? [...subjectIdsForValidation].sort().join("+")
         : subjectId,
       teacherIds,
       subjects: allocationSubjects,
       combinedClassGroupId,
-      electiveGroupId: effectiveType === "ELECTIVE"
+      electiveGroupId: isEffectiveElective
         ? [...subjectIdsForValidation].sort().join("+")
         : null,
     });
@@ -248,47 +261,6 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
     }).select("_id").lean();
     if (existingAllocation) {
       return res.status(409).json({ error: "This teaching allocation already exists." });
-    }
-
-    await Promise.all(
-      upsertPairs.map((pair) =>
-        pair.teacherId || pair.teacher?._id || pair.teacher
-          ? TeacherSubjectCombination.findOneAndUpdate(
-              {
-                faculty: pair.teacher?._id || pair.teacherId || pair.teacher,
-                subject: pair.subject?._id || pair.subjectId || pair.subject,
-                collegeId: req.collegeId,
-              },
-              {
-                $setOnInsert: {
-                  faculty: pair.teacher?._id || pair.teacherId || pair.teacher,
-                  subject: pair.subject?._id || pair.subjectId || pair.subject,
-                  collegeId: req.collegeId,
-                },
-              },
-              { new: true, upsert: true }
-            )
-          : Promise.resolve(null)
-      )
-    );
-
-    for (const classId of classIds) {
-      for (const pair of upsertPairs) {
-        const pairSubjectId = toId(pair.subject?._id || pair.subjectId || pair.subject);
-        if (!pairSubjectId) continue;
-        await ClassSubject.findOneAndUpdate(
-          { class: classId, subject: pairSubjectId, collegeId: req.collegeId },
-          { $set: { hoursPerWeek, collegeId: req.collegeId } },
-          { new: true, upsert: true }
-        );
-      }
-      if (teacherIds.length > 0 && requiresTeacher) {
-        await ClassModel.findOneAndUpdate({ _id: classId, collegeId: req.collegeId }, {
-          $addToSet: {
-            faculties: { $each: teacherIds },
-          },
-        });
-      }
     }
 
     const allocation = await TeachingAllocation.create({
@@ -302,14 +274,28 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
       hoursPerWeek,
       combinedClassGroupId,
       allocationKey,
+      source: "DIRECT",
+    });
+
+    // Audit Logging
+    await AllocationAudit.create({
+      collegeId: req.collegeId,
+      allocationId: allocation._id,
+      action: "CREATE",
+      performedBy: req.user?._id || req.userId,
+      source: "DIRECT",
+      snapshot: {
+        after: allocation.toObject(),
+      },
+      message: "Manually created teaching allocation.",
     });
 
     const populatedAllocation = await TeachingAllocation.findOne({ _id: allocation._id, collegeId: req.collegeId })
       .populate("classIds", "name id sem section")
-      .populate("subject", "name id type isElective")
+      .populate("subject", "name id type")
       .populate("teacher", "name id")
       .populate("teachers", "name id")
-      .populate("subjects.subject", "name id type isElective")
+      .populate("subjects.subject", "name id type")
       .populate("subjects.teacher", "name id")
       .lean();
 
@@ -329,139 +315,287 @@ protectedRouter.post("/teaching-allocations", async (req, res) => {
 
 protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
   try {
-    const [classes, classSubjects, combos] = await Promise.all([
+    const isPreview = req.body.preview === true;
+    const [classes, classSubjects, combos, existingAllocations] = await Promise.all([
       ClassModel.find({ collegeId: req.collegeId }).select("_id name faculties").lean(),
-      ClassSubject.find({ collegeId: req.collegeId }).select("class subject hoursPerWeek").lean(),
+      ClassSubject.find({ collegeId: req.collegeId }).select("_id class subject hoursPerWeek").lean(),
       TeacherSubjectCombination.find({ collegeId: req.collegeId }).select("_id faculty subject").lean(),
+      TeachingAllocation.find({ collegeId: req.collegeId }).select("allocationKey source hoursPerWeek classIds subject teacher teachers subjects combinedClassGroupId type").lean(),
     ]);
-    const subjects = await Subject.find({ collegeId: req.collegeId }).select("_id type classesPerWeek").lean();
-    const subjectById = new Map(subjects.map((subject) => [toId(subject._id), subject]));
+    const subjects = await Subject.find({ collegeId: req.collegeId }).select("_id name type classesPerWeek").lean();
+    const subjectById = new Map(subjects.map((s) => [toId(s._id), s]));
+    
+    const existingMap = new Map(existingAllocations.map((a) => [a.allocationKey, a]));
+    const processedKeys = new Set();
 
     const subjectIdsByClassId = new Map();
     const hoursByClassSubject = new Map();
+    const classSubjectIdByClassSubject = new Map();
+
     for (const row of classSubjects) {
-      const classId = toId(row.class);
-      const subjectId = toId(row.subject);
-      if (!classId || !subjectId) continue;
-      if (!subjectIdsByClassId.has(classId)) {
-        subjectIdsByClassId.set(classId, new Set());
-      }
-      subjectIdsByClassId.get(classId).add(subjectId);
-      hoursByClassSubject.set(`${classId}|${subjectId}`, Number(row.hoursPerWeek || 1) || 1);
+      const cid = toId(row.class);
+      const sid = toId(row.subject);
+      if (!cid || !sid) continue;
+      if (!subjectIdsByClassId.has(cid)) subjectIdsByClassId.set(cid, new Set());
+      subjectIdsByClassId.get(cid).add(sid);
+      hoursByClassSubject.set(`${cid}|${sid}`, Number(row.hoursPerWeek || 1) || 1);
+      classSubjectIdByClassSubject.set(`${cid}|${sid}`, toId(row._id));
     }
 
-    const comboIdByTeacherSubject = new Map();
+    const combosByTeacherSubject = new Map();
     for (const combo of combos) {
-      const teacherId = toId(combo.faculty);
-      const subjectId = toId(combo.subject);
-      if (!teacherId || !subjectId) continue;
-      comboIdByTeacherSubject.set(`${teacherId}|${subjectId}`, toId(combo._id));
+      const tid = toId(combo.faculty);
+      const sid = toId(combo.subject);
+      if (!tid || !sid) continue;
+      const key = `${tid}|${sid}`;
+      if (!combosByTeacherSubject.has(key)) combosByTeacherSubject.set(key, []);
+      combosByTeacherSubject.get(key).push(combo);
     }
 
     const summary = [];
+    const conflicts = [];
+    let totalCreates = 0;
+    let totalUpdates = 0;
+    let totalUnchanged = 0;
     let totalAllocations = 0;
+
+    const areEqual = (a, b) => {
+      if (a === b) return true;
+      if (!a || !b) return false;
+      return JSON.stringify(a) === JSON.stringify(b);
+    };
+
+    const checkUnchanged = (existing, payload) => {
+      if (!existing) return false;
+      // Compare core fields that the sync manages
+      const fields = ["hoursPerWeek", "type", "combinedClassGroupId", "subject", "teacher"];
+      for (const f of fields) {
+        const ev = toId(existing[f]);
+        const pv = toId(payload[f]);
+        if (ev !== pv) return false;
+      }
+      
+      // Compare arrays
+      const arrayFields = ["classIds", "teachers"];
+      for (const f of arrayFields) {
+        const evs = (existing[f] || []).map(toId).sort();
+        const pvs = (payload[f] || []).map(toId).sort();
+        if (evs.length !== pvs.length) return false;
+        if (evs.some((v, i) => v !== pvs[i])) return false;
+      }
+
+      // Compare subjects array (pairs)
+      const es = (existing.subjects || []).map(s => ({ subject: toId(s.subject), teacher: toId(s.teacher) })).sort((a, b) => a.subject.localeCompare(b.subject) || a.teacher.localeCompare(b.teacher));
+      const ps = (payload.subjects || []).map(s => ({ subject: toId(s.subject), teacher: toId(s.teacher) })).sort((a, b) => a.subject.localeCompare(b.subject) || a.teacher.localeCompare(b.teacher));
+      if (es.length !== ps.length) return false;
+      return es.every((v, i) => v.subject === ps[i].subject && v.teacher === ps[i].teacher);
+    };
 
     for (const klass of classes) {
       const classId = toId(klass._id);
       const teacherIds = (klass.faculties || []).map((id) => toId(id)).filter(Boolean);
       const subjectIds = Array.from(subjectIdsByClassId.get(classId) || []);
-      const derivedComboIds = new Set();
 
-      for (const teacherId of teacherIds) {
-        for (const subjectId of subjectIds) {
-          const comboId = comboIdByTeacherSubject.get(`${teacherId}|${subjectId}`);
-          if (comboId) derivedComboIds.add(comboId);
+      const combosBySubject = new Map();
+      for (const sid of subjectIds) {
+        combosBySubject.set(sid, []);
+        for (const tid of teacherIds) {
+          const matchingCombos = combosByTeacherSubject.get(`${tid}|${sid}`) || [];
+          for (const c of matchingCombos) {
+            combosBySubject.get(sid).push(c);
+          }
         }
       }
 
-      const finalComboIds = Array.from(derivedComboIds);
-      const comboIdsBySubject = new Map();
-      for (const comboId of finalComboIds) {
-        const combo = combos.find((item) => toId(item._id) === comboId);
-        if (!combo) continue;
-        const subjectId = toId(combo.subject);
-        if (!comboIdsBySubject.has(subjectId)) {
-          comboIdsBySubject.set(subjectId, []);
-        }
-        comboIdsBySubject.get(subjectId).push(combo);
-      }
-
-      for (const [subjectId, subjectCombos] of comboIdsBySubject.entries()) {
-        const subject = subjectById.get(subjectId);
+      for (const sid of subjectIds) {
+        const subject = subjectById.get(sid);
         const subjectType = String(subject?.type || "").toLowerCase();
-        const comboTeacherIds = [...new Set(subjectCombos.map((combo) => toId(combo.faculty)).filter(Boolean))];
-        const hoursPerWeek = hoursByClassSubject.get(`${classId}|${subjectId}`) || Number(subject?.classesPerWeek || 1) || 1;
+        const subjectCombos = combosBySubject.get(sid) || [];
+        const comboTeacherIds = [...new Set(subjectCombos.map((c) => toId(c.faculty)))];
+        const hoursPerWeek = hoursByClassSubject.get(`${classId}|${sid}`) || Number(subject?.classesPerWeek || 1) || 1;
+        const classSubjectId = classSubjectIdByClassSubject.get(`${classId}|${sid}`);
 
-        if (subjectType === "lab" && comboTeacherIds.length > 0) {
-          const allocationSubjects = comboTeacherIds.map((teacherId) => ({
-            subject: subjectId,
-            teacher: teacherId,
+        if (subjectCombos.length === 0) {
+          conflicts.push({
+            type: "NO_TEACHERS_MAPPED",
+            message: `Subject "${subject?.name || sid}" in class "${klass.name}" has no matching teacher mapping.`,
+            classId,
+            className: klass.name,
+            subjectId: sid,
+            subjectName: subject?.name,
+          });
+          continue;
+        }
+
+        if (subjectType !== "lab" && subjectType !== "elective" && subjectCombos.length > 1) {
+          conflicts.push({
+            type: "MULTIPLE_TEACHERS_FOR_NORMAL",
+            message: `Normal subject "${subject?.name || sid}" in class "${klass.name}" has multiple teachers mapped (${subjectCombos.length}). This will create separate allocations for each.`,
+            classId,
+            className: klass.name,
+            subjectId: sid,
+            subjectName: subject?.name,
+          });
+        }
+
+        if (subjectType === "lab") {
+          const allocationSubjects = comboTeacherIds.map((tid) => ({
+            subject: sid,
+            teacher: tid,
           }));
           const allocationKey = buildTeachingAllocationKey({
             collegeId: req.collegeId,
             type: "LAB",
             classIds: [klass._id],
-            subjectId,
+            subjectId: sid,
             teacherIds: comboTeacherIds,
             subjects: allocationSubjects,
             combinedClassGroupId: null,
           });
-          await TeachingAllocation.findOneAndUpdate(
-            {
-              collegeId: req.collegeId,
-              allocationKey,
-            },
-            {
-              $set: {
-                classIds: [klass._id],
-                subject: subjectId,
-                teacher: comboTeacherIds[0] || null,
-                teachers: comboTeacherIds,
-                collegeId: req.collegeId,
-                type: "LAB",
-                hoursPerWeek,
-                combinedClassGroupId: null,
-                subjects: allocationSubjects,
-                allocationKey,
-              },
-            },
-            { upsert: true, new: true }
-          );
-          totalAllocations += 1;
-          continue;
-        }
 
-        for (const combo of subjectCombos) {
-          const allocationSubjects = [{ subject: combo.subject, teacher: combo.faculty }];
-          const allocationKey = buildTeachingAllocationKey({
-            collegeId: req.collegeId,
-            type: "NORMAL",
+          const payload = {
             classIds: [klass._id],
-            subjectId: combo.subject,
-            teacherIds: [combo.faculty],
-            subjects: allocationSubjects,
+            subject: sid,
+            teacher: comboTeacherIds[0] || null,
+            teachers: comboTeacherIds,
+            collegeId: req.collegeId,
+            type: "LAB",
+            hoursPerWeek,
             combinedClassGroupId: null,
-          });
-          await TeachingAllocation.findOneAndUpdate(
-            {
-              collegeId: req.collegeId,
-              allocationKey,
+            subjects: allocationSubjects,
+            allocationKey,
+            source: "MAPPING_SYNC",
+            sourceMappings: {
+              classSubjectId,
+              teacherSubjectIds: subjectCombos.map((c) => c._id),
             },
-            {
-              $set: {
-                classIds: [klass._id],
-                subject: combo.subject,
-                teacher: combo.faculty,
+          };
+
+          const existing = existingMap.get(allocationKey);
+          if (existing) {
+            if (existing.source === "DIRECT") {
+              conflicts.push({
+                type: "OVERWRITING_DIRECT_ALLOCATION",
+                message: `Sync will overwrite a manual allocation for "${subject?.name || sid}" in class "${klass.name}".`,
+                classId,
+                className: klass.name,
+              });
+            }
+            if (checkUnchanged(existing, payload)) {
+              totalUnchanged++;
+            } else {
+              totalUpdates++;
+              if (!isPreview) {
+                await TeachingAllocation.findOneAndUpdate(
+                  { collegeId: req.collegeId, allocationKey },
+                  { $set: payload }
+                );
+                await AllocationAudit.create({
+                  collegeId: req.collegeId,
+                  allocationId: existing._id,
+                  action: "UPDATE",
+                  performedBy: req.user?._id || req.userId,
+                  source: "MAPPING_SYNC",
+                  snapshot: { before: existing, after: payload },
+                  message: "Updated via Mapping Sync.",
+                });
+              }
+            }
+          } else {
+            totalCreates++;
+            if (!isPreview) {
+              const created = await TeachingAllocation.create(payload);
+              await AllocationAudit.create({
                 collegeId: req.collegeId,
-                hoursPerWeek,
-                combinedClassGroupId: null,
-                subjects: allocationSubjects,
-                allocationKey,
+                allocationId: created._id,
+                action: "CREATE",
+                performedBy: req.user?._id || req.userId,
+                source: "MAPPING_SYNC",
+                snapshot: { after: payload },
+                message: "Created via Mapping Sync.",
+              });
+            }
+          }
+          totalAllocations++;
+          processedKeys.add(allocationKey);
+        } else {
+          for (const combo of subjectCombos) {
+            const tid = toId(combo.faculty);
+            const allocationSubjects = [{ subject: sid, teacher: tid }];
+            const allocationKey = buildTeachingAllocationKey({
+              collegeId: req.collegeId,
+              type: "NORMAL",
+              classIds: [klass._id],
+              subjectId: sid,
+              teacherIds: [tid],
+              subjects: allocationSubjects,
+              combinedClassGroupId: null,
+            });
+
+            const payload = {
+              classIds: [klass._id],
+              subject: sid,
+              teacher: tid,
+              collegeId: req.collegeId,
+              hoursPerWeek,
+              combinedClassGroupId: null,
+              subjects: allocationSubjects,
+              allocationKey,
+              source: "MAPPING_SYNC",
+              sourceMappings: {
+                classSubjectId,
+                teacherSubjectIds: [combo._id],
               },
-            },
-            { upsert: true, new: true }
-          );
-          totalAllocations += 1;
+            };
+
+            const existing = existingMap.get(allocationKey);
+            if (existing) {
+              if (existing.source === "DIRECT") {
+                conflicts.push({
+                  type: "OVERWRITING_DIRECT_ALLOCATION",
+                  message: `Sync will overwrite a manual allocation for "${subject?.name || sid}" in class "${klass.name}".`,
+                  classId,
+                  className: klass.name,
+                });
+              }
+              if (checkUnchanged(existing, payload)) {
+                totalUnchanged++;
+              } else {
+                totalUpdates++;
+                if (!isPreview) {
+                  await TeachingAllocation.findOneAndUpdate(
+                    { collegeId: req.collegeId, allocationKey },
+                    { $set: payload }
+                  );
+                  await AllocationAudit.create({
+                    collegeId: req.collegeId,
+                    allocationId: existing._id,
+                    action: "UPDATE",
+                    performedBy: req.user?._id || req.userId,
+                    source: "MAPPING_SYNC",
+                    snapshot: { before: existing, after: payload },
+                    message: "Updated via Mapping Sync.",
+                  });
+                }
+              }
+            } else {
+              totalCreates++;
+              if (!isPreview) {
+                const created = await TeachingAllocation.create(payload);
+                await AllocationAudit.create({
+                  collegeId: req.collegeId,
+                  allocationId: created._id,
+                  action: "CREATE",
+                  performedBy: req.user?._id || req.userId,
+                  source: "MAPPING_SYNC",
+                  snapshot: { after: payload },
+                  message: "Created via Mapping Sync.",
+                });
+              }
+            }
+            totalAllocations++;
+            processedKeys.add(allocationKey);
+          }
         }
       }
 
@@ -470,19 +604,114 @@ protectedRouter.post("/teaching-allocations/calculate", async (req, res) => {
         className: klass.name,
         teachersInClass: teacherIds.length,
         classSubjects: subjectIds.length,
-        generatedCombos: finalComboIds.length,
+        potentialAllocations: combosBySubject.size,
       });
+    }
+
+    // Detect Orphans (Sync allocations that are no longer produced by mappings)
+    const orphans = [];
+    for (const [key, existing] of existingMap.entries()) {
+      if (existing.source === "MAPPING_SYNC" && !processedKeys.has(key)) {
+        orphans.push(existing._id);
+        conflicts.push({
+          type: "ORPHANED_SYNC_ALLOCATION",
+          message: `Allocation for "${subjectById.get(toId(existing.subject))?.name || "Unknown"}" is no longer matched by any mapping. It will remain in the database unless deleted.`,
+          allocationId: existing._id,
+        });
+      }
     }
 
     res.json({
       ok: true,
-      message: `Calculated allocations for ${classes.length} classes.`,
-      classesProcessed: classes.length,
-      totalGeneratedCombos: totalAllocations,
+      isPreview,
+      message: isPreview
+        ? `Preview: ${totalAllocations} allocations analyzed.`
+        : `Successfully synced ${totalAllocations} allocations.`,
+      totalAllocations,
+      totalCreates,
+      totalUpdates,
+      totalUnchanged,
+      totalOrphans: orphans.length,
+      conflicts,
       summary,
     });
   } catch (e) {
     console.error("[POST /teaching-allocations/calculate] Error:", e);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+protectedRouter.post("/teaching-allocations/sync-to-mappings", async (req, res) => {
+  try {
+    const allocations = await TeachingAllocation.find({ collegeId: req.collegeId }).lean();
+    
+    let totalMappingsCreated = 0;
+    let totalFacultiesLinked = 0;
+
+    for (const alloc of allocations) {
+      const classIds = Array.isArray(alloc.classIds) ? alloc.classIds : [];
+      const pairs = extractAllocationPairs(alloc);
+      const hoursPerWeek = Number(alloc.hoursPerWeek || 1) || 1;
+
+      for (const pair of pairs) {
+        if (!pair.subject) continue;
+        
+        // 1. Sync Teacher-Subject Combination
+        if (pair.teacher) {
+          const combo = await TeacherSubjectCombination.findOneAndUpdate(
+            { faculty: pair.teacher, subject: pair.subject, collegeId: req.collegeId },
+            { $setOnInsert: { faculty: pair.teacher, subject: pair.subject, collegeId: req.collegeId } },
+            { upsert: true, new: true }
+          );
+          if (combo) totalMappingsCreated++;
+        }
+
+        // 2. Sync Class-Subject Mappings
+        for (const classId of classIds) {
+          await ClassSubject.findOneAndUpdate(
+            { class: classId, subject: pair.subject, collegeId: req.collegeId },
+            { $set: { hoursPerWeek, collegeId: req.collegeId } },
+            { upsert: true }
+          );
+          
+          // 3. Link Faculty to Class
+          if (pair.teacher) {
+            const updatedClass = await ClassModel.findOneAndUpdate(
+              { _id: classId, collegeId: req.collegeId },
+              { $addToSet: { faculties: pair.teacher } }
+            );
+            if (updatedClass) totalFacultiesLinked++;
+          }
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: "Successfully synchronized allocations back to mappings.",
+      totalMappingsCreated,
+      totalFacultiesLinked
+    });
+  } catch (e) {
+    console.error("[POST /teaching-allocations/sync-to-mappings] Error:", e);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+protectedRouter.get("/teaching-allocations/:id/history", async (req, res) => {
+  try {
+    const allocationId = toId(req.params.id);
+    const history = await AllocationAudit.find({
+      collegeId: req.collegeId,
+      allocationId,
+    })
+      .populate("performedBy", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json(history);
+  } catch (e) {
+    console.error("[GET /teaching-allocations/:id/history] Error:", e);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -498,16 +727,30 @@ protectedRouter.delete("/teaching-allocations", async (req, res) => {
       return res.status(404).json({ error: "Allocation not found." });
     }
 
-    // Clean up Class.faculties: remove teachers from class if they have no other allocations in that class
-    const teacherIds = uniqueStrings(extractAllocationPairs(allocation).map(p => p.teacher));
-    const classIds = Array.isArray(allocation.classIds) ? allocation.classIds : [];
+    // Audit Logging
+    await AllocationAudit.create({
+      collegeId: req.collegeId,
+      allocationId,
+      action: "DELETE",
+      performedBy: req.user?._id || req.userId,
+      source: allocation.source || "DIRECT",
+      snapshot: {
+        before: allocation,
+      },
+      message: "Deleted teaching allocation and performed deep cleanup of mappings.",
+    });
 
+    // Extract all Class-Subject and Teacher-Subject pairs from this allocation
+    const classIds = Array.isArray(allocation.classIds) ? allocation.classIds : [];
+    const pairs = extractAllocationPairs(allocation); // { subject, teacher } pairs
+
+    // 1. Cleanup Class Faculties (Already exists, but refined)
     for (const classId of classIds) {
-      for (const teacherId of teacherIds) {
+      const teacherIdsInThisAllocation = uniqueStrings(pairs.map(p => p.teacher));
+      for (const teacherId of teacherIdsInThisAllocation) {
         if (!teacherId) continue;
-        
-        // Check if this teacher has any OTHER allocations for this class
-        const otherAllocations = await TeachingAllocation.findOne({
+        const hasOtherAllocations = await TeachingAllocation.findOne({
+          _id: { $ne: allocationId },
           collegeId: req.collegeId,
           classIds: classId,
           $or: [
@@ -517,8 +760,7 @@ protectedRouter.delete("/teaching-allocations", async (req, res) => {
           ]
         }).lean();
 
-        if (!otherAllocations) {
-          // No other allocations, remove teacher from class
+        if (!hasOtherAllocations) {
           await ClassModel.findOneAndUpdate(
             { _id: classId, collegeId: req.collegeId },
             { $pull: { faculties: teacherId } }
@@ -527,7 +769,53 @@ protectedRouter.delete("/teaching-allocations", async (req, res) => {
       }
     }
 
-    res.json({ ok: true, message: "Allocation deleted and class faculties synced." });
+    // 2. Cleanup Class-Subject Mappings
+    for (const classId of classIds) {
+      const subjectIdsInThisAllocation = uniqueStrings(pairs.map(p => p.subject));
+      for (const subjectId of subjectIdsInThisAllocation) {
+        if (!subjectId) continue;
+        const hasOtherAllocations = await TeachingAllocation.findOne({
+          _id: { $ne: allocationId },
+          collegeId: req.collegeId,
+          classIds: classId,
+          $or: [
+            { subject: subjectId },
+            { "subjects.subject": subjectId }
+          ]
+        }).lean();
+
+        if (!hasOtherAllocations) {
+          await ClassSubject.findOneAndDelete({
+            class: classId,
+            subject: subjectId,
+            collegeId: req.collegeId
+          });
+        }
+      }
+    }
+
+    // 3. Cleanup Teacher-Subject Mappings (Combinations)
+    for (const pair of pairs) {
+      if (!pair.teacher || !pair.subject) continue;
+      const hasOtherAllocations = await TeachingAllocation.findOne({
+        _id: { $ne: allocationId },
+        collegeId: req.collegeId,
+        $or: [
+          { subject: pair.subject, teacher: pair.teacher },
+          { subjects: { $elemMatch: { subject: pair.subject, teacher: pair.teacher } } }
+        ]
+      }).lean();
+
+      if (!hasOtherAllocations) {
+        await TeacherSubjectCombination.findOneAndDelete({
+          faculty: pair.teacher,
+          subject: pair.subject,
+          collegeId: req.collegeId
+        });
+      }
+    }
+
+    res.json({ ok: true, message: "Allocation deleted and mappings synchronized." });
   } catch (e) {
     console.error("[DELETE /teaching-allocations] Error:", e);
     res.status(500).json({ error: "Internal Server Error" });

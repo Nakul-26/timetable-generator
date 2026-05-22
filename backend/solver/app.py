@@ -483,6 +483,7 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
         return sorted(
             candidates,
             key=lambda item: (
+                len(item.get("unmet_requirements") or []),
                 item["objectiveValue"]
                 if isinstance(item.get("objectiveValue"), (int, float))
                 else (item["score"] if isinstance(item.get("score"), (int, float)) else float("inf")),

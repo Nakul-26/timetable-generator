@@ -27,8 +27,8 @@ def main() -> int:
         },
     )
 
-    if result.constraints_added != 1:
-        print(f"Expected 1 fixed-slot constraint, got {result.constraints_added}")
+    if result.constraints_added != 2:
+        print(f"Expected 2 fixed-slot constraints, got {result.constraints_added}")
         return 1
     
     actual_warnings = [d.message for d in diagnostics]
@@ -42,19 +42,39 @@ def main() -> int:
     actual_diagnostics = [d.message for d in result.diagnostics]
     expected_diagnostics = [
         "Fixed slots enforced 1 required assignments.",
-        "Fixed slots skipped 1 slots without candidate variables.",
+        "Fixed slots had 1 slots without candidate variables; generation is infeasible until they are corrected.",
     ]
     if actual_diagnostics != expected_diagnostics:
         print(f"Expected diagnostics {expected_diagnostics}, got {actual_diagnostics}")
         return 1
-    if len(model.Proto().constraints) != 1:
-        print(f"Expected 1 model constraint, got {len(model.Proto().constraints)}")
+    if len(model.Proto().constraints) != 2:
+        print(f"Expected 2 model constraints, got {len(model.Proto().constraints)}")
         return 1
 
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) or solver.Value(x1) != 1:
-        print("Expected fixed variable to be forced to 1")
+    if status != cp_model.INFEASIBLE:
+        print("Expected missing fixed variable to make the model infeasible")
+        return 1
+
+    cover_model = cp_model.CpModel()
+    start_at_1 = cover_model.NewBoolVar("x_lab_0_1")
+    cover_result, cover_diagnostics = add_fixed_slot_constraints(
+        model=cover_model,
+        fixed_slots=[
+            {"class": "class-1", "combo": "lab-combo", "day": 0, "hour": 2},
+        ],
+        cover_vars={
+            ("lab-combo", 0, 2): [start_at_1],
+        },
+    )
+    if cover_result.constraints_added != 1 or cover_diagnostics:
+        print("Expected cover-based fixed slot to add one clean constraint")
+        return 1
+    cover_solver = cp_model.CpSolver()
+    cover_status = cover_solver.Solve(cover_model)
+    if cover_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) or cover_solver.Value(start_at_1) != 1:
+        print("Expected covered fixed slot to force its covering variable")
         return 1
 
     print("OK: fixed slot constraints")

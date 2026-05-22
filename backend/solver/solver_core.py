@@ -748,10 +748,34 @@ def solve_instance(
     all_diagnostics: List[Diagnostic] = []
     all_diagnostics.extend(fixed_slot_diagnostics)
 
+    # Pre-flight Conflict Detection: Block Size vs. Total Hours
+    for cls in classes:
+        class_id = cls["_id"]
+        for subj in subjects:
+            subj_id = subj["_id"]
+            req = required_hours_by_class_subject[class_id][subj_id]
+            if req <= 0:
+                continue
+            
+            block = lab_block_size if _is_lab_subject(subj) else theory_block_size
+            if req % block != 0:
+                msg = (f"Subject '{subj.get('name') or subj_id}' in class '{cls.get('name') or class_id}' "
+                       f"has {req} hours required but is forced into {block}-hour blocks. "
+                       f"This is mathematically impossible and will cause generation to fail.")
+                all_diagnostics.append({
+                    "code": "BLOCK_SIZE_MISMATCH",
+                    "message": msg,
+                    "severity": "error",
+                    "entityType": "class_subject",
+                    "entityId": f"{class_id}_{subj_id}",
+                })
+                logger.error("[solve_instance] %s", msg)
+
     model = cp_model.CpModel()
 
     # Decision variables: start placement per combo/day/hour.
     x: Dict[Tuple[str, int, int], cp_model.IntVar] = {}
+    fixed_slot_covers: Dict[Tuple[str, int, int], List[cp_model.IntVar]] = {}
     covers: Dict[Tuple[str, int, int], List[cp_model.IntVar]] = {}
     teacher_covers: Dict[Tuple[str, int, int], List[cp_model.IntVar]] = {}
     subject_covers: Dict[Tuple[str, int, int, str], List[cp_model.IntVar]] = {}
@@ -912,6 +936,7 @@ def solve_instance(
                     objective_terms.append(var * no_teacher_early_slot_weight * early_penalty)
 
             for h in range(hour, hour + block):
+                fixed_slot_covers.setdefault((combo_id, day, h), []).append(var)
                 for class_id in class_ids:
                     covers.setdefault((class_id, day, h), []).append(var)
                     subject_covers.setdefault((class_id, day, h, combo["subject_id"]), []).append(var)
@@ -1369,6 +1394,10 @@ def solve_instance(
                     model.Add(sum(terms) == 0)
                 continue
             scheduled_terms = sum(terms) if terms else 0
+            
+            logger.debug("[solve_instance] Subject coverage: class=%s subj=%s req=%d block=%d candidates=%d", 
+                         class_id, subj.get("name"), req, block, len(terms))
+
             if _is_lab_subject(subj):
                 # For labs, use high-penalty soft constraints instead of hard equality.
                 # This ensures the solver *tries* its best to place them without failing the whole model.
@@ -1404,13 +1433,11 @@ def solve_instance(
                 model.Add(scheduled == scheduled_terms)
                 shortage = model.NewIntVar(0, req, f"shortage_{class_id}_{subj_id}")
                 model.Add(scheduled + shortage == req)
-                # Strongly prioritize meeting lab hours; otherwise the solver can prefer
-                # an empty timetable (especially in minimal instances) because many soft
-                # constraints penalize placing sessions.
-                effective_shortage_weight = weekly_hours_shortage_weight
-                if _is_lab_subject(subj):
-                    # Ensure lab shortages are never treated as "free" even if config weight is 0.
-                    effective_shortage_weight = max(effective_shortage_weight, weekly_hours_shortage_weight * 50, 50000)
+                # Missing required hours must dominate layout preferences. In
+                # best-available mode weekly hours are soft, but compactness,
+                # gap, and teacher-load penalties should not make an incomplete
+                # timetable look cheaper than placing an available theory hour.
+                effective_shortage_weight = max(weekly_hours_shortage_weight, 100000)
 
                 if effective_shortage_weight > 0:
                     objective_terms.append(shortage * effective_shortage_weight)
@@ -1520,6 +1547,7 @@ def solve_instance(
         model=model,
         fixed_slots=valid_fixed_slots,
         assignment_vars=x,
+        cover_vars=fixed_slot_covers,
     )
     fixed_slot_warnings.extend(fixed_slot_enforcement_warnings)
     if fixed_slot_result.constraints_added or fixed_slot_result.diagnostics:
@@ -1976,7 +2004,10 @@ def solve_instance(
         if early_abort_thread is not None:
             early_abort_thread.join(timeout=0.2)
 
-    diagnostics_dicts = [d.to_dict() for d in all_diagnostics]
+    diagnostics_dicts = [
+        d.to_dict() if hasattr(d, "to_dict") else dict(d)
+        for d in all_diagnostics
+    ]
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and not progress_callback.solution_found:
         failure_diagnostics = _build_failure_diagnostics()
         partial_preview = _build_partial_preview()

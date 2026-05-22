@@ -25,6 +25,7 @@ import {
 
 import { runAutoFill } from "../services/manual-timetable/autofill.service.js";
 import { validateAndSimulateMove } from "../services/manual-timetable/manualValidator.service.js";
+import TimetableResult from "../models/TimetableResult.js";
 
 import {
   computeAvailableCombos,
@@ -46,12 +47,81 @@ import {
 router.use(auth);
 router.use(requireCollegeContext);
 
+async function ensureDurableState(req, res, next) {
+  try {
+    const timetableId = getStableTimetableId(req);
+    if (!timetableId) return next();
+
+    // 1. Check if already in memory
+    if (getState(timetableId)) return next();
+
+    // 2. If it's a session ID, try to recover from DB
+    if (String(timetableId).startsWith("session-")) {
+      const parts = String(timetableId).split("-");
+      if (parts.length >= 4) {
+        const collegeId = parts[1];
+        const userId = parts[2];
+        const sourceId = parts.slice(3).join("-");
+
+        const buffer = await TimetableResult.findOne({
+          collegeId,
+          created_by: userId,
+          generated_from_id: sourceId === "new" ? null : sourceId,
+          status: "session_buffer",
+        }).lean();
+
+        if (buffer) {
+          const recovered = await loadSavedTimetable({
+            timetableId,
+            savedTimetableId: buffer._id,
+            collegeId,
+          });
+          loadState(timetableId, recovered);
+          return next();
+        }
+      }
+    }
+    next();
+  } catch (e) {
+    console.error("[ensureDurableState] Error:", e);
+    next();
+  }
+}
+
+function getStableTimetableId(req) {
+  const userId = req.user?._id || req.userId;
+  const sourceTimetableId = req.body.sourceTimetableId || req.query.sourceTimetableId || null;
+  return `session-${req.collegeId}-${userId}-${sourceTimetableId || "new"}`;
+}
+
+router.use(ensureDurableState);
+
+async function persistSessionBuffer(timetableId, collegeId, userId) {
+  try {
+    const state = getState(timetableId);
+    if (!state) return;
+
+    const name = state.name || "Session Buffer";
+    // We use a specific status to mark this as an auto-saved buffer
+    await saveTimetable({
+      name,
+      state,
+      collegeId,
+      userId,
+      isBuffer: true,
+    });
+  } catch (e) {
+    console.error("[persistSessionBuffer] Error:", e);
+  }
+}
+
 function buildSessionMeta(existingState = {}, overrides = {}) {
+  const sourceId = overrides.sourceTimetableId || existingState.sourceTimetableId || null;
   return {
     slotSources: existingState.slotSources || {},
     lockedSlots: existingState.lockedSlots || {},
-    sourceTimetableId: existingState.sourceTimetableId || null,
-    generatedFromId: existingState.generatedFromId || null,
+    sourceTimetableId: sourceId,
+    generatedFromId: sourceId,
     parentTimetableId: existingState.parentTimetableId || null,
     lifecycleStatus: existingState.lifecycleStatus || "draft",
     editVersion: existingState.editVersion || 1,
@@ -87,7 +157,7 @@ function getComboFacultyIds(combo) {
 router.post("/initialize", async (req, res) => {
   try {
     const {
-      timetableId,
+      timetableId: requestedTimetableId,
       classes = [],
       faculties = [],
       subjects = [],
@@ -97,10 +167,38 @@ router.post("/initialize", async (req, res) => {
       sourceTimetableId = null,
     } = req.body;
 
-    if (!timetableId) {
-      return res.status(400).json({ ok: false, error: "timetableId is required" });
+    const userId = req.user?._id || req.userId;
+    // Derive a stable session ID for this specific user and source
+    const timetableId = `session-${req.collegeId}-${userId}-${sourceTimetableId || "new"}`;
+
+    // 1. Check if already in memory
+    if (getState(timetableId)) {
+      return res.json({ ok: true, ...getState(timetableId) });
     }
 
+    // 2. Check if a session_buffer exists in DB
+    const existingBuffer = await TimetableResult.findOne({
+      collegeId: req.collegeId,
+      created_by: userId,
+      generated_from_id: sourceTimetableId || null,
+      status: "session_buffer"
+    }).lean();
+
+    if (existingBuffer) {
+      const recoveredState = await loadSavedTimetable({
+        timetableId,
+        savedTimetableId: existingBuffer._id,
+        collegeId: req.collegeId
+      });
+      loadState(timetableId, {
+        ...recoveredState,
+        electiveGroups: electiveGroups.length ? electiveGroups : (recoveredState.electiveGroups || []),
+        constraintConfig: Object.keys(constraintConfig).length ? constraintConfig : (recoveredState.constraintConfig || {})
+      });
+      return res.json({ ok: true, ...getState(timetableId) });
+    }
+
+    // 3. Normal initialization
     initializeState(timetableId, classes, faculties, subjects, config, electiveGroups);
 
     const nextState = {
@@ -122,7 +220,8 @@ router.post("/initialize", async (req, res) => {
 // Valid options
 router.post("/valid-options", async (req, res) => {
   try {
-    const { timetableId, classId, day, hour } = req.body;
+    const { classId, day, hour } = req.body;
+    const timetableId = getStableTimetableId(req);
     assertState(timetableId);
 
     const state = getState(timetableId);
@@ -255,7 +354,8 @@ router.post("/valid-options", async (req, res) => {
 
 // Place
 router.post("/place", async (req, res) => {
-  const { timetableId, classId, day, hour, comboId } = req.body;
+  const { classId, day, hour, comboId } = req.body;
+  const timetableId = getStableTimetableId(req);
   assertState(timetableId);
 
   const lockKey = `${timetableId}|${classId}|${day}|${hour}`;
@@ -289,6 +389,7 @@ router.post("/place", async (req, res) => {
     }
 
     setState(timetableId, newState);
+    persistSessionBuffer(timetableId, req.collegeId, req.user?._id || req.userId);
     return res.json({ ok: true, ...newState });
   } catch (e) {
     return res.json({ ok: false, error: e.message });
@@ -299,7 +400,8 @@ router.post("/place", async (req, res) => {
 
 // Auto-fill
 router.post("/auto-fill", async (req, res) => {
-  const { timetableId, classId } = req.body;
+  const { classId } = req.body;
+  const timetableId = getStableTimetableId(req);
   assertState(timetableId);
 
   const lockKey = `${timetableId}|autofill|${classId}`;
@@ -309,6 +411,9 @@ router.post("/auto-fill", async (req, res) => {
 
   try {
     const result = await runAutoFill({ timetableId, classId });
+    if (result.ok) {
+        persistSessionBuffer(timetableId, req.collegeId, req.user?._id || req.userId);
+    }
     return res.json(result.ok ? { ok: true, ...result } : result);
   } finally {
     unlockSlot(lockKey);
@@ -317,7 +422,8 @@ router.post("/auto-fill", async (req, res) => {
 
 // Clear all
 router.post("/clear-all", async (req, res) => {
-  const { timetableId, config } = req.body;
+  const { config } = req.body;
+  const timetableId = getStableTimetableId(req);
   assertState(timetableId);
 
   const [classes, faculties, subjects] = await Promise.all([
@@ -334,12 +440,14 @@ router.post("/clear-all", async (req, res) => {
       lifecycleStatus: "draft",
     }),
   });
+  persistSessionBuffer(timetableId, req.collegeId, req.user?._id || req.userId);
   return res.json({ ok: true, ...getState(timetableId) });
 });
 
 router.post("/validate-move", async (req, res) => {
   try {
-    const { timetableId, from, to } = req.body;
+    const { from, to } = req.body;
+    const timetableId = getStableTimetableId(req);
     assertState(timetableId);
 
     const state = getState(timetableId);
@@ -352,7 +460,8 @@ router.post("/validate-move", async (req, res) => {
 
 router.post("/move", async (req, res) => {
   try {
-    const { timetableId, from, to } = req.body;
+    const { from, to } = req.body;
+    const timetableId = getStableTimetableId(req);
     assertState(timetableId);
 
     const lockKey = `${timetableId}|move|${String(from?.classId || "")}|${from?.day}|${from?.hour}|${String(to?.classId || "")}|${to?.day}|${to?.hour}`;
@@ -369,6 +478,7 @@ router.post("/move", async (req, res) => {
       }
 
       setState(timetableId, result.newState);
+      persistSessionBuffer(timetableId, req.collegeId, req.user?._id || req.userId);
       return res.json({ ok: true, ...result, ...getState(timetableId) });
     } finally {
       unlockSlot(lockKey);
@@ -381,7 +491,8 @@ router.post("/move", async (req, res) => {
 // Load a saved timetable
 router.post("/load", async (req, res) => {
   try {
-    const { timetableId, savedTimetableId } = req.body;
+    const { savedTimetableId } = req.body;
+    const timetableId = getStableTimetableId(req);
     assertState(timetableId);
 
     const savedState = await loadSavedTimetable({
@@ -407,16 +518,26 @@ router.post("/load", async (req, res) => {
 // Save
 router.post("/save", async (req, res) => {
   try {
-    const { timetableId, name, savedTimetableId } = req.body;
+    const { name, savedTimetableId } = req.body;
+    const timetableId = getStableTimetableId(req);
     assertState(timetableId);
 
+    const userId = req.user?._id || req.userId;
     const state = getState(timetableId);
     const saved = await saveTimetable({
       name,
       state,
       collegeId: req.collegeId,
-      userId: req.user?._id || null,
+      userId,
       savedTimetableId,
+    });
+
+    // Clear session buffer on successful save
+    await TimetableResult.deleteMany({
+      collegeId: req.collegeId,
+      created_by: userId,
+      generated_from_id: state.sourceTimetableId || null,
+      status: "session_buffer"
     });
 
     res.json({
@@ -441,16 +562,16 @@ router.get("/processed-assignments", async (req, res) => {
 
 // Delete
 router.post("/delete", async (req, res) => {
-  const { timetableId } = req.body;
+  const timetableId = getStableTimetableId(req);
   assertState(timetableId);
-
   deleteState(timetableId);
   return res.json({ ok: true });
 });
 
 // Clear a specific slot
 router.post("/clear-slot", async (req, res) => {
-  const { timetableId, classId, day, hour } = req.body;
+  const { classId, day, hour } = req.body;
+  const timetableId = getStableTimetableId(req);
   assertState(timetableId);
 
   try {
@@ -477,6 +598,7 @@ router.post("/clear-slot", async (req, res) => {
       newState.slotSources[targetClassId][day][hour] = "manual";
     }
     setState(timetableId, newState);
+    persistSessionBuffer(timetableId, req.collegeId, req.user?._id || req.userId);
     return res.json({ ok: true, ...newState });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -484,7 +606,8 @@ router.post("/clear-slot", async (req, res) => {
 });
 
 router.post("/toggle-lock", async (req, res) => {
-  const { timetableId, classId, day, hour } = req.body;
+  const { classId, day, hour } = req.body;
+  const timetableId = getStableTimetableId(req);
   assertState(timetableId);
 
   try {
@@ -498,6 +621,7 @@ router.post("/toggle-lock", async (req, res) => {
 
     newState.lockedSlots[classId][day][hour] = !newState.lockedSlots[classId][day][hour];
     setState(timetableId, newState);
+    persistSessionBuffer(timetableId, req.collegeId, req.user?._id || req.userId);
     return res.json({ ok: true, ...newState });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });

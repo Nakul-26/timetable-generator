@@ -142,6 +142,11 @@ const ManageElectiveSubjects = () => {
     return (
         <div className="manage-container">
             <h2>Manage Elective Teacher Requirements</h2>
+            <div className="success-message" style={{ marginBottom: 20, backgroundColor: '#e7f3ff', color: '#004085', border: '1px solid #b8daff' }}>
+                <strong>MAPPING MODE:</strong> Use this page to define bulk mappings. After saving, go to 
+                <a href="/teaching-allocations" style={{ marginLeft: 5, fontWeight: 'bold' }}>Manage Allocations</a> 
+                and click <strong>"Sync from Mappings"</strong> to automatically generate teaching assignments.
+            </div>
             <div className="elective-help-box">
                 <p><b>How to use this page:</b></p>
                 <p>1. Select a class to load its elective subjects.</p>

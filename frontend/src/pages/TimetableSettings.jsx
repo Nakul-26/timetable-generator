@@ -131,12 +131,17 @@ function parseJsonOrDefault(text, fallback) {
   }
 }
 
+function ControlHelp({ children }) {
+  return <span className="tt-control-help">{children}</span>;
+}
+
 function TimetableSettings() {
   const [config, setConfig] = useState(() => normalizeConstraintConfig(DEFAULT_CONSTRAINT_CONFIG));
   const [savedAt, setSavedAt] = useState("");
   const [jsonMode, setJsonMode] = useState(false);
   const [showPolicySettings, setShowPolicySettings] = useState(true);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [showPolicyReference, setShowPolicyReference] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState("custom");
   const [inputMode, setInputMode] = useState("EXPLICIT");
   const [jsonText, setJsonText] = useState(() =>
@@ -405,8 +410,7 @@ function TimetableSettings() {
       <div className="tt-settings-hero">
         <h2>Timetable Settings</h2>
         <p>
-          Start simple: set schedule shape, choose a policy preset, then adjust only what you need.
-          Advanced controls are available but hidden by default.
+          Each row shows one control, the value you can set, and what that value changes in generation.
         </p>
       </div>
 
@@ -414,7 +418,10 @@ function TimetableSettings() {
         <button className="primary-btn" onClick={save}>Save Settings</button>
         <button className="secondary-btn" onClick={resetDefaults}>Reset Defaults</button>
         <button className="secondary-btn" onClick={() => setShowAdvancedSettings((v) => !v)}>
-          {showAdvancedSettings ? "Hide Advanced Settings" : "Show Advanced Settings"}
+          {showAdvancedSettings ? "Hide Advanced" : "Show Advanced"}
+        </button>
+        <button className="secondary-btn" onClick={() => setShowPolicyReference((v) => !v)}>
+          {showPolicyReference ? "Hide Policy Reference" : "Policy Reference"}
         </button>
         <Link className="secondary-btn" to="/timetable">Go To Generate</Link>
       </div>
@@ -428,6 +435,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
           <label>
             Preset
+            <ControlHelp>Applies a ready-made balance of strictness, teacher comfort, and compactness.</ControlHelp>
             <select
               value={selectedPreset}
               onChange={(e) => applyPreset(e.target.value)}
@@ -440,22 +448,13 @@ function TimetableSettings() {
           </label>
           <label>
             Policy Controls
+            <ControlHelp>Shows or hides the main timetable-quality rules below.</ControlHelp>
             <button
               type="button"
               className="secondary-btn"
               onClick={() => setShowPolicySettings((v) => !v)}
             >
               {showPolicySettings ? "Hide Policy Settings" : "Show Policy Settings"}
-            </button>
-          </label>
-          <label>
-            Expert Controls
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={() => setShowAdvancedSettings((v) => !v)}
-            >
-              {showAdvancedSettings ? "Hide Advanced" : "Show Advanced"}
             </button>
           </label>
         </div>
@@ -469,6 +468,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
           <label>
             Combo Generation Mode
+            <ControlHelp>Choose whether generation uses Teaching Allocations or the older mapping tables.</ControlHelp>
             <select
               value={inputMode}
               onChange={(e) => setInputMode(e.target.value)}
@@ -480,7 +480,8 @@ function TimetableSettings() {
         </div>
       </section>
 
-      <section className="tt-settings-section">
+      {showPolicyReference ? (
+      <section className="tt-settings-section tt-settings-reference">
         <h3>What Each Policy Means</h3>
         <p className="tt-settings-help">
           Simple definitions for common timetable rules. Use this as a quick reference.
@@ -544,6 +545,7 @@ function TimetableSettings() {
           </div>
         </div>
       </section>
+      ) : null}
 
       <section className="tt-settings-section">
         <h3>Schedule Basics</h3>
@@ -553,6 +555,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Days Per Week
+          <ControlHelp>How many timetable rows each class can use in a week.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -567,6 +570,7 @@ function TimetableSettings() {
         </label>
         <label>
           Hours Per Day
+          <ControlHelp>How many periods are available on each teaching day.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -581,6 +585,7 @@ function TimetableSettings() {
         </label>
         <label>
           Break Hours (comma separated)
+          <ControlHelp>Periods that must stay empty, using zero-based indexes like 2,5.</ControlHelp>
           <input
             type="text"
             value={config.schedule.breakHours.join(",")}
@@ -603,6 +608,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Lab Block Size
+          <ControlHelp>How many continuous periods a lab placement consumes.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -617,6 +623,7 @@ function TimetableSettings() {
         </label>
         <label>
           Theory Block Size
+          <ControlHelp>How many continuous periods a normal theory placement consumes.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -642,6 +649,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Weekly Subject Hours
+          <ControlHelp>Hard means every subject must hit its weekly target; soft allows fallback schedules.</ControlHelp>
           <select
             value={config.weeklySubjectHours.hard ? "hard" : "soft"}
             onChange={(e) =>
@@ -660,6 +668,7 @@ function TimetableSettings() {
         </label>
         <label>
           Weekly Hours Soft Strength
+          <ControlHelp>How strongly the solver avoids missing required subject hours when the rule is soft.</ControlHelp>
           <select
             value={strengths.weeklySubjectHours}
             onChange={(e) =>
@@ -687,6 +696,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           No Gaps Rule
+          <ControlHelp>Controls whether empty periods between classes are forbidden, discouraged, or ignored.</ControlHelp>
           <select
             value={
               config.noGaps.hard ? "hard" : config.noGaps.weight > 0 ? "soft" : "disabled"
@@ -720,6 +730,7 @@ function TimetableSettings() {
         </label>
         <label>
           No Gaps Soft Strength
+          <ControlHelp>How strongly the solver avoids class gaps when no-gaps is set to soft.</ControlHelp>
           <select
             value={strengths.noGaps}
             onChange={(e) =>
@@ -750,6 +761,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Maximum Periods Per Teacher (Per Day)
+          <ControlHelp>Caps each teacher's daily load before overload penalties apply.</ControlHelp>
           <input
             type="number"
             min="0"
@@ -767,6 +779,7 @@ function TimetableSettings() {
         </label>
         <label>
           Teacher Workload Strictness
+          <ControlHelp>How strongly the solver avoids assigning above the teacher daily limit.</ControlHelp>
           <select
             value={strengths.teacherDailyOverload}
             onChange={(e) =>
@@ -793,6 +806,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Maximum Consecutive Classes (Teacher)
+          <ControlHelp>Limits back-to-back periods for a teacher.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -810,6 +824,7 @@ function TimetableSettings() {
         </label>
         <label>
           Consecutive Limit Strictness (Teacher)
+          <ControlHelp>How strongly the solver avoids teacher runs longer than the limit.</ControlHelp>
           <select
             value={strengths.teacherContinuity}
             onChange={(e) =>
@@ -836,6 +851,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Maximum Consecutive Classes (Class)
+          <ControlHelp>Limits back-to-back periods for a class section.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -853,6 +869,7 @@ function TimetableSettings() {
         </label>
         <label>
           Consecutive Limit Strictness (Class)
+          <ControlHelp>How strongly the solver avoids class runs longer than the limit.</ControlHelp>
           <select
             value={strengths.classContinuity}
             onChange={(e) =>
@@ -879,6 +896,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Teacher Recovery Break
+          <ControlHelp>Requires or prefers a gap between two classes for the same teacher.</ControlHelp>
           <select
             value={config.teacherRecoveryBreak.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -897,6 +915,7 @@ function TimetableSettings() {
         </label>
         <label>
           Min Free Hours Between Classes
+          <ControlHelp>Minimum free periods to leave between a teacher's separate teaching blocks.</ControlHelp>
           <input
             type="number"
             min="0"
@@ -915,6 +934,7 @@ function TimetableSettings() {
         </label>
         <label>
           Recovery Rule Mode
+          <ControlHelp>Hard forbids violations; soft only penalizes them.</ControlHelp>
           <select
             value={config.teacherRecoveryBreak.hard ? "hard" : "soft"}
             onChange={(e) =>
@@ -934,6 +954,7 @@ function TimetableSettings() {
         </label>
         <label>
           Recovery Strength
+          <ControlHelp>How strongly soft recovery-break violations are avoided.</ControlHelp>
           <select
             value={strengths.teacherRecoveryBreak}
             onChange={(e) =>
@@ -961,6 +982,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Subject Max Per Day
+          <ControlHelp>Maximum times the same subject should appear for a class on one day.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -978,6 +1000,7 @@ function TimetableSettings() {
         </label>
         <label>
           Subject Clustering Strength
+          <ControlHelp>How strongly the solver avoids repeating the same subject in a day.</ControlHelp>
           <select
             value={strengths.subjectClustering}
             onChange={(e) =>
@@ -1004,6 +1027,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Subject Week Distribution
+          <ControlHelp>Turns on spreading or compacting each subject across the week.</ControlHelp>
           <select
             value={config.subjectDistribution.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1022,6 +1046,7 @@ function TimetableSettings() {
         </label>
         <label>
           Distribution Mode
+          <ControlHelp>Spread puts a subject across more days; compact groups it into fewer days.</ControlHelp>
           <select
             value={config.subjectDistribution.mode}
             onChange={(e) =>
@@ -1041,6 +1066,7 @@ function TimetableSettings() {
         </label>
         <label>
           Distribution Strength
+          <ControlHelp>How strongly the selected distribution mode is preferred.</ControlHelp>
           <select
             value={strengths.subjectDistribution}
             onChange={(e) =>
@@ -1068,6 +1094,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           High-Hour Subject Timing
+          <ControlHelp>Moves subjects with many weekly hours toward early or late periods.</ControlHelp>
           <select
             value={config.highLoadSubjectTiming.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1086,6 +1113,7 @@ function TimetableSettings() {
         </label>
         <label>
           Timing Preference
+          <ControlHelp>Choose whether heavy subjects should be scheduled earlier or later in the day.</ControlHelp>
           <select
             value={config.highLoadSubjectTiming.mode}
             onChange={(e) =>
@@ -1105,6 +1133,7 @@ function TimetableSettings() {
         </label>
         <label>
           Min Hours/Week To Qualify
+          <ControlHelp>Only subjects at or above this weekly-hour count receive timing preference.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -1123,6 +1152,7 @@ function TimetableSettings() {
         </label>
         <label>
           Timing Strength
+          <ControlHelp>How strongly high-hour subject timing is preferred.</ControlHelp>
           <select
             value={strengths.highLoadSubjectTiming}
             onChange={(e) =>
@@ -1150,6 +1180,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Daily Compactness
+          <ControlHelp>Packs each class day into a tighter block of periods.</ControlHelp>
           <select
             value={config.dailyCompactness.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1168,6 +1199,7 @@ function TimetableSettings() {
         </label>
         <label>
           Daily Compactness Strength
+          <ControlHelp>How strongly the solver prefers earlier, compact daily schedules.</ControlHelp>
           <select
             value={strengths.dailyCompactness}
             onChange={(e) =>
@@ -1198,6 +1230,7 @@ function TimetableSettings() {
         </label>
         <label>
           Weekly Front Loading
+          <ControlHelp>Moves more periods toward earlier days of the week.</ControlHelp>
           <select
             value={config.weeklyFrontLoading.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1216,6 +1249,7 @@ function TimetableSettings() {
         </label>
         <label>
           Weekly Front Loading Strength
+          <ControlHelp>How strongly later-week periods are avoided.</ControlHelp>
           <select
             value={strengths.weeklyFrontLoading}
             onChange={(e) =>
@@ -1246,6 +1280,7 @@ function TimetableSettings() {
         </label>
         <label>
           Weekly Balance
+          <ControlHelp>Spreads each class's total periods more evenly across teaching days.</ControlHelp>
           <select
             value={config.weeklyBalance.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1264,6 +1299,7 @@ function TimetableSettings() {
         </label>
         <label>
           Weekly Balance Strength
+          <ControlHelp>How strongly uneven daily class loads are penalized.</ControlHelp>
           <select
             value={strengths.weeklyBalance}
             onChange={(e) =>
@@ -1446,6 +1482,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Teacher Availability
+          <ControlHelp>Turns teacher unavailable-slot rules on or off.</ControlHelp>
           <select
             value={config.teacherAvailability.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1464,6 +1501,7 @@ function TimetableSettings() {
         </label>
         <label>
           Teacher Availability Mode
+          <ControlHelp>Hard blocks unavailable slots completely; soft only penalizes them.</ControlHelp>
           <select
             value={config.teacherAvailability.hard ? "hard" : "soft"}
             onChange={(e) =>
@@ -1483,6 +1521,7 @@ function TimetableSettings() {
         </label>
         <label>
           Teacher Availability Strength
+          <ControlHelp>How strongly soft teacher availability conflicts are avoided.</ControlHelp>
           <select
             value={strengths.teacherAvailability}
             onChange={(e) =>
@@ -1566,6 +1605,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Teacher Weekly Load Balance
+          <ControlHelp>Controls weekly minimum, target, and maximum load rules for teachers.</ControlHelp>
           <select
             value={config.teacherWeeklyLoadBalance.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1584,6 +1624,7 @@ function TimetableSettings() {
         </label>
         <label>
           Min Weekly Load
+          <ControlHelp>Minimum weekly periods expected for each teacher when enabled.</ControlHelp>
           <input
             type="number"
             min="0"
@@ -1602,6 +1643,7 @@ function TimetableSettings() {
         </label>
         <label>
           Target Weekly Load
+          <ControlHelp>Preferred weekly teaching load for each teacher.</ControlHelp>
           <input
             type="number"
             min="0"
@@ -1620,6 +1662,7 @@ function TimetableSettings() {
         </label>
         <label>
           Max Weekly Load
+          <ControlHelp>Maximum weekly periods allowed or preferred for each teacher.</ControlHelp>
           <input
             type="number"
             min="0"
@@ -1730,6 +1773,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Class Daily Minimum Load
+          <ControlHelp>Requires or prefers each active class day to have a minimum number of periods.</ControlHelp>
           <select
             value={config.classDailyMinimumLoad.enabled ? "enabled" : "disabled"}
             onChange={(e) =>
@@ -1932,6 +1976,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           Solver Time Limit (seconds)
+          <ControlHelp>Maximum total time the solver can spend searching for schedules.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -1946,6 +1991,7 @@ function TimetableSettings() {
         </label>
         <label>
           Generated Options Count
+          <ControlHelp>How many timetable options to generate for comparison.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -1964,6 +2010,7 @@ function TimetableSettings() {
         </label>
         <label>
           Max Candidates Per Combo
+          <ControlHelp>Limits search size per combo; lower is faster, higher explores more placements.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -1981,6 +2028,7 @@ function TimetableSettings() {
         </label>
         <label>
           Early Abort If No Solution
+          <ControlHelp>Stops an attempt early when no feasible schedule appears in the abort window.</ControlHelp>
           <select
             value={config.solver.earlyAbortNoSolution ? "yes" : "no"}
             onChange={(e) =>
@@ -2001,6 +2049,7 @@ function TimetableSettings() {
         <div className="filters-container tt-settings-row">
         <label>
           No-Solution Abort Ratio
+          <ControlHelp>Portion of the time limit to wait before early abort can trigger.</ControlHelp>
           <input
             type="number"
             min="0"
@@ -2020,6 +2069,7 @@ function TimetableSettings() {
         </label>
         <label>
           No-Solution Abort Min Seconds
+          <ControlHelp>Minimum seconds to wait before early abort can stop an attempt.</ControlHelp>
           <input
             type="number"
             min="1"
@@ -2038,6 +2088,7 @@ function TimetableSettings() {
         </label>
         <label>
           Min Time Per Attempt (seconds)
+          <ControlHelp>Smallest time slice given to each generation attempt.</ControlHelp>
           <input
             type="number"
             min="5"

@@ -211,14 +211,11 @@ const ManualTimetable = () => {
         }
         setComboIdToDetails(comboDetails);
 
-        const currentTimetableId = `manual-${Date.now()}`;
         const electiveGroups = Array.isArray(electiveGroupsRes?.data) ? electiveGroupsRes.data : [];
-        setTimetableId(currentTimetableId);
         setSourceTimetableMeta(sourceRes.data || null);
         setEditableTimetableName(sourceRes.data?.name || '');
 
         const initResponse = await api.post('/manual/initialize', {
-          timetableId: currentTimetableId,
           classes: fetchedClasses,
           faculties: fetchedFaculties,
           subjects: fetchedSubjects,
@@ -227,10 +224,23 @@ const ManualTimetable = () => {
           constraintConfig,
           sourceTimetableId,
         });
+        
         if (!initResponse.data.ok) throw new Error('Failed to initialize timetable state.');
 
-        if (sourceTimetableId) {
-          const loadResponse = await api.post('/manual/load', { timetableId: currentTimetableId, savedTimetableId: sourceTimetableId });
+        // Use the stable session ID returned by the backend
+        const stableTimetableId = initResponse.data.timetableId;
+        setTimetableId(stableTimetableId);
+
+        // If the backend recovered a session buffer, it will have classTimetable populated
+        const isRecovered = initResponse.data.classTimetable && Object.keys(initResponse.data.classTimetable).length > 0;
+
+        if (isRecovered) {
+          applyServerState(initResponse.data);
+          // If recovered, we still need to set savedTimetableId if it was a manual draft
+          setSavedTimetableId(sourceRes.data?.source === 'manual' && sourceRes.data?.status !== 'generated' ? sourceTimetableId : null);
+        } else if (sourceTimetableId) {
+          // If not recovered but has source, load the original
+          const loadResponse = await api.post('/manual/load', { sourceTimetableId, savedTimetableId: sourceTimetableId });
           if (!loadResponse.data.ok) throw new Error(loadResponse.data.error || 'Failed to load source timetable.');
           applyServerState(loadResponse.data);
           setSavedTimetableId(sourceRes.data?.source === 'manual' && sourceRes.data?.status !== 'generated' ? sourceTimetableId : null);

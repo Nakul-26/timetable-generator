@@ -17,80 +17,63 @@ const HomePage = () => (
     </section>
 
     <section className="guide-section">
-      <h2>2. Core Data (What to add)</h2>
+      <h2>2. Core Data (The Foundation)</h2>
       <p>These are the pieces needed to build a timetable. Add them first.</p>
       <ul>
-        <li><strong>Faculties (Teachers):</strong> Add each teacher with their name and subjects they can teach. Find this under the <a href="/faculties">Faculties</a> page.</li>
-        <li><strong>Subjects:</strong> Add every subject offered by the college on the <a href="/subjects">Subjects</a> page.</li>
-        <li><strong>Classes (Student groups):</strong> Create class records (course, year, section) on the <a href="/classes">Classes</a> page.</li>
-        <li><strong>Teacher-Subject Combos:</strong> For each teacher, link the subjects they can teach. This ensures assignments choose only valid teacher-subject pairs.</li>
+        <li><strong>Faculties (Teachers):</strong> Add each teacher on the <a href="/faculties">Faculties</a> page.</li>
+        <li><strong>Subjects:</strong> Add every subject on the <a href="/subjects">Subjects</a> page.</li>
+        <li><strong>Classes:</strong> Create class student groups (e.g. CSE 3-A) on the <a href="/classes">Classes</a> page.</li>
       </ul>
     </section>
 
     <section className="guide-section">
-      <h2>3. Assignments (Who teaches what)</h2>
-      <p>Tell the system which subject is taught to which class and by which teacher.</p>
-      <ol>
-        <li>Open the <a href="/class-subjects">Class-Subjects</a> page to assign subjects to classes.</li>
-        <li>Use <a href="/class-faculties">Class-Faculties</a> or the Assignments button on a class to choose teachers for each subject.</li>
-        <li>For elective subjects, use the <a href="/class-elective-subjects">Elective Subjects</a> page to create groups and options.</li>
-      </ol>
-      <p>Tip: keep data complete — missing teacher links or subject hours will reduce generator quality.</p>
+      <h2>3. Teaching Allocations (Two Methods)</h2>
+      <p>Tell the system who teaches what. You can choose the method that fits your college best.</p>
+      
+      <h3>Method A: Direct Entry (Recommended for Small Colleges)</h3>
+      <ul>
+        <li>Go directly to <a href="/teaching-allocations">Manage Allocations</a>.</li>
+        <li>Pick a Class + Subject + Teacher and enter the weekly hours.</li>
+        <li>This is fast and gives you total control.</li>
+      </ul>
+
+      <h3>Method B: Mapping-Based (Recommended for Large Colleges)</h3>
+      <ul>
+        <li>Step 1: Link Subjects to Classes on the <a href="/class-subjects">Class-Subjects</a> page.</li>
+        <li>Step 2: Define which teachers teach which subjects on the <a href="/teacher-subject-combos">Teacher-Subjects</a> page.</li>
+        <li>Step 3: Link teachers to classes on the <a href="/class-faculties">Class-Faculties</a> page.</li>
+        <li>Step 4: Go to <a href="/teaching-allocations">Manage Allocations</a> and click <strong>"Sync from Mappings (Bulk)"</strong>.</li>
+        <li>The system will automatically intersect your mappings to create assignments.</li>
+      </ul>
     </section>
 
     <section className="guide-section">
       <h2>4. Timetable Generation</h2>
-      <p>After data and assignments are ready:</p>
+      <p>After data and teaching allocations are ready:</p>
       <ul>
         <li>Go to the <a href="/timetable">Timetable</a> page.</li>
-        <li>Choose the class or full-generation options if available.</li>
-        <li>Use <strong>Fix Slots</strong> to lock a subject to a particular day/time before generating.</li>
-        <li>Click <strong>Generate</strong>. The server runs the generator and returns a result you can view and save.</li>
+        <li><strong>Pre-Generation Audit:</strong> Review the health report to catch data errors early.</li>
+        <li>Use <strong>Fix Slots</strong> to lock specific subjects to a time (e.g. morning labs).</li>
+        <li>Click <strong>Generate</strong> to find a valid schedule.</li>
       </ul>
-      <p>If you don’t like the result, use <strong>Regenerate</strong> to try another solution.</p>
     </section>
 
     <section className="guide-section">
-      <h2>5. Superadmin Features</h2>
+      <h2>5. Common Tasks</h2>
       <ul>
-        <li><strong>Manage Colleges:</strong> Superadmins can create, edit, and delete colleges under the Superadmin menu.</li>
-        <li><strong>Manage Admins:</strong> Create or remove admin users and assign them to colleges.</li>
-        <li><strong>Act as college:</strong> Use the top-bar selector to pick a college. The frontend will add the college id to requests so you can work as that college.</li>
+        <li><strong>Manage Availability:</strong> Block time for teachers on the <a href="/teacher-availability">Availability</a> page.</li>
+        <li><strong>Set Preferences:</strong> Define "Avoid First Period" etc. on the <a href="/teacher-preferences">Preferences</a> page.</li>
+        <li><strong>Download/Export:</strong> Use the export buttons on the Timetable page for Excel or PDF versions.</li>
       </ul>
     </section>
 
     <section className="guide-section">
-      <h2>6. Exports and Reports</h2>
-      <p>Export generated timetables or download reports:</p>
+      <h2>6. Troubleshooting & Support</h2>
       <ul>
-        <li>On the timetable view, use Export to download schedules in supported formats (CSV/Excel/PDF depending on configuration).</li>
-        <li>Save results to reference them later or to share with staff.</li>
+        <li><strong>Generation is slow:</strong> Try reducing constraints or increasing solver time in settings.</li>
+        <li><strong>Infeasible results:</strong> Check the Audit report. Usually, a teacher is assigned too many hours.</li>
+        <li><strong>Need help?</strong> See DEPLOYMENT.md in the project root.</li>
       </ul>
-    </section>
-
-    <section className="guide-section">
-      <h2>7. Common Tasks — Short How-tos</h2>
-      <ul>
-        <li><strong>Add a teacher:</strong> Open <a href="/faculties">Faculties</a> → Add → fill details → save.</li>
-        <li><strong>Link a teacher to a subject:</strong> In the teacher's edit screen, add the subject under Teacher-Subject Combos.</li>
-        <li><strong>Create a class and assign subjects:</strong> Classes → Create class → go to Assignments → add subjects and teachers.</li>
-        <li><strong>Regenerate timetable:</strong> Timetable → select scope → click Generate → review result.</li>
-      </ul>
-    </section>
-
-    <section className="guide-section">
-      <h2>8. Troubleshooting & Tips</h2>
-      <ul>
-        <li>If a page is empty, check the selected college (top-bar) and your login permissions.</li>
-        <li>If generation fails or results are poor: verify subject hours, teacher availability, and that teachers are linked to subjects.</li>
-        <li>Use small, incremental changes — add data then generate for a single class first to validate settings.</li>
-        <li>Contact your system admin if you see permission errors (403) or missing data.</li>
-      </ul>
-    </section>
-
-    <section className="guide-section">
-      <h2>9. Where to find help</h2>
-      <p>Found a bug or need a new feature? Share details with screenshots and steps to reproduce. For deployment help, see DEPLOYMENT.md in the project root.</p>
     </section>
 
     <footer style={{marginTop:20}}>
