@@ -35,11 +35,11 @@ const Navbar = () => {
                 window.location.reload();
               }
             }
-          } catch (e) {
+          } catch {
             // ignore
           }
         }
-      } catch (err) {
+      } catch {
         // ignore — selector can stay empty
       }
     })();
@@ -111,7 +111,9 @@ const Navbar = () => {
                   try {
                     if (val) window.localStorage.setItem('selectedCollegeId', val);
                     else window.localStorage.removeItem('selectedCollegeId');
-                  } catch (err) {}
+                  } catch {
+                    // ignore
+                  }
                   setSelectedCollege(val);
                   // reload so pages refetch under new context
                   window.location.reload();

@@ -11,6 +11,7 @@ const CreateAdmin = () => {
   const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     fetchColleges();
@@ -38,7 +39,7 @@ const CreateAdmin = () => {
     setMessage('');
 
     try {
-      const response = await axios.post('/superadmin/admins', formData);
+      await axios.post('/superadmin/admins', formData);
       setMessage('Admin created successfully!');
       setFormData({ email: '', password: '', collegeId: '' });
     } catch (err) {
@@ -65,15 +66,24 @@ const CreateAdmin = () => {
         </div>
         <div className="form-group">
           <label htmlFor="password">Password</label>
-          <input
-            type="password"
-            id="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            required
-            minLength="8"
-          />
+          <div className="password-input-container">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              id="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              required
+              minLength="8"
+            />
+            <button
+              type="button"
+              className="toggle-password-visibility"
+              onClick={() => setShowPassword((prev) => !prev)}
+            >
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </div>
         <div className="form-group">
           <label htmlFor="collegeId">College</label>

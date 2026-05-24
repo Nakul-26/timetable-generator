@@ -15,7 +15,7 @@ API.interceptors.request.use((config) => {
         config.headers["x-college-id"] = selected;
       }
     }
-  } catch (e) {
+  } catch {
     // ignore localStorage errors
   }
   return config;

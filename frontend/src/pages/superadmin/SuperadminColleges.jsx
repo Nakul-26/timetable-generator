@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from '../../api/axios.jsx';
 import './SuperadminDashboard.css';
 
 const SuperadminColleges = () => {
+  const navigate = useNavigate();
   const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -71,18 +73,9 @@ const SuperadminColleges = () => {
         <h1>College Management</h1>
         <div className="toolbar">
           <span className="count-badge">{colleges.length} colleges</span>
-          <button className="btn btn-edit" onClick={async () => {
-            const name = window.prompt('College name') || '';
-            if (!name) return;
-            const code = window.prompt('College code') || '';
-            const collegeId = window.prompt('College ID (unique)') || '';
-            try {
-              setActionMessage("Creating college. Please wait...");
-              await axios.post('/superadmin/colleges', { name, code, collegeId });
-              fetchColleges();
-            } catch (err) { alert(err?.response?.data?.error || 'Create failed'); }
-            finally { setActionMessage(""); }
-          }}>New college</button>
+          <button className="btn btn-edit" onClick={() => navigate('/superadmin/create-college')}>
+            New college
+          </button>
         </div>
       </div>
       {selectedCollegeIds.length > 0 ? (

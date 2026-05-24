@@ -14,7 +14,6 @@ const ViewTimetable = () => {
     const [combos, setCombos] = useState([]);
     const [subjects, setSubjects] = useState([]);
     const [faculties, setFaculties] = useState([]);
-    const [classSubjects, setClassSubjects] = useState([]);
     
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -31,13 +30,12 @@ const ViewTimetable = () => {
         const fetchData = async () => {
             try {
                 setIsLoading(true);
-                const [ttRes, classesRes, combosRes, subjectsRes, facultiesRes, classSubjectsRes] = await Promise.all([
+                const [ttRes, classesRes, combosRes, subjectsRes, facultiesRes] = await Promise.all([
                     api.get(`/timetable/${id}`),
                     api.get('/classes'),
                     api.get('/teacher-subject-combos'),
                     api.get('/subjects'),
-                    api.get('/faculties'),
-                    api.get('/class-subjects')
+                    api.get('/faculties')
                 ]);
 
                 setTimetable(ttRes.data);
@@ -45,7 +43,6 @@ const ViewTimetable = () => {
                 setCombos([...(combosRes.data || []), ...(ttRes.data?.combos || [])]);
                 setSubjects([...(ttRes.data?.subjects || []), ...(subjectsRes.data || [])]);
                 setFaculties([...(ttRes.data?.faculties || []), ...(facultiesRes.data || [])]);
-                setClassSubjects(classSubjectsRes.data);
                 
                 setError(null);
             } catch (err) {
@@ -411,7 +408,12 @@ const ViewTimetable = () => {
         try {
             setActiveExport(mode);
             const response = await api.get(`/timetable/${id}/export/excel`, {
-                params: { mode },
+                params: { 
+                    mode,
+                    classId: selectedClass || undefined,
+                    facultyId: selectedFaculty || undefined,
+                    subjectId: selectedSubject || undefined,
+                },
                 responseType: 'blob',
             });
 

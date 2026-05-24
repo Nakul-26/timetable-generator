@@ -45,6 +45,32 @@
   border-color: var(--primary-color);
 }
 
+.password-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-container input {
+  padding-right: 60px;
+}
+
+.toggle-password-visibility {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #ff6b6b;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px;
+  font-size: 0.9rem;
+}
+
+.toggle-password-visibility:hover {
+  text-decoration: underline;
+}
+
 button[type="submit"] {
   background: var(--primary-gradient);
   color: white;

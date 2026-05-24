@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import api from '../../api/axios';
@@ -85,7 +85,6 @@ const ManualTimetable = () => {
   const [facultyIdToName, setFacultyIdToName] = useState({});
   const [requiredHoursByClassSubject, setRequiredHoursByClassSubject] = useState({});
   const [classTimetable, setClassTimetable] = useState({});
-  const [teacherTimetable, setTeacherTimetable] = useState({});
   const [subjectHoursAssigned, setSubjectHoursAssigned] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [isAutoFilling, setIsAutoFilling] = useState({});
@@ -109,7 +108,6 @@ const ManualTimetable = () => {
 
   const applyServerState = (payload) => {
     setClassTimetable(payload.classTimetable || {});
-    setTeacherTimetable(payload.teacherTimetable || {});
     setSubjectHoursAssigned(payload.subjectHoursAssigned || {});
     setSlotSources(payload.slotSources || {});
     setLockedSlots(payload.lockedSlots || {});
@@ -363,7 +361,6 @@ const ManualTimetable = () => {
       const response = await api.post('/manual/delete', { timetableId });
       if (response.data.ok) {
         setClassTimetable({});
-        setTeacherTimetable({});
         setSubjectHoursAssigned({});
         setTimetableId(null);
         setValidOptions({});

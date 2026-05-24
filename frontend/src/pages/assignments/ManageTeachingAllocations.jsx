@@ -168,7 +168,7 @@ const AllocationHistoryModal = ({ isOpen, onClose, allocationId, allocationName 
         try {
           const res = await api.get(`/teaching-allocations/${allocationId}/history`);
           setHistory(res.data);
-        } catch (e) {
+        } catch {
           setError("Failed to fetch history.");
         } finally {
           setLoading(false);
@@ -324,14 +324,7 @@ const ManageTeachingAllocations = () => {
       const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
       return String(subject?.type || "").toLowerCase() === "no_teacher";
     });
-  const anySelectedSubjectsGroupedTeachers =
-    selectedSubjects.length > 0 &&
-    selectedSubjects.some((subjectOption) => {
-      const subject = subjects.find((s) => String(s._id) === String(subjectOption.value));
-      const subjectType = String(subject?.type || "").toLowerCase();
-      // Labs and Electives (multi-subject) keep teachers together
-      return allocationMode === "elective" || allocationMode === "elective_lab" || allocationMode === "lab" || subjectType === "lab";
-    });
+
   useEffect(() => {
     const subjectItems =
       allocationMode === "elective" || allocationMode === "elective_lab"
@@ -642,7 +635,7 @@ const ManageTeachingAllocations = () => {
   const handleSyncToMappings = async () => {
     if (!window.confirm("This will update your Class-Subject and Teacher-Subject mappings to match your current Teaching Allocations. Continue?")) return;
     
-    setSyncToMappings(true);
+    setSyncingToMappings(true);
     setError("");
     try {
       const res = await api.post("/teaching-allocations/sync-to-mappings");
@@ -659,7 +652,7 @@ const ManageTeachingAllocations = () => {
     } catch (e) {
       setError(e?.response?.data?.error || "Failed to sync to mappings.");
     } finally {
-      setSyncToMappings(false);
+      setSyncingToMappings(false);
     }
   };
 

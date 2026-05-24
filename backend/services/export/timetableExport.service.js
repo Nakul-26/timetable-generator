@@ -22,7 +22,7 @@ const MODE_BUILDERS = {
   full: buildFullSheet,
 };
 
-export async function exportTimetableExcel({ timetable, mode }) {
+export async function exportTimetableExcel({ timetable, mode, filters = {} }) {
   const normalizedMode = String(mode || "class").toLowerCase();
   const builder = MODE_BUILDERS[normalizedMode];
 
@@ -30,7 +30,7 @@ export async function exportTimetableExcel({ timetable, mode }) {
     throw new Error(`Unsupported export mode: ${mode}`);
   }
 
-  const context = await buildExportContext(timetable);
+  const context = await buildExportContext(timetable, filters);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Timetable ERP";
   workbook.created = new Date();
@@ -40,9 +40,19 @@ export async function exportTimetableExcel({ timetable, mode }) {
   return workbook;
 }
 
-async function buildExportContext(timetable) {
+async function buildExportContext(timetable, filters = {}) {
   const { days, hours } = getScheduleDimensions(timetable);
-  const classTables = normalizeTables(timetable?.class_timetables || {}, days, hours);
+  let classTables = normalizeTables(timetable?.class_timetables || {}, days, hours);
+  
+  // Apply class filter if present
+  if (filters.classId) {
+    const filteredTables = {};
+    if (classTables[filters.classId]) {
+      filteredTables[filters.classId] = classTables[filters.classId];
+    }
+    classTables = filteredTables;
+  }
+
   const classIds = Object.keys(classTables);
 
   const slotComboIds = collectSlotComboIds(classTables);
@@ -120,6 +130,15 @@ async function buildExportContext(timetable) {
       .map((classId) => classMap.get(classId) || `Class ${classId.slice(-4)}`)
       .filter(Boolean);
 
+    // Check if combo matches faculty/subject filters
+    let matchesFilters = true;
+    if (filters.facultyId) {
+      matchesFilters = facultyIdList.some(id => String(id) === String(filters.facultyId));
+    }
+    if (matchesFilters && filters.subjectId) {
+      matchesFilters = String(subjectId) === String(filters.subjectId);
+    }
+
     comboMetaMap.set(comboId, {
       comboId,
       subjectId,
@@ -128,10 +147,18 @@ async function buildExportContext(timetable) {
       teacherNames,
       classIds: classIdList,
       classNames,
+      matchesFilters,
     });
   }
 
   const teacherViews = buildTeacherViews(classTables, comboMetaMap, classMap, days, hours);
+  
+  // If teacher filter is active, only keep that teacher's view
+  if (filters.facultyId && teacherViews[filters.facultyId]) {
+    const singleTeacherView = {};
+    singleTeacherView[filters.facultyId] = teacherViews[filters.facultyId];
+  }
+
   const dayLabels = buildDayLabels(days);
   const periodLabels = Array.from({ length: hours }, (_, index) => `P${index + 1}`);
 
@@ -145,12 +172,13 @@ async function buildExportContext(timetable) {
     comboMetaMap,
     teacherViews,
     teacherNameMap: facultyMap,
+    filters,
   };
 }
 
 async function buildClassSheets(workbook, context) {
   const usedNames = new Set();
-  const sortedClassIds = [...Object.keys(context.classTables)].sort((left, right) =>
+  let sortedClassIds = [...Object.keys(context.classTables)].sort((left, right) =>
     (context.classMap.get(left) || left).localeCompare(context.classMap.get(right) || right)
   );
 
@@ -163,12 +191,12 @@ async function buildClassSheets(workbook, context) {
   for (const classId of sortedClassIds) {
     const className = context.classMap.get(classId) || `Class ${classId.slice(-4)}`;
     const sheet = workbook.addWorksheet(makeSheetName(className, usedNames));
-    sheet.addRow(["Period", ...context.dayLabels]);
+    sheet.addRow(["Day", ...context.periodLabels]);
 
-    for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
-      const row = [`P${hourIndex + 1}`];
+    for (let dayIndex = 0; dayIndex < context.days; dayIndex += 1) {
+      const row = [context.dayLabels[dayIndex]];
 
-      for (let dayIndex = 0; dayIndex < context.days; dayIndex += 1) {
+      for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
         row.push(
           formatClassSlotCell(context.classTables[classId]?.[dayIndex]?.[hourIndex], context.comboMetaMap)
         );
@@ -177,13 +205,23 @@ async function buildClassSheets(workbook, context) {
       sheet.addRow(row);
     }
 
-    styleWorksheet(sheet, context.dayLabels.length + 1);
+    styleWorksheet(sheet, context.periodLabels.length + 1, {
+      table: context.classTables[classId],
+      comboMetaMap: context.comboMetaMap,
+      hasFilters: !!(context.filters.facultyId || context.filters.subjectId)
+    });
   }
 }
 
 async function buildTeacherSheets(workbook, context) {
   const usedNames = new Set();
-  const teacherIds = Object.keys(context.teacherViews).sort((left, right) =>
+  let teacherIds = Object.keys(context.teacherViews);
+  
+  if (context.filters.facultyId) {
+    teacherIds = teacherIds.filter(id => String(id) === String(context.filters.facultyId));
+  }
+
+  teacherIds.sort((left, right) =>
     (context.teacherNameMap.get(left) || left).localeCompare(context.teacherNameMap.get(right) || right)
   );
 
@@ -196,15 +234,23 @@ async function buildTeacherSheets(workbook, context) {
   for (const teacherId of teacherIds) {
     const teacherName = context.teacherNameMap.get(teacherId) || `Teacher ${teacherId.slice(-4)}`;
     const sheet = workbook.addWorksheet(makeSheetName(teacherName, usedNames));
-    sheet.addRow(["Period", ...context.dayLabels]);
+    sheet.addRow(["Day", ...context.periodLabels]);
 
-    for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
-      const row = [`P${hourIndex + 1}`];
+    for (let dayIndex = 0; dayIndex < context.days; dayIndex += 1) {
+      const row = [context.dayLabels[dayIndex]];
 
-      for (let dayIndex = 0; dayIndex < context.days; dayIndex += 1) {
+      for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
         const entries = context.teacherViews[teacherId]?.[dayIndex]?.[hourIndex] || [];
+        // For teacher sheets, we filter entries that match subject filter if present
+        const filteredEntries = context.filters.subjectId 
+          ? entries.filter(e => {
+              const meta = context.comboMetaMap.get(e.comboId);
+              return meta && String(meta.subjectId) === String(context.filters.subjectId);
+            })
+          : entries;
+
         row.push(
-          entries
+          filteredEntries
             .map((entry) => `${entry.subjectName}\n${entry.classNames.join(", ")}`)
             .join("\n\n")
         );
@@ -213,25 +259,27 @@ async function buildTeacherSheets(workbook, context) {
       sheet.addRow(row);
     }
 
-    styleWorksheet(sheet, context.dayLabels.length + 1);
+    styleWorksheet(sheet, context.periodLabels.length + 1);
   }
 }
 
 async function buildFullSheet(workbook, context) {
   const sheet = workbook.addWorksheet("Full Timetable");
-  sheet.addRow(["Class", "Period", ...context.dayLabels]);
+  sheet.addRow(["Class", "Day", ...context.periodLabels]);
 
-  const sortedClassIds = [...Object.keys(context.classTables)].sort((left, right) =>
+  let sortedClassIds = [...Object.keys(context.classTables)].sort((left, right) =>
     (context.classMap.get(left) || left).localeCompare(context.classMap.get(right) || right)
   );
+
+  const hasFilters = !!(context.filters.facultyId || context.filters.subjectId);
 
   for (const classId of sortedClassIds) {
     const className = context.classMap.get(classId) || `Class ${classId.slice(-4)}`;
 
-    for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
-      const row = [className, `P${hourIndex + 1}`];
+    for (let dayIndex = 0; dayIndex < context.days; dayIndex += 1) {
+      const row = [className, context.dayLabels[dayIndex]];
 
-      for (let dayIndex = 0; dayIndex < context.days; dayIndex += 1) {
+      for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
         row.push(
           formatClassSlotCell(
             context.classTables[classId]?.[dayIndex]?.[hourIndex],
@@ -241,13 +289,31 @@ async function buildFullSheet(workbook, context) {
         );
       }
 
-      sheet.addRow(row);
+      const excelRow = sheet.addRow(row);
+
+      if (hasFilters) {
+        for (let hourIndex = 0; hourIndex < context.hours; hourIndex += 1) {
+          const slot = context.classTables[classId]?.[dayIndex]?.[hourIndex];
+          const comboIds = getSlotComboIds(slot);
+          const isMatch = comboIds.some(cid => context.comboMetaMap.get(cid)?.matchesFilters);
+          
+          if (comboIds.length > 0 && !isMatch) {
+            const cell = excelRow.getCell(hourIndex + 3);
+            cell.font = { color: { argb: "FFAAAAAA" } };
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF9F9F9" },
+            };
+          }
+        }
+      }
     }
 
     sheet.addRow([]);
   }
 
-  styleWorksheet(sheet, context.dayLabels.length + 2);
+  styleWorksheet(sheet, context.periodLabels.length + 2);
 }
 
 function getScheduleDimensions(timetable) {
@@ -256,13 +322,11 @@ function getScheduleDimensions(timetable) {
     Number(schedule.daysPerWeek) ||
     Number(timetable?.config?.days) ||
     Number(timetable?.config?.daysPerWeek) ||
-    inferDaysFromTables(timetable?.class_timetables) ||
     6;
   const hours =
     Number(schedule.hoursPerDay) ||
     Number(timetable?.config?.hours) ||
     Number(timetable?.config?.hoursPerDay) ||
-    inferHoursFromTables(timetable?.class_timetables) ||
     8;
 
   return { days, hours };
@@ -559,7 +623,9 @@ function makeSheetName(baseName, usedNames) {
   return `${Date.now()}`.slice(-31);
 }
 
-function styleWorksheet(sheet, totalColumns) {
+function styleWorksheet(sheet, totalColumns, options = {}) {
+  const { table, comboMetaMap, hasFilters } = options;
+
   sheet.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
   sheet.getRow(1).height = 22;
   sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -600,6 +666,22 @@ function styleWorksheet(sheet, totalColumns) {
           fgColor: { argb: "FFF3F6FA" },
         };
         cell.font = { bold: true };
+      } else if (hasFilters && table && comboMetaMap) {
+        // Now row-based (Day is Y-axis)
+        const dayIndex = rowNumber - 2;
+        const hourIndex = columnNumber - 2;
+        const slot = table[dayIndex]?.[hourIndex];
+        const comboIds = getSlotComboIds(slot);
+        
+        const isMatch = comboIds.some(cid => comboMetaMap.get(cid)?.matchesFilters);
+        if (comboIds.length > 0 && !isMatch) {
+          cell.font = { color: { argb: "FFAAAAAA" } };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF9F9F9" },
+          };
+        }
       }
     });
   });

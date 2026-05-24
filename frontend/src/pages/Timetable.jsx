@@ -1117,6 +1117,61 @@ function Timetable() {
     popup.print();
   };
 
+  const downloadGeneratedExcel = async () => {
+    if (!timetable) {
+      alert("No timetable available to download.");
+      return;
+    }
+    try {
+      const response = await api.post("/timetable/export/excel", {
+        timetable,
+        mode: "class",
+      }, { responseType: "blob" });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${(timetable.name || "timetable").replace(/\s+/g, "_")}_full.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error("Excel export failed:", err);
+      setError("Failed to download generated timetable Excel.");
+    }
+  };
+
+  const downloadFilteredExcel = async () => {
+    if (!timetable) {
+      alert("No timetable available to download.");
+      return;
+    }
+    try {
+      const filters = {
+        classId: selectedClass || undefined,
+        facultyId: selectedFaculty || undefined,
+        subjectId: selectedSubject || undefined,
+      };
+
+      const response = await api.post("/timetable/export/excel", {
+        timetable,
+        mode: "class",
+        filters,
+      }, { responseType: "blob" });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${(timetable.name || "timetable").replace(/\s+/g, "_")}_filtered.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error("Excel export failed:", err);
+      setError("Failed to download filtered timetable Excel.");
+    }
+  };
+
   const downloadGeneratedPdf = () => {
     if (!timetable || !timetable.class_timetables) {
       alert("No timetable available to download.");
@@ -1346,14 +1401,8 @@ function Timetable() {
         ? currentClass.subject_hours
         : {};
 
-    const hasVirtualElectives = Object.keys(classRequiredHours).some((subjectId) => {
-      const subject = subjectById.get(String(subjectId));
-      return Boolean(subject?.isVirtual);
-    });
-
     const filteredAssignmentHours = Object.entries(assignmentRequiredHours || {}).reduce(
       (acc, [subjectId, hours]) => {
-        const subject = subjectById.get(String(subjectId));
         // If we have virtual electives, we should be careful about double counting
         // component subjects. For now, we allow them unless we have a better way
         // to detect components without the isElective flag.
@@ -1506,9 +1555,9 @@ function Timetable() {
               : "Generate a single timetable"
           }
         >
-          Generate 1
+          Generate
         </button>
-        <button
+        {/* <button
           className="primary-btn"
           onClick={() => generateTimetable()}
           disabled={loading || isGenerateBlockedByHealth}
@@ -1518,8 +1567,8 @@ function Timetable() {
               : "Generate timetable"
           }
         >
-          Generate Top {constraintConfig?.solver?.solutionCount ?? 5}
-        </button>
+          Generate Top {constraintConfig?.solver?.solutionCount ?? 5} // not working well currently, needs backend support to prioritize multiple solutions
+        </button> */}
         {/* <button className="danger-btn" onClick={stopGeneration} disabled={!loading}>
           Stop
         </button> */}
@@ -1546,6 +1595,12 @@ function Timetable() {
         </button>
         <button className="secondary-btn" onClick={downloadFilteredPdf} disabled={loading || !timetable}>
           Download Filtered PDF
+        </button>
+        <button className="secondary-btn" onClick={downloadGeneratedExcel} disabled={loading || !timetable}>
+          Download Generated Excel
+        </button>
+        <button className="secondary-btn" onClick={downloadFilteredExcel} disabled={loading || !timetable}>
+          Download Filtered Excel
         </button>
       </div>
       <div className="tt-options-row">

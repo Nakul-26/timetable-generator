@@ -828,12 +828,18 @@ protectedRouter.get('/timetable/:id/export/excel', async (req, res) => {
             return res.status(400).json({ error: 'Invalid export mode.' });
         }
 
+        const filters = {
+          classId: req.query.classId,
+          facultyId: req.query.facultyId,
+          subjectId: req.query.subjectId,
+        };
+
         const timetable = await TimetableResult.findOne({ _id: req.params.id, collegeId: req.collegeId }).lean();
         if (!timetable) {
             return res.status(404).json({ error: 'Timetable not found.' });
         }
 
-        const workbook = await exportTimetableExcel({ timetable, mode });
+        const workbook = await exportTimetableExcel({ timetable, mode, filters });
         const safeName = String(timetable.name || 'timetable')
           .replace(/[<>:"/\\|?*]+/g, '_')
           .replace(/\s+/g, '_')
@@ -852,6 +858,41 @@ protectedRouter.get('/timetable/:id/export/excel', async (req, res) => {
         res.end();
     } catch (e) {
         console.error('[GET /timetable/:id/export/excel] Error:', e);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+protectedRouter.post('/timetable/export/excel', async (req, res) => {
+    try {
+        const { timetable, mode, filters } = req.body;
+        if (!timetable) {
+            return res.status(400).json({ error: 'Timetable data is required.' });
+        }
+
+        const normalizedMode = String(mode || 'class').toLowerCase();
+        if (!['class', 'teacher', 'full'].includes(normalizedMode)) {
+            return res.status(400).json({ error: 'Invalid export mode.' });
+        }
+
+        const workbook = await exportTimetableExcel({ timetable, mode: normalizedMode, filters });
+        const safeName = String(timetable.name || 'generated_timetable')
+          .replace(/[<>:"/\\|?*]+/g, '_')
+          .replace(/\s+/g, '_')
+          .toLowerCase();
+
+        res.setHeader(
+          'Content-Type',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${safeName}_${normalizedMode}.xlsx"`
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (e) {
+        console.error('[POST /timetable/export/excel] Error:', e);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });

@@ -1,5 +1,4 @@
 import React, { useState, useContext } from "react";
-import { useNavigate } from "react-router-dom";
 import axios from "../../api/axios";
 import DataContext from "../../context/DataContext";
 
@@ -47,7 +46,7 @@ const AddClass = () => {
       setSection("");
       setDaysPerWeek(6);
       refetchData();
-    } catch (err) {
+    } catch {
       setError("Failed to add class.");
     }
     setLoading(false);

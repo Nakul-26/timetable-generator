@@ -25,7 +25,7 @@ const Login = () => {
             } else {
                 setError(response.data.message);
             }
-        } catch (err) {
+        } catch {
             setError('An error occurred. Please try again later.');
         }
     };

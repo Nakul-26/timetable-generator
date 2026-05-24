@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from '../../api/axios.jsx';
 import './SuperadminDashboard.css';
 
 const SuperadminAdmins = () => {
+  const navigate = useNavigate();
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -28,7 +30,15 @@ const SuperadminAdmins = () => {
 
   return (
     <div className="superadmin-dashboard">
-      <h1>Admin Management</h1>
+      <div className="header">
+        <h1>Admin Management</h1>
+        <div className="toolbar">
+          <span className="count-badge">{admins.length} admins</span>
+          <button className="btn btn-edit" onClick={() => navigate('/superadmin/create-admin')}>
+            Create new admin
+          </button>
+        </div>
+      </div>
       <div className="colleges-list">
         <h2>Admins ({admins.length})</h2>
         {admins.length === 0 ? (

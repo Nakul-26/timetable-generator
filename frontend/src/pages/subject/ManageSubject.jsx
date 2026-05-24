@@ -5,7 +5,7 @@ import DataContext from "../../context/DataContext";
 import * as XLSX from "xlsx";
 
 function ManageSubject() {
-  const { subjects, classes, assignments, combos, loading, error, refetchData } = useContext(DataContext);
+  const { subjects, assignments, combos, loading, error, refetchData } = useContext(DataContext);
   const [editId, setEditId] = useState(null);
   const [excelMessage, setExcelMessage] = useState("");
   const [excelError, setExcelError] = useState("");
