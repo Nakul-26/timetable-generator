@@ -19,7 +19,7 @@
 .superadmin-dashboard h1 {
   margin: 0;
   font-size: 22px;
-  color: var(--primary-color, #ff8c42);
+  color: var(--primary-color, var(--primary-color));
 }
 
 .toolbar { display:flex; gap:10px; align-items:center }
@@ -60,8 +60,8 @@
 }
 
 .college-card.row-selected {
-  border-color: rgba(255, 140, 66, 0.7);
-  box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.12);
+  border-color: rgba(79, 70, 229, 0.7);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
 }
 
 .card-select-checkbox {
@@ -108,7 +108,7 @@
 }
 
 .btn-edit {
-  background: linear-gradient(90deg, var(--primary-color, #ff8c42), var(--accent-color, #ff6b6b));
+  background: linear-gradient(90deg, var(--primary-color, var(--primary-color)), var(--accent-color, var(--accent-color)));
   color: #fff;
   box-shadow: 0 6px 12px rgba(255,140,66,0.12);
 }

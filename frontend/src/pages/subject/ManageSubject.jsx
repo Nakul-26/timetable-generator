@@ -390,7 +390,8 @@ function ManageSubject() {
       ) : error ? (
         <div className="error-message">{error}</div>
       ) : (
-        <table className="styled-table">
+        <div className="table-responsive">
+          <table className="styled-table">
           <thead>
             <tr>
               <th className="selection-column">
@@ -508,19 +509,15 @@ function ManageSubject() {
                   <td className="actions-cell">
                     {editId === subject._id ? (
                       <div className="actions-buttons">
-                        <button
-                          onClick={handleEditSubmit}
-                          className="primary-btn"
-                          disabled={Boolean(mutationMessage)}
-                        >
-                          {mutationMessage ? "Working..." : "Save"}
+                        <button onClick={handleUpdate} className="primary-btn" disabled={Boolean(mutationMessage)}>
+                          {mutationMessage ? "..." : "💾 Save"}
                         </button>
                         <button
                           onClick={() => setEditId(null)}
                           className="secondary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          Cancel
+                          ❌ Cancel
                         </button>
                       </div>
                     ) : (
@@ -530,14 +527,14 @@ function ManageSubject() {
                           className="primary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          Edit
+                          ✏️ Edit
                         </button>
                         <button
                           onClick={() => handleDelete(subject._id)}
                           className="danger-btn"
                           disabled={Boolean(mutationMessage) || bulkDeleting}
                         >
-                          {mutationMessage ? "Working..." : "Delete"}
+                          {mutationMessage ? "..." : "🗑️ Delete"}
                         </button>
                       </div>
                     )}
@@ -546,6 +543,7 @@ function ManageSubject() {
               ))}
           </tbody>
         </table>
+      </div>
       )}
     </div>
   );

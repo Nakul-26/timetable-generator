@@ -5,7 +5,7 @@
 }
 
 .create-college h1 {
-  color: #ff6b6b;
+  color: var(--accent-color);
   margin-bottom: 20px;
   text-align: center;
 }

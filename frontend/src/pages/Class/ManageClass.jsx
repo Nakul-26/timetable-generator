@@ -370,7 +370,8 @@ function ManageClass() {
       ) : error ? (
         <div className="error-message">{error}</div>
       ) : (
-        <table className="styled-table">
+        <div className="table-responsive">
+          <table className="styled-table">
           <thead>
             <tr>
               <th className="selection-column">
@@ -483,14 +484,14 @@ function ManageClass() {
                     {editId === classItem._id ? (
                       <div className="actions-buttons">
                         <button onClick={handleEditSubmit} className="primary-btn" disabled={Boolean(mutationMessage)}>
-                          {mutationMessage ? "Working..." : "Save"}
+                          {mutationMessage ? "..." : "💾 Save"}
                         </button>
                         <button
                           onClick={() => setEditId(null)}
                           className="secondary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          Cancel
+                          ❌ Cancel
                         </button>
                       </div>
                     ) : (
@@ -500,14 +501,14 @@ function ManageClass() {
                           className="primary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          Edit
+                          ✏️ Edit
                         </button>
                         <button
                           onClick={() => handleDelete(classItem._id)}
                           className="danger-btn"
                           disabled={Boolean(mutationMessage) || bulkDeleting}
                         >
-                          {mutationMessage ? "Working..." : "Delete"}
+                          {mutationMessage ? "..." : "🗑️ Delete"}
                         </button>
                       </div>
                     )}
@@ -516,6 +517,7 @@ function ManageClass() {
               ))}
           </tbody>
         </table>
+      </div>
       )}
     </div>
   );

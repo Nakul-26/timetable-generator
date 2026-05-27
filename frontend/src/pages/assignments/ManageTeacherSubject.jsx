@@ -187,51 +187,54 @@ const ManageTeacherSubject = () => {
             {loading ? (
                 <div>Loading...</div>
             ) : (
-                <table className="styled-table">
-                    <thead>
-                        <tr>
-                            <th className="selection-column">
-                                <input
-                                    type="checkbox"
-                                    checked={allVisibleCombosSelected}
-                                    ref={(input) => {
-                                        if (input) input.indeterminate = !allVisibleCombosSelected && someVisibleCombosSelected;
-                                    }}
-                                    onChange={(e) => setSelectedComboIds(e.target.checked ? filteredComboIds : [])}
-                                />
-                            </th>
-                            <th>Teacher</th>
-                            <th>Subject</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredCombos.map((combo) => (
-                            <tr key={combo._id} className={selectedComboIds.includes(combo._id) ? "row-selected" : ""}>
-                                <td className="selection-cell">
+                <div className="table-responsive">
+                    <table className="styled-table">
+                        <thead>
+                            <tr>
+                                <th className="selection-column">
                                     <input
                                         type="checkbox"
-                                        checked={selectedComboIds.includes(combo._id)}
-                                        onChange={(e) => {
-                                            setSelectedComboIds((prev) =>
-                                                e.target.checked
-                                                    ? Array.from(new Set([...prev, combo._id]))
-                                                    : prev.filter((id) => id !== combo._id)
-                                            );
+                                        checked={allVisibleCombosSelected}
+                                        ref={(input) => {
+                                            if (input) input.indeterminate = !allVisibleCombosSelected && someVisibleCombosSelected;
                                         }}
+                                        onChange={(e) => setSelectedComboIds(e.target.checked ? filteredComboIds : [])}
                                     />
-                                </td>
-                                <td>{combo.faculty?.name}</td>
-                                <td>{combo.subject?.name}</td>
-                                <td>
-                                    <button onClick={() => handleDelete(combo._id)} className="danger-btn" disabled={Boolean(mutationMessage) || bulkDeleting}>
-                                        {mutationMessage ? "Working..." : "Delete"}
-                                    </button>
-                                </td>
+                                </th>
+                                <th>Teacher</th>
+                                <th>Subject</th>
+                                <th>Actions</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {filteredCombos.map((combo) => (
+                                <tr key={combo._id} className={selectedComboIds.includes(combo._id) ? "row-selected" : ""}>
+                                    <td className="selection-cell">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedComboIds.includes(combo._id)}
+                                            onChange={(e) => {
+                                                setSelectedComboIds((prev) =>
+                                                    e.target.checked
+                                                        ? Array.from(new Set([...prev, combo._id]))
+                                                        : prev.filter((id) => id !== combo._id)
+                                                );
+                                            }}
+                                        />
+                                    </td>
+                                    <td>{combo.faculty?.name}</td>
+                                    <td>{combo.subject?.name}</td>
+                                    <td className="actions-cell">
+                                        <div className="actions-buttons">
+                                            <button onClick={() => handleDelete(combo._id)} className="danger-btn" disabled={Boolean(mutationMessage) || bulkDeleting}>
+                                                {mutationMessage ? "..." : "🗑️ Delete"}
+                                            </button>
+                                        </div>
+                                    </td>                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             )}
         </div>
     );

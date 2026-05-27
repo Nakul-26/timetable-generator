@@ -47,49 +47,51 @@ const SavedTimetables = () => {
             {timetables.length === 0 ? (
                 <p>No saved timetables found.</p>
             ) : (
-                <table className="styled-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Source</th>
-                            <th>Status</th>
-                            <th>Version</th>
-                            <th>Saved At</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {timetables.map((tt) => (
-                            <tr key={tt._id}>
-                                <td>{tt.name}</td>
-                                <td>{tt.source}</td>
-                                <td>{tt.status || 'draft'}</td>
-                                <td>{tt.edit_version || 1}</td>
-                                <td>{new Date(tt.createdAt).toLocaleString()}</td>
-                                <td>
-                                    <button
-                                        className="primary-btn"
-                                        onClick={() => handleViewClick(tt._id)}
-                                    >
-                                        View
-                                    </button>
-                                    {(tt.source === 'generator' || tt.status === 'generated') && (
-                                        <button
-                                            className="secondary-btn"
-                                            onClick={() => {
-                                                setActionMessage('Opening timetable editor. Please wait...');
-                                                navigate(`/manual-timetable?sourceTimetableId=${tt._id}`);
-                                            }}
-                                            style={{ marginLeft: '8px' }}
-                                        >
-                                            Edit
-                                        </button>
-                                    )}
-                                </td>
+                <div className="table-responsive">
+                    <table className="styled-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Source</th>
+                                <th>Status</th>
+                                <th>Version</th>
+                                <th>Saved At</th>
+                                <th>Actions</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {timetables.map((tt) => (
+                                <tr key={tt._id}>
+                                    <td>{tt.name}</td>
+                                    <td>{tt.source}</td>
+                                    <td>{tt.status || 'draft'}</td>
+                                    <td>{tt.edit_version || 1}</td>
+                                    <td>{new Date(tt.createdAt).toLocaleString()}</td>
+                                    <td>
+                                        <button
+                                            className="primary-btn"
+                                            onClick={() => handleViewClick(tt._id)}
+                                        >
+                                            View
+                                        </button>
+                                        {(tt.source === 'generator' || tt.status === 'generated') && (
+                                            <button
+                                                className="secondary-btn"
+                                                onClick={() => {
+                                                    setActionMessage('Opening timetable editor. Please wait...');
+                                                    navigate(`/manual-timetable?sourceTimetableId=${tt._id}`);
+                                                }}
+                                                style={{ marginLeft: '8px' }}
+                                            >
+                                                Edit
+                                            </button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             )}
         </div>
     );

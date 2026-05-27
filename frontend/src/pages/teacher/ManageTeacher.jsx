@@ -339,7 +339,8 @@ const ManageTeacher = () => {
       ) : error ? (
         <div className="error-message">{error}</div>
       ) : (
-        <table className="styled-table">
+        <div className="table-responsive">
+          <table className="styled-table">
           <thead>
             <tr>
               <th className="selection-column">
@@ -428,14 +429,14 @@ const ManageTeacher = () => {
                           className="primary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          {mutationMessage ? "Working..." : "Save"}
+                          {mutationMessage ? "..." : "💾 Save"}
                         </button>
                         <button
                           onClick={() => setEditId(null)}
                           className="secondary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          Cancel
+                          ❌ Cancel
                         </button>
                       </div>
                     ) : (
@@ -445,14 +446,14 @@ const ManageTeacher = () => {
                           className="primary-btn"
                           disabled={Boolean(mutationMessage)}
                         >
-                          Edit
+                          ✏️ Edit
                         </button>
                         <button
                           onClick={() => handleDelete(teacher._id)}
                           className="danger-btn"
                           disabled={Boolean(mutationMessage) || bulkDeleting}
                         >
-                          {mutationMessage ? "Working..." : "Delete"}
+                          {mutationMessage ? "..." : "🗑️ Delete"}
                         </button>
                       </div>
                     )}
@@ -461,6 +462,7 @@ const ManageTeacher = () => {
               ))}
           </tbody>
         </table>
+      </div>
       )}
     </div>
   );

@@ -5,7 +5,7 @@
 }
 
 .create-admin h1 {
-  color: #ff6b6b;
+  color: var(--accent-color);
   margin-bottom: 20px;
   text-align: center;
 }
@@ -60,7 +60,7 @@
   right: 10px;
   background: none;
   border: none;
-  color: #ff6b6b;
+  color: var(--accent-color);
   font-weight: 600;
   cursor: pointer;
   padding: 5px;

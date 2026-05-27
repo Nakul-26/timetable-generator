@@ -123,7 +123,7 @@ const SyncPreviewModal = ({ isOpen, onClose, data, onApply, isApplying }) => {
           <h4 style={{ marginBottom: '10px' }}>Processing Summary ({data.summary?.length || 0} classes)</h4>
           <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #eee', borderRadius: '6px' }}>
             <table className="styled-table" style={{ fontSize: '0.85rem', margin: 0 }}>
-              <thead style={{ position: 'sticky', top: 0, background: '#f8f9fa', zIndex: 1 }}>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--primary-color)', zIndex: 1 }}>
                 <tr>
                   <th>Class</th>
                   <th>Subjects Mapped</th>
@@ -1055,21 +1055,26 @@ const ManageTeachingAllocations = () => {
                 <td>{item?.combinedClassGroupId || "—"}</td>
                 <td>{item?.type || (item?.isElectiveBlock ? "ELECTIVE" : item?.subject?.type === "no_teacher" ? "No Teacher" : item?.isLab ? "Lab" : "Theory")}</td>
                 <td>{item?.status || "active"}</td>
-                <td style={{ display: 'flex', gap: '5px' }}>
-                  <button 
-                    type="button"
-                    className="secondary-btn" 
-                    onClick={() => {
-                      setHistoryAllocation(item);
-                      setShowHistoryModal(true);
-                    }}
-                    style={{ padding: '4px 8px', fontSize: '0.85rem' }}
-                  >
-                    History
-                  </button>
-                  <button className="danger-btn" onClick={() => handleDelete(item)} disabled={deleting || calculating || submitting || bulkDeleting} style={{ padding: '4px 8px', fontSize: '0.85rem' }}>
-                    {deleting ? "..." : "Delete"}
-                  </button>
+                <td className="actions-cell">
+                  <div className="actions-buttons">
+                    <button 
+                      type="button"
+                      className="secondary-btn" 
+                      onClick={() => {
+                        setHistoryAllocation(item);
+                        setShowHistoryModal(true);
+                      }}
+                    >
+                      📜 History
+                    </button>
+                    <button 
+                      className="danger-btn" 
+                      onClick={() => handleDelete(item)} 
+                      disabled={deleting || calculating || submitting || bulkDeleting}
+                    >
+                      {deleting ? "..." : "🗑️ Delete"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

@@ -373,7 +373,7 @@ const ViewTimetable = () => {
                 .pdf-root .class-block h3 { margin: 0 0 8px 0; font-size: 16px; }
                 .pdf-root table { width: 100%; border-collapse: collapse; table-layout: fixed; }
                 .pdf-root th, .pdf-root td { border: 1px solid #d0d0d0; padding: 6px; font-size: 10px; vertical-align: top; word-wrap: break-word; }
-                .pdf-root th { background: #f2f2f2; }
+                .pdf-root th { background: #f2f2f2; color: #333; }
                 .pdf-root .day { font-weight: 700; width: 95px; }
                 .pdf-root .subject { font-weight: 700; }
                 .pdf-root .faculty { margin-top: 3px; color: #333; }
