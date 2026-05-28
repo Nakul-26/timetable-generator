@@ -76,8 +76,22 @@ export function startGenerationWorker({ payload }) {
           : 1;
         const generatedName = `Generated Timetable Batch (${optionCount} options) - ${new Date().toLocaleString()}`;
         try {
+          const collegeId = payload.collegeId || resultData.collegeId;
+
+          // 1. Assign 30-day expiry to all existing generated timetables for this college
+          // that don't already have one (or refresh their expiry).
+          // This follows the rule: latest is permanent, previous ones get 30 days.
+          const expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + 30);
+
+          await TimetableResult.updateMany(
+            { collegeId, source: "generator", expiresAt: null },
+            { $set: { expiresAt: expiryDate } }
+          );
+
+          // 2. Save the new one without an expiry date (it becomes the "latest")
           const rec = new TimetableResult({
-            collegeId: payload.collegeId || resultData.collegeId,
+            collegeId,
             name: generatedName,
             source: "generator",
             status: "generated",
@@ -94,6 +108,7 @@ export function startGenerationWorker({ payload }) {
             combos: resultData.combos,
             allocations_report: resultData.allocations_report,
             config: resultData.config,
+            expiresAt: null, // Latest generated has no expiry
           });
           await rec.save();
         } catch (saveErr) {

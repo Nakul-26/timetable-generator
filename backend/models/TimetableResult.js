@@ -78,6 +78,12 @@ const ResultSchema = new Schema(
     faculties: Object,
     combos: Object,
     allocations_report: Object,
+
+    expiresAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -85,6 +91,10 @@ const ResultSchema = new Schema(
     toObject: { virtuals: true } // Ensure virtuals are included in toObject
   }
 );
+
+// TTL index for automatic deletion. Documents with a non-null expiresAt
+// will be deleted when the current date passes expiresAt.
+ResultSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Indexes for fast queries
 ResultSchema.index({ collegeId: 1, createdAt: -1 });

@@ -1,85 +1,102 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import './HomePage.css';
 
-const HomePage = () => (
-  <div className="home-container">
-    <h1>Timetable Generator — Quick Guide</h1>
+const HomePage = () => {
+  const navigate = useNavigate();
 
-    <p>This page explains every feature in simple words and shows how to use the site step-by-step.</p>
+  const sections = [
+    {
+      title: "Step 1: Setup Masters",
+      description: "Define the building blocks of your college.",
+      cards: [
+        { title: "Faculties", description: "Manage teachers and staff", path: "/faculties", icon: "👥" },
+        { title: "Subjects", description: "Define all courses offered", path: "/subjects", icon: "📚" },
+        { title: "Classes", description: "Manage student groups", path: "/classes", icon: "🏫" },
+      ]
+    },
+    {
+      title: "Step 2: Assign & Map",
+      description: "Link teachers and subjects to classes.",
+      cards: [
+        { title: "Allocations", description: "Directly assign teaching hours", path: "/teaching-allocations", icon: "📝" },
+        { title: "Class Subjects", description: "Map subjects to classes", path: "/class-subjects", icon: "🔗" },
+        { title: "Teacher Subjects", description: "Define who can teach what", path: "/teacher-subject-combos", icon: "🤝" },
+        { title: "Class Faculties", description: "Assign teachers to classes", path: "/class-faculties", icon: "👤" },
+        { title: "Electives", description: "Manage elective subject groups", path: "/class-elective-subjects", icon: "🔀" },
+      ]
+    },
+    {
+      title: "Step 3: Constraints",
+      description: "Set rules for the generator to follow.",
+      cards: [
+        { title: "Availability", description: "Block teacher leave/busy times", path: "/teacher-availability", icon: "📅" },
+        { title: "Preferences", description: "Teacher slot preferences", path: "/teacher-preferences", icon: "⭐" },
+      ]
+    },
+    {
+      title: "Step 4: Generate & Refine",
+      description: "Run the solver and finalize results.",
+      cards: [
+        { title: "Generator", description: "Run health checks and solve", path: "/timetable", icon: "⚡" },
+        { title: "Manual Editor", description: "Fine-tune slots with drag-and-drop", path: "/manual-timetable", icon: "🖱️" },
+        { title: "History", description: "View and export saved results", path: "/saved-timetables", icon: "📂" },
+      ]
+    }
+  ];
 
-    <section className="guide-section">
-      <h2>1. Before You Start</h2>
-      <ul>
-        <li>Make sure you are logged in. Use the login page to sign in.</li>
-        <li>If you are a superadmin, pick a college from the "Act as" selector in the top bar.</li>
-        <li>Work through this guide in order: add core data, assign teachers, then generate.</li>
-      </ul>
-    </section>
+  return (
+    <div className="home-dashboard">
+      <header className="home-header">
+        <h1>Timetable Dashboard</h1>
+        <p>Manage your college schedule efficiently with automated generation and manual control.</p>
+      </header>
 
-    <section className="guide-section">
-      <h2>2. Core Data (The Foundation)</h2>
-      <p>These are the pieces needed to build a timetable. Add them first.</p>
-      <ul>
-        <li><strong>Faculties (Teachers):</strong> Add each teacher on the <a href="/faculties">Faculties</a> page.</li>
-        <li><strong>Subjects:</strong> Add every subject on the <a href="/subjects">Subjects</a> page.</li>
-        <li><strong>Classes:</strong> Create class student groups (e.g. CSE 3-A) on the <a href="/classes">Classes</a> page.</li>
-      </ul>
-    </section>
+      <div className="dashboard-grid">
+        {sections.map((section, idx) => (
+          <section key={idx} className="dashboard-section">
+            <div className="section-info">
+              <h2>{section.title}</h2>
+              <p>{section.description}</p>
+            </div>
+            <div className="cards-container">
+              {section.cards.map((card, cidx) => (
+                <div 
+                  key={cidx} 
+                  className="feature-card" 
+                  onClick={() => navigate(card.path)}
+                >
+                  <div className="card-icon">{card.icon}</div>
+                  <div className="card-content">
+                    <h3>{card.title}</h3>
+                    <p>{card.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
 
-    <section className="guide-section">
-      <h2>3. Teaching Allocations (Two Methods)</h2>
-      <p>Tell the system who teaches what. You can choose the method that fits your college best.</p>
-      
-      <h3>Method A: Direct Entry (Recommended for Small Colleges)</h3>
-      <ul>
-        <li>Go directly to <a href="/teaching-allocations">Manage Allocations</a>.</li>
-        <li>Pick a Class + Subject + Teacher and enter the weekly hours.</li>
-        <li>This is fast and gives you total control.</li>
-      </ul>
-
-      <h3>Method B: Mapping-Based (Recommended for Large Colleges)</h3>
-      <ul>
-        <li>Step 1: Link Subjects to Classes on the <a href="/class-subjects">Class-Subjects</a> page.</li>
-        <li>Step 2: Define which teachers teach which subjects on the <a href="/teacher-subject-combos">Teacher-Subjects</a> page.</li>
-        <li>Step 3: Link teachers to classes on the <a href="/class-faculties">Class-Faculties</a> page.</li>
-        <li>Step 4: Go to <a href="/teaching-allocations">Manage Allocations</a> and click <strong>"Sync from Mappings (Bulk)"</strong>.</li>
-        <li>The system will automatically intersect your mappings to create assignments.</li>
-      </ul>
-    </section>
-
-    <section className="guide-section">
-      <h2>4. Timetable Generation</h2>
-      <p>After data and teaching allocations are ready:</p>
-      <ul>
-        <li>Go to the <a href="/timetable">Timetable</a> page.</li>
-        <li><strong>Pre-Generation Audit:</strong> Review the health report to catch data errors early.</li>
-        <li>Use <strong>Fix Slots</strong> to lock specific subjects to a time (e.g. morning labs).</li>
-        <li>Click <strong>Generate</strong> to find a valid schedule.</li>
-      </ul>
-    </section>
-
-    <section className="guide-section">
-      <h2>5. Common Tasks</h2>
-      <ul>
-        <li><strong>Manage Availability:</strong> Block time for teachers on the <a href="/teacher-availability">Availability</a> page.</li>
-        <li><strong>Set Preferences:</strong> Define "Avoid First Period" etc. on the <a href="/teacher-preferences">Preferences</a> page.</li>
-        <li><strong>Download/Export:</strong> Use the export buttons on the Timetable page for Excel or PDF versions.</li>
-      </ul>
-    </section>
-
-    <section className="guide-section">
-      <h2>6. Troubleshooting & Support</h2>
-      <ul>
-        <li><strong>Generation is slow:</strong> Try reducing constraints or increasing solver time in settings.</li>
-        <li><strong>Infeasible results:</strong> Check the Audit report. Usually, a teacher is assigned too many hours.</li>
-        <li><strong>Need help?</strong> See DEPLOYMENT.md in the project root.</li>
-      </ul>
-    </section>
-
-    <footer style={{marginTop:20}}>
-      <small>Quick tip: follow the numbered sections in order for the smoothest experience.</small>
-    </footer>
-  </div>
-);
+      <div className="home-quick-guide">
+        <h2>Quick Start Tips</h2>
+        <div className="tips-grid">
+          <div className="tip-item">
+            <strong>Order Matters:</strong> Start with Masters, then Mappings, then Generation.
+          </div>
+          <div className="tip-item">
+            <strong>Health Check:</strong> Always run the "Pre-Generation Audit" on the Generator page to catch data errors.
+          </div>
+          <div className="tip-item">
+            <strong>Bulk Mappings:</strong> Use Method B (Mappings) for large colleges to save time.
+          </div>
+          <div className="tip-item">
+            <strong>Manual Adjust:</strong> If the generator is 95% there, use the Manual Editor to fix the last few slots.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default HomePage;
