@@ -2,8 +2,8 @@ import "../env.js";
 
 import mongoose from "mongoose";
 
-import College from "../models/College.js";
-import ClassModel from "../models/Class.js";
+import College from "../../models/College.js";
+import ClassModel from "../../models/Class.js";
 
 const RAW_CLASSES = [
   // VI Semester (EVEN)

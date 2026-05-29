@@ -2,10 +2,10 @@ import "../env.js";
 
 import mongoose from "mongoose";
 
-import College from "../models/College.js";
-import ClassSubject from "../models/ClassSubject.js";
-import Subject from "../models/Subject.js";
-import TeacherSubjectCombination from "../models/TeacherSubjectCombination.js";
+import College from "../../models/College.js";
+import ClassSubject from "../../models/ClassSubject.js";
+import Subject from "../../models/Subject.js";
+import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
 
 // Detailed breakdown from your 2025-2026 timetables.
 // NOTE: Subject model stores the default weekly load in `classesPerWeek`.

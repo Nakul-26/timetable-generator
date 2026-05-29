@@ -16,6 +16,7 @@ const globalLimiter = rateLimit({
   max: 200, // limit each IP to 200 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false }
 });
 
 const uri = process.env.MONGO_URI;

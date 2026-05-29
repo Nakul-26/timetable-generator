@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
-import Faculty from './models/Faculty.js';
-import Subject from './models/Subject.js';
-import TeacherSubjectCombination from './models/TeacherSubjectCombination.js';
+import Faculty from '../../models/Faculty.js';
+import Subject from '../../models/Subject.js';
+import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
 import dotenv from 'dotenv';
 
 dotenv.config();

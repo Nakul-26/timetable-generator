@@ -1,6 +1,6 @@
 import "../env.js";
 import mongoose from "mongoose";
-import Admin from "../models/Admin.js";
+import Admin from "../../models/Admin.js";
 
 const email = String(process.argv[2] || "").trim().toLowerCase();
 const password = String(process.argv[3] || "");

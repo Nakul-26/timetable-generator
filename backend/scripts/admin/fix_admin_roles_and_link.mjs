@@ -21,8 +21,8 @@ if (fs.existsSync(envPath)) {
 
 const MONGO = process.env.MONGO_URI || process.env.MONGOURL || 'mongodb://localhost:27017/placementDB';
 
-import Admin from '../models/Admin.js';
-import College from '../models/College.js';
+import Admin from '../../models/Admin.js';
+import College from '../../models/College.js';
 
 async function main() {
   const args = process.argv.slice(2);

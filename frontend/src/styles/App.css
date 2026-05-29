@@ -2595,7 +2595,7 @@ h2 {
 
 @media (max-width: 640px) {
   .main-content {
-    padding: 0 10px 16px;
+    padding: var(--space-4);
   }
 
   .form-container,

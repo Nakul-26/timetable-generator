@@ -10,14 +10,16 @@ const issueCreateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 10, // 10 tickets per hour
   message: { error: 'Too many tickets created. Please try again later.' },
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  validate: { keyGeneratorIpFallback: false }
 });
 
 const commentCreateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 30, // 30 comments per hour
   message: { error: 'Too many comments. Please try again later.' },
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  validate: { keyGeneratorIpFallback: false }
 });
 
 /**

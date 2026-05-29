@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import ElectiveSubjectSetting from "../models/ElectiveSubjectSetting.js";
-import ClassModel from "../models/Class.js";
-import Subject from "../models/Subject.js";
+import ElectiveSubjectSetting from "../../models/ElectiveSubjectSetting.js";
+import ClassModel from "../../models/Class.js";
+import Subject from "../../models/Subject.js";
 
 const uri = process.env.MONGO_URI;
 if (!uri) {

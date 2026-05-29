@@ -5,22 +5,22 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 // Import all your models
-import Faculty from './models/Faculty.js';
-import Admin from './models/Admin.js';
-import Subject from './models/Subject.js';
-import ClassModel from './models/Class.js';
-import ClassSubject from './models/ClassSubject.js';
-import TeacherSubjectCombination from './models/TeacherSubjectCombination.js';
-import TimetableResult from './models/TimetableResult.js';
+import Faculty from '../../models/Faculty.js';
+import Admin from '../../models/Admin.js';
+import Subject from '../../models/Subject.js';
+import ClassModel from '../../models/Class.js';
+import ClassSubject from '../../models/ClassSubject.js';
+import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
+import TimetableResult from '../../models/TimetableResult.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = 'timetable_jayanth';
-const BACKUP_DIR = path.resolve(__dirname, 'mongoose_backup');
+const BACKUP_DIR = path.resolve(__dirname, '../../data/mongoose_backup');
 
 // Ensure backup directory exists
 if (!fs.existsSync(BACKUP_DIR)) {

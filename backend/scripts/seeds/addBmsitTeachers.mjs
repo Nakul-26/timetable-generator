@@ -2,8 +2,8 @@ import "../env.js";
 
 import mongoose from "mongoose";
 
-import College from "../models/College.js";
-import Faculty from "../models/Faculty.js";
+import College from "../../models/College.js";
+import Faculty from "../../models/Faculty.js";
 
 const RAW_TEACHER_NAMES = [
   // VI Semester

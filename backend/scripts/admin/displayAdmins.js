@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import Admin from './models/Admin.js';
+import Admin from '../../models/Admin.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 

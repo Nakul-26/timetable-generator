@@ -21,6 +21,7 @@
   font-weight: 700;
   letter-spacing: -0.025em;
   min-width: 0;
+  cursor: pointer;
 }
 
 .navbar-links {
@@ -28,6 +29,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-4);
+  align-items: center;
 }
 
 .nav-item {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../../api/axios";
-import "../../App.css";
+import "../../styles/App.css";
 
 const ManageIssues = () => {
   const [issues, setIssues] = useState([]);

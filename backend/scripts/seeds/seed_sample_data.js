@@ -1,7 +1,7 @@
 // backend/seed_sample_data.js
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
-import { sampleData } from "./sample_data.js";
+import { sampleData } from "../../data/sample_data.js";
 
 dotenv.config();
 

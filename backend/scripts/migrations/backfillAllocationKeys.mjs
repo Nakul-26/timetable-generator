@@ -1,8 +1,8 @@
 import "../env.js";
 import mongoose from "mongoose";
 
-import TeachingAllocation from "../models/TeachingAllocation.js";
-import { buildTeachingAllocationKey } from "../utils/allocationKey.js";
+import TeachingAllocation from "../../models/TeachingAllocation.js";
+import { buildTeachingAllocationKey } from "../../utils/allocationKey.js";
 
 const APPLY = process.argv.includes("--apply");
 const DB_NAME = process.env.MONGO_DB_NAME || "timetable_jayanth";

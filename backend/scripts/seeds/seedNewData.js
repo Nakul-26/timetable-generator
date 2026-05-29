@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import Faculty from "./models/Faculty.js";
-import Subject from "./models/Subject.js";
-import Class from "./models/Class.js";
-import Combo from "./models/Combo.js";
+import Faculty from "../../models/Faculty.js";
+import Subject from "../../models/Subject.js";
+import Class from "../../models/Class.js";
+import Combo from "../../models/Combo.js";
 import { facultiesData, subjectsData, classesData, comboMappingData } from "./new_seed_data.js";
 
 dotenv.config();

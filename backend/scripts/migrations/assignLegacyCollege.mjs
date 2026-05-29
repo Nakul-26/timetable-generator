@@ -1,16 +1,16 @@
 import "../env.js";
 import mongoose from "mongoose";
 
-import Admin from "../models/Admin.js";
-import Faculty from "../models/Faculty.js";
-import Subject from "../models/Subject.js";
-import ClassModel from "../models/Class.js";
-import ClassSubject from "../models/ClassSubject.js";
-import TeacherSubjectCombination from "../models/TeacherSubjectCombination.js";
-import TeachingAllocation from "../models/TeachingAllocation.js";
-import ElectiveSubjectSetting from "../models/ElectiveSubjectSetting.js";
-import GenerationJob from "../models/GenerationJob.js";
-import TimetableResult from "../models/TimetableResult.js";
+import Admin from "../../models/Admin.js";
+import Faculty from "../../models/Faculty.js";
+import Subject from "../../models/Subject.js";
+import ClassModel from "../../models/Class.js";
+import ClassSubject from "../../models/ClassSubject.js";
+import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
+import TeachingAllocation from "../../models/TeachingAllocation.js";
+import ElectiveSubjectSetting from "../../models/ElectiveSubjectSetting.js";
+import GenerationJob from "../../models/GenerationJob.js";
+import TimetableResult from "../../models/TimetableResult.js";
 
 const DEFAULT_COLLEGE_ID = "shreevani-pu-college";
 const APPLY = process.argv.includes("--apply");

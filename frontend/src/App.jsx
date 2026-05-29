@@ -32,7 +32,7 @@ import Login from './pages/Login';
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
 import FeedbackButton from './components/FeedbackButton';
-import './App.css';
+import './styles/App.css';
 
 // Styled homepage
 // const HomePage = () => (
