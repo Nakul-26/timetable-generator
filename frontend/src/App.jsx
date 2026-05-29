@@ -23,11 +23,15 @@ import CreateCollege from './pages/superadmin/CreateCollege';
 import CreateAdmin from './pages/superadmin/CreateAdmin';
 import SuperadminColleges from './pages/superadmin/SuperadminColleges';
 import SuperadminAdmins from './pages/superadmin/SuperadminAdmins';
+import ManageIssues from './pages/support/ManageIssues';
+import CreateIssue from './pages/support/CreateIssue';
+import IssueDetail from './pages/support/IssueDetail';
 import HomePage from './pages/HomePage';
 import Navbar from './components/Navbar2';
 import Login from './pages/Login';
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
+import FeedbackButton from './components/FeedbackButton';
 import './App.css';
 
 // Styled homepage
@@ -125,6 +129,9 @@ function App() {
           <Route path="/manual-timetable" element={<PrivateRoute><ManualTimetable /></PrivateRoute>} />
           <Route path="/saved-timetables" element={<PrivateRoute><SavedTimetables /></PrivateRoute>} />
           <Route path="/generation-payload" element={<PrivateRoute><GenerationPayloadViewer /></PrivateRoute>} />
+          <Route path="/support" element={<PrivateRoute><ManageIssues /></PrivateRoute>} />
+          <Route path="/support/create" element={<PrivateRoute><CreateIssue /></PrivateRoute>} />
+          <Route path="/support/issue/:id" element={<PrivateRoute><IssueDetail /></PrivateRoute>} />
           <Route path="/superadmin" element={<PrivateRoute><Navigate to="/superadmin/colleges" replace /></PrivateRoute>} />
           <Route path="/superadmin/colleges" element={<PrivateRoute><SuperadminColleges /></PrivateRoute>} />
           <Route path="/superadmin/admins" element={<PrivateRoute><SuperadminAdmins /></PrivateRoute>} />
@@ -132,6 +139,7 @@ function App() {
           <Route path="/superadmin/create-admin" element={<PrivateRoute><CreateAdmin /></PrivateRoute>} />
         </Routes>
       </main>
+      <FeedbackButton />
     </div>
   );
 }

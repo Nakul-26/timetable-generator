@@ -92,6 +92,7 @@ const Navbar = () => {
             {/* <div className="nav-section-label">Generation</div> */}
             <NavLink to="/timetable" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generate Timetable</NavLink>
             <NavLink to="/saved-timetables" className="nav-item" onClick={() => setIsMenuOpen(false)}>History</NavLink>
+            <NavLink to="/support" className="nav-item" onClick={() => setIsMenuOpen(false)}>Support</NavLink>
           </>
         )}
         {isSuper && (

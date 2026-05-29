@@ -948,9 +948,9 @@ tr:hover td {
 }
 
 .actions-bar > button {
-  padding: 10px 16px;
+  padding: 12px 20px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
   color: #fff;
   font-weight: 600;
@@ -2492,7 +2492,14 @@ h2 {
     font-size: 1rem;
   }
 
-  .actions-bar,
+  .actions-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 24px;
+  }
+
   .filters-container {
     flex-wrap: wrap;
     align-items: stretch;
@@ -2510,6 +2517,15 @@ h2 {
   }
 
   .actions-bar > button,
+  .actions-bar > a {
+    width: 100%;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+    margin-bottom: 0;
+  }
+
   .filters-container > button,
   .filters-container input,
   .filters-container select {
@@ -2617,7 +2633,10 @@ h2 {
   .secondary-btn,
   .danger-btn {
     width: 100%;
-    margin-right: 0;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+    display: block;
     margin-bottom: 8px;
   }
 

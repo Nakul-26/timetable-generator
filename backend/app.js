@@ -6,8 +6,17 @@ import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import API from "./routes/api.js";
 import ManualAPI from "./routes/timetableManual.js";
+import { rateLimit } from 'express-rate-limit';
 
 const app = express();
+
+// --- Global Rate Limiter ---
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // limit each IP to 200 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const uri = process.env.MONGO_URI;
 if (!uri) {
@@ -81,6 +90,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
+app.use(globalLimiter);
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 
