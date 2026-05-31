@@ -106,15 +106,32 @@ const Pricing = () => {
                 ))}
               </ul>
 
-              <button className={`btn ${plan.highlighted ? 'btn-primary' : ''}`} style={{ 
+              <a href="#contact" className={`btn ${plan.highlighted ? 'btn-primary' : ''}`} style={{ 
                 width: '100%', 
                 border: plan.highlighted ? 'none' : '1px solid var(--border)',
-                backgroundColor: plan.highlighted ? 'var(--primary)' : 'white'
+                backgroundColor: plan.highlighted ? 'var(--primary)' : 'white',
+                textDecoration: 'none'
               }}>
                 {plan.cta}
-              </button>
+              </a>
             </div>
           ))}
+        </div>
+
+        <div style={{ 
+          marginTop: '4rem', 
+          textAlign: 'center', 
+          padding: '2rem', 
+          backgroundColor: 'white', 
+          borderRadius: '1rem', 
+          border: '1px dashed var(--primary)',
+          maxWidth: '800px',
+          margin: '4rem auto 0 auto'
+        }}>
+          <h3 style={{ fontSize: '1.25rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>Our Personal Commitment</h3>
+          <p style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
+            "You can request for new features, changes, or custom integrations for free. We build for you."
+          </p>
         </div>
       </div>
     </section>
