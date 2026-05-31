@@ -17,7 +17,7 @@ const SavedTimetables = () => {
                 setTimetables(response.data);
                 setError(null);
             } catch (err) {
-                setError('Failed to fetch saved timetables. Please try again later.');
+                setError(err.response?.data?.error || 'Failed to fetch saved timetables. Please try again later.');
                 console.error('Error fetching timetables:', err);
             } finally {
                 setIsLoading(false);

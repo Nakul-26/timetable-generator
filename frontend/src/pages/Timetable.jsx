@@ -390,8 +390,8 @@ function Timetable() {
       setCombos(comboRes.data || []);
       setClassSubjects(classSubjectRes.data || []);
       setFixedSlotCombos(fixedComboRes.data?.combos || []);
-    } catch {
-      setError("Failed to fetch master data.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to fetch master data.");
     }
   }, []);
 
@@ -407,8 +407,8 @@ function Timetable() {
         setTimetableOptions([]);
         setSelectedOptionId("");
       }
-    } catch {
-      setError("Failed to fetch latest timetable.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to fetch latest timetable.");
     }
     setLoading(false);
   }, [applyTimetableState]);
@@ -872,7 +872,7 @@ function Timetable() {
         /* ignore */
       }
     } catch (err) {
-      setError(err?.response?.data?.error || "Failed to start generation.");
+      setError(err.response?.data?.error || "Failed to start generation.");
       setLoading(false);
       setSolverDeadlineAt(null);
       setSolverRemainingSec(null);
@@ -887,8 +887,8 @@ function Timetable() {
     setError("");
     try {
       setHealthReport(await requestHealthCheck(constraintConfig));
-    } catch {
-      setError("Failed to run health check.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to run health check.");
     } finally {
       setHealthLoading(false);
     }
@@ -1137,7 +1137,7 @@ function Timetable() {
       link.remove();
     } catch (err) {
       console.error("Excel export failed:", err);
-      setError("Failed to download generated timetable Excel.");
+      setError(err.response?.data?.error || "Failed to download generated timetable Excel.");
     }
   };
 
@@ -1168,7 +1168,7 @@ function Timetable() {
       link.remove();
     } catch (err) {
       console.error("Excel export failed:", err);
-      setError("Failed to download filtered timetable Excel.");
+      setError(err.response?.data?.error || "Failed to download filtered timetable Excel.");
     }
   };
 
@@ -1187,8 +1187,9 @@ function Timetable() {
     try {
       const html = buildPdfHtml({ entries, filtered: false });
       downloadPdfFromHtml(html, "Generated Timetable PDF");
-    } catch {
-      setError("Failed to download generated timetable PDF.");
+    } catch (err) {
+      console.error("PDF download failed:", err);
+      setError(err.message || "Failed to download generated timetable PDF.");
     }
   };
 
@@ -1207,8 +1208,9 @@ function Timetable() {
     try {
       const html = buildPdfHtml({ entries, filtered: true });
       downloadPdfFromHtml(html, "Filtered Timetable PDF");
-    } catch {
-      setError("Failed to download filtered timetable PDF.");
+    } catch (err) {
+      console.error("Filtered PDF download failed:", err);
+      setError(err.message || "Failed to download filtered timetable PDF.");
     }
   };
 

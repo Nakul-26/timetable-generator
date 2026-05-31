@@ -45,14 +45,7 @@ const AddTeacher = () => {
       setFacultyId("");
       refetchData();
     } catch (err) {
-      if (err.response) {
-        // console.error("[axios error response]", err.response);
-      } else if (err.request) {
-        // console.error("[axios error request - no response]", err.request);
-      } else {
-        // console.error("[axios error message]", err.message);
-      }
-      setError("Failed to add teacher.");
+      setError(err.response?.data?.error || "Failed to add teacher.");
     }
     setLoading(false);
   };

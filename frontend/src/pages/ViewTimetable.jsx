@@ -46,7 +46,7 @@ const ViewTimetable = () => {
                 
                 setError(null);
             } catch (err) {
-                setError('Failed to fetch data. Please try again later.');
+                setError(err.response?.data?.error || 'Failed to fetch data. Please try again later.');
                 console.error('Error fetching data:', err);
             } finally {
                 setIsLoading(false);

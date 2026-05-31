@@ -2,6 +2,7 @@ import { Router } from "express";
 const router = Router();
 import auth from "../middleware/auth.js";
 import requireCollegeContext from "../middleware/collegeScope.js";
+import { authLimiter } from "../middleware/rateLimiter.js";
 import ClassModel from "../models/Class.js";
 import Faculty from "../models/Faculty.js";
 import Subject from "../models/Subject.js";
@@ -46,6 +47,7 @@ import {
 
 router.use(auth);
 router.use(requireCollegeContext);
+router.use(authLimiter);
 
 async function ensureDurableState(req, res, next) {
   try {

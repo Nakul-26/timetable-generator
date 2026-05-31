@@ -168,8 +168,8 @@ const AllocationHistoryModal = ({ isOpen, onClose, allocationId, allocationName 
         try {
           const res = await api.get(`/teaching-allocations/${allocationId}/history`);
           setHistory(res.data);
-        } catch {
-          setError("Failed to fetch history.");
+        } catch (err) {
+          setError(err.response?.data?.error || "Failed to fetch history.");
         } finally {
           setLoading(false);
         }
@@ -360,8 +360,8 @@ const ManageTeachingAllocations = () => {
     try {
       const res = await api.get("/teaching-allocations");
       setAllocations(Array.isArray(res.data) ? res.data : []);
-    } catch {
-      setError("Failed to fetch teaching allocations.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to fetch teaching allocations.");
     } finally {
       setLoading(false);
     }

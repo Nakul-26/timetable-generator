@@ -25,9 +25,21 @@ API.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status;
+    const backendError = error?.response?.data?.error || error?.response?.data?.message;
+
     if (status === 401 && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("auth:expired"));
     }
+
+    if (status === 429 && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("app:notification", { 
+        detail: { 
+          message: backendError || "Too many requests. Please try again later.", 
+          type: "error" 
+        } 
+      }));
+    }
+
     return Promise.reject(error);
   }
 );

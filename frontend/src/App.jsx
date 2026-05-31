@@ -29,6 +29,7 @@ import IssueDetail from './pages/support/IssueDetail';
 import HomePage from './pages/HomePage';
 import Navbar from './components/Navbar2';
 import Login from './pages/Login';
+import Notification from './components/Notification';
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
 import FeedbackButton from './components/FeedbackButton';
@@ -105,6 +106,7 @@ function App() {
   return (
     <div className="app-container">
       <Navbar />
+      <Notification />
       <main className="main-content">
         <Routes>
           <Route path="/login" element={<Login />} />

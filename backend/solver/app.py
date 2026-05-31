@@ -428,6 +428,26 @@ def _build_attempt_constraint_config(
 
 
 def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cancel_check=None) -> Dict[str, Any]:
+    # --- Guardrails ---
+    MAX_CLASSES = 150
+    MAX_FACULTIES = 500
+    MAX_SUBJECTS = 1000
+    MAX_COMBOS = 3000
+
+    classes = payload.get("classes") or []
+    faculties = payload.get("faculties") or []
+    subjects = payload.get("subjects") or []
+    combos = payload.get("combos") or []
+
+    if len(classes) > MAX_CLASSES:
+        return {"ok": False, "error": f"Too many classes (limit: {MAX_CLASSES})"}
+    if len(faculties) > MAX_FACULTIES:
+        return {"ok": False, "error": f"Too many faculties (limit: {MAX_FACULTIES})"}
+    if len(subjects) > MAX_SUBJECTS:
+        return {"ok": False, "error": f"Too many subjects (limit: {MAX_SUBJECTS})"}
+    if len(combos) > MAX_COMBOS:
+        return {"ok": False, "error": f"Too many combinations (limit: {MAX_COMBOS})"}
+
     # DEBUG: Log payload summary at start of generation
     logger.info(
         "Generation payload summary: inputMode=%s classes=%d subjects=%d faculties=%d combos=%d fixedSlots=%d daysPerWeek=%s hoursPerDay=%s",

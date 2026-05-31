@@ -23,10 +23,10 @@ const Login = () => {
                 queryClient.invalidateQueries();
                 navigate('/');
             } else {
-                setError(response.data.message);
+                setError(response.data.message || 'Login failed');
             }
-        } catch {
-            setError('An error occurred. Please try again later.');
+        } catch (err) {
+            setError(err.response?.data?.error || err.response?.data?.message || 'An error occurred. Please try again later.');
         }
     };
 

@@ -11,7 +11,7 @@ const issueCreateLimit = rateLimit({
   max: 10, // 10 tickets per hour
   message: { error: 'Too many tickets created. Please try again later.' },
   keyGenerator: (req) => req.user?._id?.toString() || req.ip,
-  validate: { keyGeneratorIpFallback: false }
+  validate: { default: false }
 });
 
 const commentCreateLimit = rateLimit({
@@ -19,7 +19,7 @@ const commentCreateLimit = rateLimit({
   max: 30, // 30 comments per hour
   message: { error: 'Too many comments. Please try again later.' },
   keyGenerator: (req) => req.user?._id?.toString() || req.ip,
-  validate: { keyGeneratorIpFallback: false }
+  validate: { default: false }
 });
 
 /**

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, Calendar } from 'lucide-react';
+import { ArrowRight, Calendar, Play } from 'lucide-react';
 
 const Hero = () => {
   return (
@@ -20,8 +20,8 @@ const Hero = () => {
             <a href="#contact" className="btn btn-primary">
               Get Started Now <ArrowRight size={20} style={{ marginLeft: '0.5rem' }} />
             </a>
-            <a href="#features" className="btn" style={{ border: '1px solid var(--border)', backgroundColor: 'white' }}>
-              View Features
+            <a href="#demo" className="btn" style={{ border: '1px solid var(--border)', backgroundColor: 'white', display: 'flex', alignItems: 'center' }}>
+              <Play size={18} style={{ marginRight: '0.5rem' }} /> Watch Demo
             </a>
           </div>
         </div>

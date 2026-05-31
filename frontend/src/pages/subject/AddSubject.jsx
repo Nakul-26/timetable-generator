@@ -60,8 +60,8 @@ function AddSubject() {
       setType("theory");
       setClassesPerWeek("");
       refetchData();
-    } catch {
-      setError("Failed to add subject.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to add subject.");
     }
     setLoading(false);
   };

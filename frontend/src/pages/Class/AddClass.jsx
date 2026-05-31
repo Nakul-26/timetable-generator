@@ -46,8 +46,8 @@ const AddClass = () => {
       setSection("");
       setDaysPerWeek(6);
       refetchData();
-    } catch {
-      setError("Failed to add class.");
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to add class.");
     }
     setLoading(false);
   };

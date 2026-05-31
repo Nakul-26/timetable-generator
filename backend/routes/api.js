@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import auth from '../middleware/auth.js';
 import requireCollegeContext from '../middleware/collegeScope.js';
+import { publicLimiter, authLimiter } from '../middleware/rateLimiter.js';
 
 import authRoutes from './api/auth.js';
 import superAdminRoutes from './api/superadmin.js';
@@ -17,13 +18,14 @@ const router = Router();
 const protectedRouter = Router();
 protectedRouter.use(auth);
 protectedRouter.use(requireCollegeContext);
+protectedRouter.use(authLimiter);
 
 // unprotected routes
+router.use(publicLimiter);
 router.use(authRoutes);
 
 // superadmin routes need auth but must NOT be wrapped by tenant scope middleware
-// mount them under the '/superadmin' path so their middleware only runs for those routes
-router.use('/superadmin', superAdminRoutes);
+router.use('/superadmin', authLimiter, superAdminRoutes);
 protectedRouter.use(facultyRoutes);
 protectedRouter.use(subjectRoutes);
 protectedRouter.use(classRoutes);
