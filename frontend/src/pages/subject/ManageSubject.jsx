@@ -509,7 +509,7 @@ function ManageSubject() {
                   <td className="actions-cell">
                     {editId === subject._id ? (
                       <div className="actions-buttons">
-                        <button onClick={handleUpdate} className="primary-btn" disabled={Boolean(mutationMessage)}>
+                        <button onClick={handleEditSubmit} className="primary-btn" disabled={Boolean(mutationMessage)}>
                           {mutationMessage ? "..." : "💾 Save"}
                         </button>
                         <button

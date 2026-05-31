@@ -167,29 +167,30 @@ const TeacherPreferences = () => {
 
   return (
     <div className="manage-container">
-      <div className="teacher-availability-header">
+      <div className="header-with-actions">
         <div>
           <h2>Teacher Preferences</h2>
           <p className="tt-subtext">
-            These are soft preferences. Generation will try to satisfy them, but manual editing will still allow exceptions.
+            Soft preferences used by the generator to optimize satisfaction.
           </p>
         </div>
-        <div className="teacher-availability-actions">
+        <div className="actions-bar" style={{ marginTop: 0 }}>
           <button className="secondary-btn" onClick={resetChanges} disabled={!hasChanges || saving}>
-            Reset
+            Reset Changes
           </button>
           <button className="primary-btn" onClick={savePreferences} disabled={!selectedTeacherId || !hasChanges || saving}>
-            {saving ? "Saving..." : "Save Preferences"}
+            {saving ? "Saving..." : "💾 Save Preferences"}
           </button>
         </div>
       </div>
 
-      <div className="filters-container teacher-availability-toolbar">
-        <label>
-          Teacher
+      <div className="filters-container" style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '300px' }}>
+          <label style={{ fontWeight: 600, fontSize: '0.875rem' }}>Select Teacher</label>
           <select
             value={selectedTeacherId}
             onChange={(e) => setSelectedTeacherId(e.target.value)}
+            style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}
           >
             {teachers.map((teacher) => (
               <option key={teacher._id} value={teacher._id}>
@@ -197,53 +198,82 @@ const TeacherPreferences = () => {
               </option>
             ))}
           </select>
-        </label>
+        </div>
       </div>
 
-      {message ? <div className="success-message">{message}</div> : null}
-      {error ? <div className="error-message">{error}</div> : null}
+      {message ? <div className="success-message" style={{ marginBottom: '1.5rem' }}>{message}</div> : null}
+      {error ? <div className="error-message" style={{ marginBottom: '1.5rem' }}>{error}</div> : null}
 
-      <div className="teacher-preferences-form">
-        <label className="teacher-preferences-toggle">
-          <input
-            type="checkbox"
-            checked={preferences.avoidFirstPeriod}
-            onChange={(e) => updateField("avoidFirstPeriod", e.target.checked)}
-          />
-          <span>Avoid first period</span>
-        </label>
+      <div className="preferences-layout" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '2rem' }}>
+        <div className="card" style={{ padding: '1.5rem', backgroundColor: 'white', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
+          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>Period Preferences</h3>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={preferences.avoidFirstPeriod}
+                onChange={(e) => updateField("avoidFirstPeriod", e.target.checked)}
+                style={{ width: '1.25rem', height: '1.25rem' }}
+              />
+              <span style={{ fontWeight: 500 }}>Avoid first period</span>
+            </label>
 
-        <label className="teacher-preferences-toggle">
-          <input
-            type="checkbox"
-            checked={preferences.avoidLastPeriod}
-            onChange={(e) => updateField("avoidLastPeriod", e.target.checked)}
-          />
-          <span>Avoid last period</span>
-        </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={preferences.avoidLastPeriod}
+                onChange={(e) => updateField("avoidLastPeriod", e.target.checked)}
+                style={{ width: '1.25rem', height: '1.25rem' }}
+              />
+              <span style={{ fontWeight: 500 }}>Avoid last period</span>
+            </label>
 
-        <label className="teacher-preferences-number">
-          <span>Maximum consecutive classes</span>
-          <input
-            type="number"
-            min="1"
-            value={preferences.maxConsecutive}
-            onChange={(e) => updateField("maxConsecutive", e.target.value)}
-            placeholder="Leave empty for default"
-          />
-        </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>Maximum consecutive classes</span>
+              <input
+                type="number"
+                min="1"
+                value={preferences.maxConsecutive}
+                onChange={(e) => updateField("maxConsecutive", e.target.value)}
+                placeholder="Institution Default"
+                style={{ padding: '0.625rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>Limit how many classes the teacher can take back-to-back.</p>
+            </div>
+          </div>
+        </div>
 
-        <div className="teacher-preferences-days">
-          <div className="teacher-preferences-days-title">Preferred days</div>
-          <div className="teacher-preferences-day-grid">
+        <div className="card" style={{ padding: '1.5rem', backgroundColor: 'white', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
+          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>Preferred Working Days</h3>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>Select days this teacher prefers to be on campus.</p>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '1rem' }}>
             {Array.from({ length: daysPerWeek }).map((_, day) => (
-              <label key={day} className="teacher-preferences-toggle">
+              <label 
+                key={day} 
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem', 
+                  cursor: 'pointer',
+                  padding: '0.75rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: preferences.preferredDays.includes(day) ? '#eff6ff' : 'white',
+                  borderColor: preferences.preferredDays.includes(day) ? 'var(--primary-color)' : 'var(--border-color)',
+                  transition: 'all 0.2s'
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={preferences.preferredDays.includes(day)}
                   onChange={() => togglePreferredDay(day)}
+                  style={{ width: '1rem', height: '1rem' }}
                 />
-                <span>{DAY_LABELS[day] || `Day ${day + 1}`}</span>
+                <span style={{ fontWeight: 600, color: preferences.preferredDays.includes(day) ? 'var(--primary-color)' : 'inherit' }}>
+                  {DAY_LABELS[day] || `Day ${day + 1}`}
+                </span>
               </label>
             ))}
           </div>

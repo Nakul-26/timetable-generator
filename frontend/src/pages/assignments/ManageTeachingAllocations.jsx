@@ -1057,7 +1057,7 @@ const ManageTeachingAllocations = () => {
                 <td>{item?.status || "active"}</td>
                 <td className="actions-cell">
                   <div className="actions-buttons">
-                    <button 
+                    {/* <button 
                       type="button"
                       className="secondary-btn" 
                       onClick={() => {
@@ -1066,7 +1066,7 @@ const ManageTeachingAllocations = () => {
                       }}
                     >
                       📜 History
-                    </button>
+                    </button> */}
                     <button 
                       className="danger-btn" 
                       onClick={() => handleDelete(item)} 

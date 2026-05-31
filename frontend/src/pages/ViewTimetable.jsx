@@ -351,7 +351,7 @@ const ViewTimetable = () => {
     };
 
     const downloadPdfFromHtml = (html, title) => {
-        const popup = window.open("", "_blank", "noopener,noreferrer");
+        const popup = window.open("", "_blank");
         if (!popup) {
             alert("Unable to open download window. Please allow popups for this site.");
             return;

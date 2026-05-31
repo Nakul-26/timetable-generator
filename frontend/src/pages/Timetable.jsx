@@ -74,17 +74,17 @@ function Timetable() {
   const DAYS_PER_WEEK = Number(constraintConfig?.schedule?.daysPerWeek) || 6;
   const HOURS_PER_DAY = Number(constraintConfig?.schedule?.hoursPerDay) || 8;
 
-  const classById = useMemo(() => new Map(classes.map((c) => [String(c._id), c])), [classes]);
+  const classById = useMemo(() => new Map(classes.map((c) => [String(c._id || c.id), c])), [classes]);
   const facultyById = useMemo(
-    () => new Map(faculties.map((f) => [String(f._id), f])),
+    () => new Map(faculties.map((f) => [String(f._id || f.id), f])),
     [faculties]
   );
   const subjectById = useMemo(
-    () => new Map(subjects.map((s) => [String(s._id), s])),
+    () => new Map(subjects.map((s) => [String(s._id || s.id), s])),
     [subjects]
   );
   const comboById = useMemo(
-    () => new Map(combos.map((c) => [String(c._id), c])),
+    () => new Map(combos.map((c) => [String(c._id || c.id), c])),
     [combos]
   );
 
@@ -301,6 +301,16 @@ function Timetable() {
     return hasRenderableTable(data?.class_timetables);
   }, [hasRenderableTable]);
 
+  const mergeById = useCallback((prev, next) => {
+    if (!Array.isArray(next)) return prev;
+    const map = new Map(prev.map((item) => [String(item._id || item.id), item]));
+    next.forEach((item) => {
+      const id = String(item._id || item.id);
+      if (id) map.set(id, item);
+    });
+    return Array.from(map.values());
+  }, []);
+
   const applyTimetableState = useCallback((raw, preferredOptionId = null) => {
     const normalized = normalizeGenerationResult(raw);
     if (!normalized) return null;
@@ -313,16 +323,16 @@ function Timetable() {
       setObjectiveValue(null);
       setFacultyDailyHours(canRenderFailurePreview ? normalized?.faculty_daily_hours ?? null : null);
       if (canRenderFailurePreview && normalized?.classes) {
-        setClasses(normalized.classes);
+        setClasses(prev => mergeById(prev, normalized.classes));
       }
       if (canRenderFailurePreview && normalized?.subjects) {
-        setSubjects(normalized.subjects);
+        setSubjects(prev => mergeById(prev, normalized.subjects));
       }
       if (canRenderFailurePreview && normalized?.faculties) {
-        setFaculties(normalized.faculties);
+        setFaculties(prev => mergeById(prev, normalized.faculties));
       }
       if (canRenderFailurePreview && normalized?.combos) {
-        setCombos(normalized.combos);
+        setCombos(prev => mergeById(prev, normalized.combos));
       }
       return normalized;
     }
@@ -358,19 +368,19 @@ function Timetable() {
     setObjectiveValue(active?.objectiveValue ?? active?.objective_value ?? null);
     setFacultyDailyHours(active?.faculty_daily_hours ?? null);
     if (active?.classes) {
-      setClasses(active.classes);
+      setClasses(prev => mergeById(prev, active.classes));
     }
     if (active?.subjects) {
-      setSubjects(active.subjects);
+      setSubjects(prev => mergeById(prev, active.subjects));
     }
     if (active?.faculties) {
-      setFaculties(active.faculties);
+      setFaculties(prev => mergeById(prev, active.faculties));
     }
     if (active?.combos) {
-      setCombos(active.combos);
+      setCombos(prev => mergeById(prev, active.combos));
     }
     return active;
-  }, [hasRenderableTimetable, normalizeGenerationResult]);
+  }, [hasRenderableTimetable, mergeById, normalizeGenerationResult]);
 
   /* ===================== DATA FETCH ===================== */
 
@@ -384,16 +394,16 @@ function Timetable() {
         axios.get("/class-subjects"),
         api.get("/fixed-slot-combos"),
       ]);
-      setClasses(classRes.data);
-      setFaculties(facRes.data);
-      setSubjects(subRes.data);
-      setCombos(comboRes.data || []);
+      setClasses(prev => mergeById(prev, classRes.data));
+      setFaculties(prev => mergeById(prev, facRes.data));
+      setSubjects(prev => mergeById(prev, subRes.data));
+      setCombos(prev => mergeById(prev, comboRes.data || []));
       setClassSubjects(classSubjectRes.data || []);
       setFixedSlotCombos(fixedComboRes.data?.combos || []);
     } catch (err) {
       setError(err.response?.data?.error || "Failed to fetch master data.");
     }
-  }, []);
+  }, [mergeById]);
 
   const fetchLatest = useCallback(async () => {
     setLoading(true);
@@ -922,10 +932,16 @@ function Timetable() {
     setObjectiveValue(option.objectiveValue ?? null);
     setFacultyDailyHours(option.faculty_daily_hours ?? null);
     if (option.classes) {
-      setClasses(option.classes);
+      setClasses(prev => mergeById(prev, option.classes));
+    }
+    if (option.subjects) {
+      setSubjects(prev => mergeById(prev, option.subjects));
+    }
+    if (option.faculties) {
+      setFaculties(prev => mergeById(prev, option.faculties));
     }
     if (option.combos) {
-      setCombos(option.combos);
+      setCombos(prev => mergeById(prev, option.combos));
     }
   };
 
@@ -1081,9 +1097,9 @@ function Timetable() {
   };
 
   const downloadPdfFromHtml = (html, title) => {
-    const popup = window.open("", "_blank", "noopener,noreferrer");
+    const popup = window.open("", "_blank");
     if (!popup) {
-      throw new Error("Unable to open print window.");
+      throw new Error("Unable to open print window. Please check if a popup blocker is enabled.");
     }
 
     popup.document.open();
