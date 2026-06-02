@@ -101,14 +101,13 @@ const AddClass = () => {
           />
         </div>
         <div className="form-group">
-          <label>Days Per Week</label>
+          <label>Days Per Week (Optional)</label>
           <input
             type="number"
             name="daysPerWeek"
             placeholder="Days per week (e.g. 6)"
             value={daysPerWeek}
             onChange={(e) => setDaysPerWeek(e.target.value)}
-            required
           />
         </div>
         <button type="submit" disabled={loading} className="primary-btn">

@@ -34,6 +34,10 @@ const SubjectSchema = new Schema(
       type: Number,
       min: 1,
       default: null,
+    },
+    isElective: {
+      type: Boolean,
+      default: false,
     }
   },
   { timestamps: true }

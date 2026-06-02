@@ -21,6 +21,7 @@ function ManageSubject() {
   const [editSem, setEditSem] = useState("");
   const [editType, setEditType] = useState("");
   const [editClassesPerWeek, setEditClassesPerWeek] = useState("");
+  const [editIsElective, setEditIsElective] = useState(false);
 
   // 🔍 Filter states
   const [showFilters, setShowFilters] = useState(false);
@@ -55,8 +56,8 @@ function ManageSubject() {
   const handleDownloadTemplate = () => {
     clearExcelStatus();
     const rows = [
-      ["name", "id", "sem", "type", "classesPerWeek"],
-      ["", "", "", "theory", ""]
+      ["name", "id", "sem", "type", "classesPerWeek", "isElective"],
+      ["", "", "", "theory", "", "false"]
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
@@ -85,6 +86,7 @@ function ManageSubject() {
         sem: subject.sem || "",
         type: subject.type || "theory",
         classesPerWeek: subject.classesPerWeek ?? "",
+        isElective: subject.isElective ?? false,
         assignedClasses: assignedClassNames,
         assignedFaculties: assignedFacultyNames
       };
@@ -133,6 +135,9 @@ function ManageSubject() {
         const classesPerWeekRaw = getCellValue(row, ["classesPerWeek", "classes_per_week", "Classes per Week", "hoursPerWeek", "weeklyClasses"]);
         const parsedClassesPerWeek = parseOptionalPositiveNumber(classesPerWeekRaw);
 
+        const isElectiveRaw = getCellValue(row, ["isElective", "is_elective", "Is Elective", "elective"]);
+        const isElective = String(isElectiveRaw).toLowerCase() === "true" || isElectiveRaw === true;
+
         if (parsedClassesPerWeek === null) {
           throw new Error(`Invalid classesPerWeek value for subject "${name || id}".`);
         }
@@ -143,6 +148,7 @@ function ManageSubject() {
           sem,
           type,
           classesPerWeek: parsedClassesPerWeek,
+          isElective,
         };
       });
 
@@ -178,6 +184,7 @@ function ManageSubject() {
             sem: row.sem,
             type: row.type,
             classesPerWeek: row.classesPerWeek,
+            isElective: row.isElective,
           });
           updatedCount += 1;
         } else {
@@ -187,6 +194,7 @@ function ManageSubject() {
             sem: row.sem,
             type: row.type,
             classesPerWeek: row.classesPerWeek,
+            isElective: row.isElective,
           });
           createdCount += 1;
         }
@@ -248,6 +256,7 @@ function ManageSubject() {
     setEditSem(subject.sem);
     setEditType(subject.type);
     setEditClassesPerWeek(subject.classesPerWeek ?? "");
+    setEditIsElective(subject.isElective ?? false);
   };
 
   const handleEditSubmit = async (e) => {
@@ -271,6 +280,7 @@ function ManageSubject() {
         sem: editSem,
         type: editType,
         classesPerWeek: classesPerWeekValue,
+        isElective: editIsElective,
       };
       await axios.put(`/subjects/${editId}`, updatedSubject);
       setEditId(null);
@@ -279,6 +289,7 @@ function ManageSubject() {
       setEditSem("");
       setEditType("theory");
       setEditClassesPerWeek("");
+      setEditIsElective(false);
       refetchData();
     } catch (err) {
       console.log(`Error: ${err.message}`);
@@ -408,7 +419,8 @@ function ManageSubject() {
               <th>Code</th>
               <th>Semester/Class</th>
               <th>Subject Type</th>
-              <th>Classes/Week</th>
+              <th>Elective? (Optional)</th>
+              <th>Classes/Week (Optional)</th>
               <th>Assigned Classes</th>
               <th>Assigned Faculties</th>
               <th>Actions</th>
@@ -477,6 +489,18 @@ function ManageSubject() {
                       </select>
                     ) : (
                       subject.type
+                    )}
+                  </td>
+                  <td>
+                    {editId === subject._id ? (
+                      <input
+                        type="checkbox"
+                        checked={editIsElective}
+                        onChange={(e) => setEditIsElective(e.target.checked)}
+                        style={{ width: 'auto' }}
+                      />
+                    ) : (
+                      subject.isElective ? "Yes" : "No"
                     )}
                   </td>
                   <td>

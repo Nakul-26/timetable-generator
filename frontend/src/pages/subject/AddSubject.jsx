@@ -12,13 +12,15 @@ function AddSubject() {
   const [sem, setSem] = useState("");
   const [type, setType] = useState("theory");
   const [classesPerWeek, setClassesPerWeek] = useState("");
+  const [isElective, setIsElective] = useState(false);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     if (name === "name") setName(value);
     if (name === "code") setCode(value);
     if (name === "sem") setSem(value);
     if (name === "type") setType(value);
+    if (name === "isElective") setIsElective(checked);
   };
 
   const validate = () => {
@@ -52,6 +54,7 @@ function AddSubject() {
         sem,
         type,
         classesPerWeek: classesPerWeek === "" ? undefined : Number(classesPerWeek),
+        isElective,
       });
       setSuccess("Subject added successfully!");
       setName("");
@@ -59,6 +62,7 @@ function AddSubject() {
       setSem("");
       setType("theory");
       setClassesPerWeek("");
+      setIsElective(false);
       refetchData();
     } catch (err) {
       setError(err.response?.data?.error || "Failed to add subject.");
@@ -107,12 +111,12 @@ function AddSubject() {
         </div>
 
         <div className="form-group">
-          <label>Classes per Week</label>
+          <label>Classes per Week (Optional)</label>
           <input
             type="number"
             name="classesPerWeek"
             min="1"
-            placeholder="Optional default"
+            placeholder="e.g. 4"
             value={classesPerWeek}
             onChange={(e) => setClassesPerWeek(e.target.value)}
           />
@@ -126,6 +130,18 @@ function AddSubject() {
             <option value="lab">Lab</option>
             <option value="no_teacher">Not Single Teacher</option>
           </select>
+        </div>
+
+        <div className="form-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+          <input
+            type="checkbox"
+            name="isElective"
+            id="isElective"
+            checked={isElective}
+            onChange={handleChange}
+            style={{ width: 'auto' }}
+          />
+          <label htmlFor="isElective" style={{ marginBottom: 0 }}>Is Elective? (Optional)</label>
         </div>
 
         <button type="submit" disabled={loading} className="primary-btn">

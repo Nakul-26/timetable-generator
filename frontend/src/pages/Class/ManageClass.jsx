@@ -390,7 +390,7 @@ function ManageClass() {
               <th>Name</th>
               <th>Section</th>
               <th>Semester/Class</th>
-              <th>Days/Week</th>
+              <th>Days/Week (Optional)</th>
               <th>Assigned Subjects</th>
               <th>Assigned Faculties</th>
               <th>Actions</th>

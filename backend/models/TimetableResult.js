@@ -109,46 +109,75 @@ ResultSchema.index(
   }
 );
 
-// Post-find hook to populate assignments when the source is 'assignments'
-ResultSchema.post('find', async function(docs, next) {
-  // Check if we need to populate.
-  const needsPopulation = docs.some(doc => doc.source === 'assignments' && doc.assignments_only);
-
-  if (!needsPopulation) {
-    return next();
+// Helper function to populate assignments for 'assignments' source
+async function populateAssignments(docs, collegeId) {
+  if (!Array.isArray(docs)) {
+    docs = [docs];
   }
 
-  try {
-    for (const doc of docs) {
-      if (doc.source === 'assignments' && doc.assignments_only) {
-        const populated_assignments = {};
-        const classIds = Object.keys(doc.assignments_only);
+  const needsPopulation = docs.some(doc => doc && doc.source === 'assignments' && doc.assignments_only);
+  if (!needsPopulation) return;
 
-        for (const classId of classIds) {
-          const comboIds = doc.assignments_only[classId];
-          if (Array.isArray(comboIds) && comboIds.length > 0) {
-            // CRITICAL FIX: Filter for valid ObjectIds before querying to prevent CastError
-            const validMongoIds = comboIds.filter(id => mongoose.Types.ObjectId.isValid(id));
-            
-            let populatedCombos = [];
-            if (validMongoIds.length > 0) {
-                populatedCombos = await TeacherSubjectCombination.find({
-                    collegeId: doc.collegeId,
-                    '_id': { $in: validMongoIds }
-                }).populate('faculty', 'name').populate('subject', 'name').lean();
+  for (const doc of docs) {
+    if (doc && doc.source === 'assignments' && doc.assignments_only) {
+      const populated_assignments = {};
+      const classIds = Object.keys(doc.assignments_only);
+      
+      // Use stored virtual combos if available for better resolution of non-DB IDs
+      const virtualCombos = doc.combos || [];
+      const virtualComboMap = new Map(virtualCombos.map(c => [String(c._id), c]));
+
+      for (const classId of classIds) {
+        const comboIds = doc.assignments_only[classId];
+        if (Array.isArray(comboIds) && comboIds.length > 0) {
+          const populatedCombos = [];
+          const dbComboIds = [];
+
+          for (const id of comboIds) {
+            const idStr = String(id);
+            if (virtualComboMap.has(idStr)) {
+              // It's a virtual combo, use the stored data
+              populatedCombos.push(virtualComboMap.get(idStr));
+            } else if (mongoose.Types.ObjectId.isValid(id)) {
+              // It might be a DB combo
+              dbComboIds.push(id);
             }
-            populated_assignments[classId] = populatedCombos;
-          } else {
-            populated_assignments[classId] = [];
           }
+
+          if (dbComboIds.length > 0) {
+            const dbCombos = await TeacherSubjectCombination.find({
+              collegeId: doc.collegeId || collegeId,
+              '_id': { $in: dbComboIds }
+            }).populate('faculty', 'name').populate('subject', 'name').lean();
+            populatedCombos.push(...dbCombos);
+          }
+          populated_assignments[classId] = populatedCombos;
+        } else {
+          populated_assignments[classId] = [];
         }
-        // Attach the populated data to a virtual field.
-        doc.populated_assignments = populated_assignments;
       }
+      doc.populated_assignments = populated_assignments;
     }
+  }
+}
+
+// Post-find hooks to populate assignments
+ResultSchema.post('find', async function(docs, next) {
+  try {
+    await populateAssignments(docs);
     next();
   } catch (error) {
     console.error("Error during post-find population:", error);
+    next(error);
+  }
+});
+
+ResultSchema.post('findOne', async function(doc, next) {
+  try {
+    if (doc) await populateAssignments(doc);
+    next();
+  } catch (error) {
+    console.error("Error during post-findOne population:", error);
     next(error);
   }
 });

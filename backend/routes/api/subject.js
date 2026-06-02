@@ -32,7 +32,7 @@ protectedRouter.use(auth);
 protectedRouter.post('/subjects', async (req, res) => {
   console.log("[POST /subjects] Body:", req.body);
   try {
-    const { id, name, sem } = req.body;
+    const { id, name, sem, isElective } = req.body;
     const classesPerWeek = parseOptionalPositiveNumber(req.body.classesPerWeek, 'classesPerWeek');
     const s = new Subject({
       collegeId: req.collegeId,
@@ -40,6 +40,7 @@ protectedRouter.post('/subjects', async (req, res) => {
       name,
       sem,
       type: req.body.type,
+      isElective: Boolean(isElective),
       ...(classesPerWeek !== undefined ? { classesPerWeek } : {}),
     });
 
@@ -67,12 +68,16 @@ protectedRouter.get('/subjects', async (req, res) => {
 protectedRouter.put('/subjects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, sem, type } = req.body;
+    const { name, sem, type, isElective } = req.body;
     const update = {
       name,
       sem,
       type,
     };
+
+    if (isElective !== undefined) {
+      update.isElective = Boolean(isElective);
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'classesPerWeek')) {
       const classesPerWeek = parseOptionalPositiveNumber(req.body.classesPerWeek, 'classesPerWeek', { allowNull: true });

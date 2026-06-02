@@ -1461,25 +1461,44 @@ h2 {
 }
 
 .tt-inline-toggle {
-  background: #fff;
-  border: 1px solid rgba(79,70,229,0.12);
-  border-radius: 8px;
-  padding: 8px 12px;
+  background: #eee;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 0 12px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
   color: #333;
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease;
+  user-select: none;
+  width: fit-content;
+  flex-shrink: 0;
+}
+
+.tt-inline-toggle:hover {
+  background: #ddd;
+  transform: translateY(-1px);
 }
 
 .tt-inline-toggle input[type="checkbox"] {
   accent-color: var(--primary-color);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  margin: 0;
 }
 
 .tt-options-row {
-  margin: -6px 0 12px;
+  margin: 0 0 12px;
   display: flex;
-  justify-content: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 
 .tt-section-card .secondary-btn,
