@@ -3,6 +3,7 @@ import Hero from './components/Hero';
 import Demo from './components/Demo';
 import Pricing from './components/Pricing';
 import Features from './components/Features';
+import Security from './components/Security';
 import HowItWorks from './components/HowItWorks';
 import Contact from './components/Contact';
 
@@ -29,6 +30,7 @@ function App() {
           <div style={{ display: 'flex', gap: '2rem', fontWeight: 500, fontSize: '0.875rem' }}>
             <a href="#demo" style={{ transition: 'color 0.2s' }} onMouseOver={(e) => e.target.style.color = 'var(--primary)'} onMouseOut={(e) => e.target.style.color = 'inherit'}>Watch Demo</a>
             <a href="#features" style={{ transition: 'color 0.2s' }} onMouseOver={(e) => e.target.style.color = 'var(--primary)'} onMouseOut={(e) => e.target.style.color = 'inherit'}>Features</a>
+            <a href="#security" style={{ transition: 'color 0.2s' }} onMouseOver={(e) => e.target.style.color = 'var(--primary)'} onMouseOut={(e) => e.target.style.color = 'inherit'}>Security</a>
             <a href="#pricing" style={{ transition: 'color 0.2s' }} onMouseOver={(e) => e.target.style.color = 'var(--primary)'} onMouseOut={(e) => e.target.style.color = 'inherit'}>Pricing</a>
             <a href="#how-it-works" style={{ transition: 'color 0.2s' }} onMouseOver={(e) => e.target.style.color = 'var(--primary)'} onMouseOut={(e) => e.target.style.color = 'inherit'}>How it Works</a>
             <a href="#contact" style={{ transition: 'color 0.2s' }} onMouseOver={(e) => e.target.style.color = 'var(--primary)'} onMouseOut={(e) => e.target.style.color = 'inherit'}>Contact</a>
@@ -40,6 +42,7 @@ function App() {
         <Hero />
         <Demo />
         <Features />
+        <Security />
         <Pricing />
         <HowItWorks />
         <Contact />
