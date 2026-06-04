@@ -84,16 +84,6 @@ app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
-app.use(async (_req, res, next) => {
-  try {
-    await connectDatabases();
-    next();
-  } catch (error) {
-    console.error("Database connection error:", error);
-    res.status(500).json({ error: "Database connection failed" });
-  }
-});
-
 app.use("/api", API);
 app.use("/api/manual", ManualAPI);
 app.get("/", (_req, res) => {

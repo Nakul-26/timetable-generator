@@ -1,11 +1,14 @@
 import College from "../models/College.js";
 
 const requireCollegeContext = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Authentication required." });
+  }
+
   // If a superadmin is calling tenant routes, allow them to act within
   // a selected college when they send the `x-college-id` header.
-  if (req.user?.role === "superadmin") {
+  if (req.user.role === "superadmin") {
     // Allow these superadmin-safe routes without a selected college.
-    // Keep in sync with route prefixes used by the API.
     const safePrefixes = [
       "/api/superadmin",
       "/api/me",
@@ -17,7 +20,6 @@ const requireCollegeContext = async (req, res, next) => {
     }
 
     const selected = req.headers["x-college-id"] || req.headers["x-collegeid"];
-    console.log("[collegeScope] header:", selected, "role:", req.user?.role, "path:", path);
     if (selected) {
       try {
         const collegeId = String(selected).toLowerCase();
@@ -40,10 +42,12 @@ const requireCollegeContext = async (req, res, next) => {
     });
   }
 
-  if (!req.collegeId) {
+  // For regular admins, collegeId is mandatory and comes from their account
+  if (!req.user.collegeId) {
     return res.status(401).json({ error: "Missing tenant context." });
   }
 
+  req.collegeId = String(req.user.collegeId);
   next();
 };
 

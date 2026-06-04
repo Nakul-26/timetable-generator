@@ -14,44 +14,24 @@ const auth = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (!decoded || !decoded.id || !decoded.role) {
-      return res.status(401).json({ error: 'Missing tenant context.' });
+      return res.status(401).json({ error: 'Invalid token.' });
     }
 
     const userQuery =
       decoded.role === "superadmin"
         ? { _id: decoded.id, role: "superadmin" }
         : { _id: decoded.id, collegeId: decoded.collegeId };
+    
     const user = await Admin.findOne(userQuery).select('-password');
     if (!user) {
-      return res.status(401).json({ error: 'Please authenticate.' });
-    }
-    if (
-      decoded.role !== "superadmin" &&
-      String(user.collegeId || "") !== String(decoded.collegeId || "")
-    ) {
-      return res.status(401).json({ error: 'Invalid tenant context.' });
-    }
-
-    // If a superadmin provided an x-college-id header, validate and attach it
-    let effectiveCollegeId = null;
-    if (decoded.role === 'superadmin') {
-      const header = req.headers['x-college-id'] || req.headers['x-collegeid'];
-      if (header) {
-        try {
-          const cid = String(header).toLowerCase();
-          const college = await College.findOne({ collegeId: cid }).select('collegeId').lean();
-          if (!college) return res.status(400).json({ error: 'Invalid college context.' });
-          effectiveCollegeId = college.collegeId;
-        } catch (err) {
-          return res.status(500).json({ error: 'Failed to validate college context.' });
-        }
-      }
+      return res.status(401).json({ error: 'User not found.' });
     }
 
     req.user = user;
-    req.collegeId = decoded.role === "superadmin" ? effectiveCollegeId : String(user.collegeId);
+    req.decoded = decoded; // Keep decoded token for collegeId access
     next();
   } catch (error) {
+    console.error("[auth] error:", error.message);
     return res.status(401).json({ error: 'Please authenticate.' });
   }
 };

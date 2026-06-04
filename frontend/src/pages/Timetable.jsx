@@ -6,6 +6,13 @@ import axios from "../api/axios";
 import { DEFAULT_CONSTRAINT_CONFIG, loadConstraintConfig, normalizeConstraintConfig } from "./constraintConfig";
 import { getComboSubjectDisplayName } from "./subjectDisplay";
 
+import HealthReport from "../components/timetable/HealthReport";
+import GenerationProgress from "../components/timetable/GenerationProgress";
+import TimetableOptions from "../components/timetable/TimetableOptions";
+import ClassTimetable from "../components/timetable/ClassTimetable";
+import FacultyTimetable from "../components/timetable/FacultyTimetable";
+import TimetableFilters from "../components/timetable/TimetableFilters";
+
 const HEALTH_BLOCK_STORAGE_KEY = "timetable.blockGenerateOnHealthErrors";
 const ACTIVE_GENERATION_TASK_KEY = "timetable.activeGenerationTaskId";
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
@@ -1514,50 +1521,20 @@ function Timetable() {
     <div className="manage-container">
       <h2>Timetable Generator</h2>
 
-      {showGenerationCard ? (
-        <div className="tt-job-card">
-          <div className="tt-job-card-head">
-            <div>
-              <h3>Generation Job</h3>
-              <p className="tt-subtext">
-                Track the active solver run. This continues even if you navigate away and come back.
-              </p>
-            </div>
-            <div className="tt-job-actions">
-              {taskId ? <span className="tt-job-badge">Task {String(taskId).slice(-8)}</span> : null}
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={stopGeneration}
-                disabled={!canCancelGeneration}
-              >
-                {generationStatusQuery.data?.cancelRequested ? "Cancel Requested" : "Stop Generation"}
-              </button>
-            </div>
-          </div>
-          <div className="filters-container">
-            <span>Status: {formatGenerationStatusLabel(currentGenerationStatus)}</span>
-            <span>Phase: {formatGenerationStatusLabel(currentGenerationPhase)}</span>
-            <span>Progress: {Math.round(visibleProgress)}%</span>
-            {visibleRemainingSec != null ? (
-              <span>Time Left: {formatCountdown(visibleRemainingSec)}</span>
-            ) : null}
-          </div>
-          <div className="tt-progress-wrap">
-            <progress value={visibleProgress} max="100" className="tt-progress-bar" />
-            <span>{Math.round(visibleProgress)}%</span>
-            <span>{getProgressMessage()}</span>
-            {visibleRemainingSec != null && (
-              <span>Time Left: {formatCountdown(visibleRemainingSec)}</span>
-            )}
-          </div>
-          {generationStatusQuery.data?.updatedAt ? (
-            <p className="tt-subtext">
-              Last update: {new Date(generationStatusQuery.data.updatedAt).toLocaleString()}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+      <GenerationProgress
+        showGenerationCard={showGenerationCard}
+        taskId={taskId}
+        stopGeneration={stopGeneration}
+        canCancelGeneration={canCancelGeneration}
+        currentGenerationStatus={currentGenerationStatus}
+        currentGenerationPhase={currentGenerationPhase}
+        visibleProgress={visibleProgress}
+        visibleRemainingSec={visibleRemainingSec}
+        getProgressMessage={getProgressMessage}
+        formatGenerationStatusLabel={formatGenerationStatusLabel}
+        formatCountdown={formatCountdown}
+        generationStatusQuery={generationStatusQuery}
+      />
 
       <div className="actions-bar">
         <button className="secondary-btn" onClick={runHealthCheck} disabled={loading || healthLoading}>
@@ -1655,77 +1632,27 @@ function Timetable() {
         </div>
       </div>
 
-      {timetableOptions.length > 0 ? (
-        <div className="tt-section-card">
-          <h3>Generated Options</h3>
-          <p className="tt-subtext">
-            Generated {timetableOptions.length} unique timetable option{timetableOptions.length === 1 ? "" : "s"}.
-            Preview and select the one you want to keep.
-          </p>
-          <div className="tt-option-grid">
-            {timetableOptions.map((option, index) => {
-              const isActive = String(option.optionId) === String(selectedOptionId);
-              return (
-                <button
-                  key={option.optionId}
-                  type="button"
-                  className={`tt-option-card ${isActive ? "is-active" : ""}`}
-                  onClick={() => handleSelectOption(option.optionId)}
-                >
-                  <span className="tt-option-title">
-                    {option.label || `Option ${index + 1}`}
-                  </span>
-                  <span className="tt-option-meta">
-                    Objective: {option.objectiveValue ?? "N/A"}
-                  </span>
-                  <span className="tt-option-meta">
-                    Gap Score: {option.score ?? "N/A"}
-                  </span>
-                  <span className="tt-option-meta">Seed: {option.seed ?? "N/A"}</span>
-                  <span className="tt-option-action">
-                    {isActive ? "Previewing" : "Preview"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
+      <TimetableOptions
+        timetableOptions={timetableOptions}
+        selectedOptionId={selectedOptionId}
+        handleSelectOption={handleSelectOption}
+      />
 
-      {showFilters && (
-        <div className="filters-container">
-          <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}>
-            <option value="">All Classes</option>
-            {classes.map((cls) => (
-              <option key={cls._id} value={cls._id}>
-                {getClassName(cls._id)}
-              </option>
-            ))}
-          </select>
-
-          <select value={selectedFaculty} onChange={(e) => setSelectedFaculty(e.target.value)}>
-            <option value="">All Faculties</option>
-            {faculties.map((fac) => (
-              <option key={fac._id} value={fac._id}>
-                {getFacultyName(fac._id)}
-              </option>
-            ))}
-          </select>
-
-          <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)}>
-            <option value="">All Subjects</option>
-            {subjects.map((sub) => (
-              <option key={sub._id} value={sub._id}>
-                {sub.name}
-              </option>
-            ))}
-          </select>
-
-          <button onClick={resetFilters} className="secondary-btn">
-            Reset
-          </button>
-        </div>
-      )}
+      <TimetableFilters
+        showFilters={showFilters}
+        selectedClass={selectedClass}
+        setSelectedClass={setSelectedClass}
+        selectedFaculty={selectedFaculty}
+        setSelectedFaculty={setSelectedFaculty}
+        selectedSubject={selectedSubject}
+        setSelectedSubject={setSelectedSubject}
+        classes={classes}
+        faculties={faculties}
+        subjects={subjects}
+        getClassName={getClassName}
+        getFacultyName={getFacultyName}
+        resetFilters={resetFilters}
+      />
 
       {error && <div className="error-message">{error}</div>}
 
@@ -1745,84 +1672,14 @@ function Timetable() {
         </div>
       </div>
 
-      {healthReport ? (
-        <div className="tt-section-card tt-audit-card">
-          <div className="tt-section-header">
-            <h3>Pre-Generation Audit</h3>
-            <span className={`tt-status-badge ${healthReport.ok ? "status-ok" : "status-error"}`}>
-              {healthReport.ok ? "Passed" : "Action Required"}
-            </span>
-          </div>
-          <p className="tt-subtext">
-            Automatic check of your data health before starting the solver.
-          </p>
-          
-          <div className="tt-audit-summary-grid">
-             <div className="tt-audit-stat">
-                <span className="tt-audit-label">Required Hours</span>
-                <span className="tt-audit-value">{healthReport.summary?.totalClassRequiredHours ?? 0}</span>
-             </div>
-             <div className="tt-audit-stat">
-                <span className="tt-audit-label">Total Capacity</span>
-                <span className="tt-audit-value">{healthReport.summary?.totalClassCapacityHours ?? 0}</span>
-             </div>
-             <div className="tt-audit-stat">
-                <span className="tt-audit-label">Errors</span>
-                <span className={`tt-audit-value ${healthReport.summary?.errors > 0 ? "text-error" : ""}`}>
-                  {healthReport.summary?.errors ?? 0}
-                </span>
-             </div>
-             <div className="tt-audit-stat">
-                <span className="tt-audit-label">Warnings</span>
-                <span className={`tt-audit-value ${healthReport.summary?.warnings > 0 ? "text-warning" : ""}`}>
-                  {healthReport.summary?.warnings ?? 0}
-                </span>
-             </div>
-          </div>
-
-          <div className="filters-container tt-top-gap">
-            <select
-              value={healthSeverityFilter}
-              onChange={(e) => setHealthSeverityFilter(e.target.value)}
-            >
-              <option value="all">All Issues</option>
-              <option value="error">Errors Only</option>
-              <option value="warning">Warnings Only</option>
-              <option value="info">Info Only</option>
-            </select>
-          </div>
-          {isGenerateBlockedByHealth ? (
-            <div className="error-message tt-tight-message">
-              Generate is blocked because health check contains errors.
-            </div>
-          ) : null}
-          {filteredHealthWarnings.length > 0 ? (
-            <div className="tt-health-list">
-              {["error", "warning", "info"].map((severity) => {
-                const items = groupedHealthWarnings[severity] || [];
-                if (!items.length) return null;
-                return (
-                  <div key={severity} className="tt-health-group">
-                    <div className="tt-health-title">
-                      {severity.toUpperCase()} ({items.length})
-                    </div>
-                    {items.map((w, idx) => (
-                      <div
-                        key={`${w.type || "warning"}-${severity}-${idx}`}
-                        className={`tt-health-item tt-health-${severity}`}
-                      >
-                        <b>{severity.toUpperCase()}</b>: {w.message}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p style={{ marginTop: 8 }}>No issues detected.</p>
-          )}
-        </div>
-      ) : null}
+      <HealthReport
+        healthReport={healthReport}
+        healthSeverityFilter={healthSeverityFilter}
+        setHealthSeverityFilter={setHealthSeverityFilter}
+        isGenerateBlockedByHealth={isGenerateBlockedByHealth}
+        filteredHealthWarnings={filteredHealthWarnings}
+        groupedHealthWarnings={groupedHealthWarnings}
+      />
 
       {showFixedClasses ? (
       <div className="tt-section-card">
@@ -1867,149 +1724,24 @@ function Timetable() {
             <span>Objective: {objectiveValue ?? "N/A"}</span>
             <span>Teacher Daily Hours: {facultyDailyHours ? "Available" : "Not reported"}</span>
           </div>
-          {filteredTimetable().map(([classId, slots]) => {
-            const assignedHours = calculateAssignedHours(slots);
-            const currentClass = classById.get(classId);
-
-            return (
-              <div key={classId} className="tt-class-block">
-                <h3>{getClassName(classId)}</h3>
-                <div className="table-responsive">
-                  <table className="styled-table">
-                    <thead>
-                      <tr>
-                        <th>Day / Period</th>
-                        {Array.from({ length: HOURS_PER_DAY }).map((_, p) => (
-                          <th key={p}>P{p + 1}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {slots.map((row, d) => (
-                        <tr key={d}>
-                          <td>Day {d + 1}</td>
-                          {row.map((slot, h) => {
-                            const cellMatches = isCellMatching(slot);
-                            const cellClassName = cellMatches ? "" : "tt-cell-dim";
-
-                            if (!slot || slot === -1 || slot === "BREAK") {
-                              return <td key={h} className={cellClassName}>-</td>;
-                            }
-
-                            const combo = comboById.get(String(slot));
-                            if (!combo) {
-                              return <td key={h} className={cellClassName}>?</td>;
-                            }
-
-                            const subject = subjectById.get(String(combo.subject_id));
-                            const subjectName = getSubjectDisplayName(combo.subject_id);
-
-                            let facultyNames = [];
-                            if (combo.faculty_ids) {
-                                facultyNames = (combo.faculty_ids || []).map(tid => {
-                                    const faculty = facultyById.get(String(tid));
-                                    return faculty ? faculty.name : "N/A";
-                                });
-                            } else if (combo.faculty_id) {
-                                const faculty = facultyById.get(String(combo.faculty_id));
-                                if (faculty) {
-                                    facultyNames.push(faculty.name);
-                                } else {
-                                    facultyNames.push("N/A");
-                                }
-                            }
-                            if (facultyNames.length === 0 && String(subject?.type || "").toLowerCase() === "no_teacher") {
-                                facultyNames.push("No Teacher");
-                            }
-
-                            const combinedClassIds = Array.isArray(combo.class_ids)
-                              ? combo.class_ids.map(String)
-                              : [];
-                            const combinedLabel = combinedClassIds.length > 1
-                              ? combinedClassIds.map((id) => getClassName(id)).join(" + ")
-                              : "";
-
-                            return (
-                              <td key={h} className={cellClassName}>
-                                <div>
-                                  <b>{subjectName}</b>
-                                </div>
-                                {facultyNames.map((name, i) => <div key={i}>{name}</div>)}
-                                {combinedLabel ? <div>Combined: {combinedLabel}</div> : null}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="tt-hours-report">
-                    <h4>Subject Hours Report</h4>
-                    {(() => {
-                        if (!currentClass) return null;
-                        const classIdKey = String(classId);
-                        const requiredFromAssignments = requiredHoursByClassSubject.get(classIdKey) || {};
-                        const requiredHours = buildDisplayRequiredHours(
-                          currentClass,
-                          requiredFromAssignments
-                        );
-
-                        const allSubjectIds = new Set([
-                          ...Object.keys(requiredHours),
-                          ...Object.keys(assignedHours),
-                        ]);
-
-                        const mergedRows = new Map();
-                        Array.from(allSubjectIds).forEach((subjectId) => {
-                          const assigned = Number(assignedHours[subjectId] || 0);
-                          const requiredValue = requiredHours[subjectId];
-                          const required =
-                            requiredValue === undefined || requiredValue === null
-                              ? "N/A"
-                              : Number(requiredValue);
-
-                          if (assigned === 0 && required === 0) return;
-                          if (assigned === 0 && required === "N/A") return;
-
-                          const name = getSubjectDisplayName(subjectId);
-                          const existing = mergedRows.get(name);
-                          if (!existing) {
-                            mergedRows.set(name, { assigned, required });
-                            return;
-                          }
-
-                          existing.assigned += assigned;
-                          if (required !== "N/A") {
-                            existing.required =
-                              existing.required === "N/A"
-                                ? required
-                                : Number(existing.required) + required;
-                          }
-                        });
-
-                        const rows = Array.from(mergedRows.entries()).map(([name, values]) => {
-                          return (
-                            <div key={name} className="tt-hours-row">
-                              <span>{name}: {values.assigned} / {values.required}</span>
-                            </div>
-                          );
-                        });
-
-                        if (!rows.length) {
-                          return <div className="tt-hours-row">No subject hours data available.</div>;
-                        }
-
-                        return (
-                          <>
-                            {rows}
-                          </>
-                        );
-                    })()}
-                </div>
-              </div>
-            )
-          })}
+          {filteredTimetable().map(([classId, slots]) => (
+            <ClassTimetable
+              key={classId}
+              classId={classId}
+              slots={slots}
+              getClassName={getClassName}
+              HOURS_PER_DAY={HOURS_PER_DAY}
+              isCellMatching={isCellMatching}
+              comboById={comboById}
+              subjectById={subjectById}
+              facultyById={facultyById}
+              getSubjectDisplayName={getSubjectDisplayName}
+              calculateAssignedHours={calculateAssignedHours}
+              classById={classById}
+              requiredHoursByClassSubject={requiredHoursByClassSubject}
+              buildDisplayRequiredHours={buildDisplayRequiredHours}
+            />
+          ))}
         </div>
       )}
 
@@ -2022,48 +1754,17 @@ function Timetable() {
             <span>Teacher Daily Hours: {facultyDailyHours ? "Available" : "Not reported"}</span>
           </div>
           {filteredFacultyTimetable().map(([facultyId, slots]) => (
-            <div key={facultyId} className="tt-class-block">
-              <h3>{getFacultyName(facultyId)}</h3>
-              <div className="table-responsive">
-                <table className="styled-table">
-                  <thead>
-                    <tr>
-                      <th>Day / Period</th>
-                      {Array.from({ length: HOURS_PER_DAY }).map((_, p) => (
-                        <th key={p}>P{p + 1}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {slots.map((row, d) => (
-                      <tr key={d}>
-                        <td>Day {d + 1}</td>
-                        {row.map((slot, h) => {
-                          const cellMatches = isFacultyCellMatching(slot);
-                          const hasFilter = selectedClass || selectedSubject;
-                          const cellClassName = !hasFilter || cellMatches ? "" : "tt-cell-dim";
-
-                          if (!slot || slot === -1 || slot === "BREAK") {
-                            return <td key={h} className={cellClassName}>-</td>;
-                          }
-
-                          const { subjectName, classNames } = getFacultySlotDisplay(slot);
-
-                          return (
-                            <td key={h} className={cellClassName}>
-                              <div>
-                                <b>{subjectName}</b>
-                              </div>
-                              {classNames.map((name, i) => <div key={i}>{name}</div>)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <FacultyTimetable
+              key={facultyId}
+              facultyId={facultyId}
+              slots={slots}
+              getFacultyName={getFacultyName}
+              HOURS_PER_DAY={HOURS_PER_DAY}
+              isFacultyCellMatching={isFacultyCellMatching}
+              selectedClass={selectedClass}
+              selectedSubject={selectedSubject}
+              getFacultySlotDisplay={getFacultySlotDisplay}
+            />
           ))}
           {!filteredFacultyTimetable().length ? (
             <p>No faculty timetables match the selected filters.</p>
