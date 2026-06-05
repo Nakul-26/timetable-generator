@@ -40,6 +40,25 @@ The app lets college admins manage faculties, subjects, classes, teacher-subject
 - Manual timetable endpoints in `backend/routes/timetableManual.js`
 - Optional solver code under `backend/solver/`
 
+### Testing & Safety Net
+
+The project includes a suite of automated tests to prevent regressions.
+
+**Backend Tests (Node.js/Vitest):**
+```powershell
+cd backend
+npm test
+```
+
+**Solver Tests (Python/Pytest):**
+```powershell
+cd backend/solver
+pytest
+```
+
+**CI/CD:**
+Tests are automatically run on every push to GitHub via GitHub Actions.
+
 ## Key User Flows
 
 1. Log in as an admin or superadmin.
