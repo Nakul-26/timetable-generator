@@ -119,7 +119,7 @@ function getComboClassIds(combo, fallbackClassId = null) {
   return fallbackClassId ? [String(fallbackClassId)] : [];
 }
 
-async function getClassMap(classIds = []) {
+async function getClassMap(classIds = [], state = {}) {
   const docs = await ClassModel.find({ _id: { $in: classIds }, collegeId: state?.collegeId }).lean();
   return new Map(docs.map((doc) => [String(doc._id), doc]));
 }
@@ -361,7 +361,7 @@ export async function validateAndSimulateMove({
     ...sourceComboClassIds,
     ...targetComboClassIds,
   ]);
-  const classMap = await getClassMap([...classIdsToFetch]);
+  const classMap = await getClassMap([...classIdsToFetch], state);
   const newState = cloneState(state);
 
   try {
