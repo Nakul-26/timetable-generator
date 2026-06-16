@@ -38,24 +38,33 @@ function getAllowedOrigins() {
 }
 
 async function connectDatabases() {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
   if (databaseConnectionPromise) {
     return databaseConnectionPromise;
   }
 
   databaseConnectionPromise = (async () => {
-    await client.connect();
-    await client.db("admin").command({ ping: 1 });
-
-    if (mongoose.connection.readyState === 0) {
+    try {
+      console.log("Connecting to MongoDB...");
       await mongoose.connect(uri, {
         dbName: process.env.MONGO_DB_NAME || "timetable_jayanth",
         serverSelectionTimeoutMS: 20000,
+        bufferCommands: false, // Disable buffering to fail fast if connection isn't ready
       });
+      console.log("Mongoose connected.");
+
+      // Also connect the raw MongoClient if needed by other parts of the app
+      await client.connect();
+      console.log("MongoClient connected.");
+    } catch (error) {
+      console.error("Database connection failed:", error);
+      databaseConnectionPromise = null;
+      throw error;
     }
-  })().catch((error) => {
-    databaseConnectionPromise = null;
-    throw error;
-  });
+  })();
 
   return databaseConnectionPromise;
 }
