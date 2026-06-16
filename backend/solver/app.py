@@ -902,7 +902,8 @@ def _run_generation_batch(payload: Dict[str, Any], progress_callback=None, cance
                     "constraintConfig": attempt_constraint_config,
                     "random_seed": int(strategy.get("seed") or seed),
                     "solver_time_limit_sec": per_attempt_time_limit_sec,
-                }
+                },
+                cancel_check=cancel_check,
             )
         except Exception as exc:
             last_error = f"Solver crashed: {str(exc) or exc.__class__.__name__}"

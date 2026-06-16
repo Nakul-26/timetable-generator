@@ -7,7 +7,7 @@ from output.extractor import extract_solver_result
 from solver_core import solve_instance as solve_instance_core
 
 
-def solve_instance(payload: dict | None) -> dict:
+def solve_instance(payload: dict | None, cancel_check: callable | None = None) -> dict:
     """
     Authoritative solver entrypoint for the Python solver service.
     """
@@ -19,7 +19,7 @@ def solve_instance(payload: dict | None) -> dict:
     
     request_payload = context.input.to_payload()
     def _solve_once(current_payload: dict) -> dict:
-        return solve_instance_core(current_payload, model_context=context)
+        return solve_instance_core(current_payload, model_context=context, cancel_check=cancel_check)
 
     result = solve_with_retries(_solve_once, request_payload, attempts=1)
     

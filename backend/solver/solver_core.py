@@ -111,6 +111,7 @@ def _required_hours(class_obj: Dict[str, Any], subject_obj: Dict[str, Any]) -> i
 def solve_instance(
     payload: Dict[str, Any],
     model_context: Optional[SolverModelContext] = None,
+    cancel_check: Optional[callable] = None,
 ) -> Dict[str, Any]:
     if model_context is None:
         model_context = build_solver_model_context(normalize_solver_payload(payload))
@@ -1997,17 +1998,58 @@ def solve_instance(
         early_abort_thread = threading.Thread(target=stop_if_stuck, daemon=True)
         early_abort_thread.start()
 
+    # Cancellation monitoring thread
+    cancel_requested_state = {"triggered": False}
+    cancel_stop_event = threading.Event()
+    cancel_thread = None
+
+    if cancel_check is not None:
+        def monitor_cancel() -> None:
+            while not cancel_stop_event.wait(0.5): # Check twice per second
+                try:
+                    if cancel_check():
+                        cancel_requested_state["triggered"] = True
+                        _stop_search(solver)
+                        break
+                except Exception:
+                    # Ignore database errors during polling
+                    pass
+
+        cancel_thread = threading.Thread(target=monitor_cancel, daemon=True)
+        cancel_thread.start()
+
     try:
         status = _solve_with_solution_callback(solver, model, progress_callback)
     finally:
         early_abort_stop.set()
+        cancel_stop_event.set()
         if early_abort_thread is not None:
             early_abort_thread.join(timeout=0.2)
+        if cancel_thread is not None:
+            cancel_thread.join(timeout=0.2)
 
     diagnostics_dicts = [
         d.to_dict() if hasattr(d, "to_dict") else dict(d)
         for d in all_diagnostics
     ]
+    
+    # Check if we stopped due to cancellation
+    if cancel_requested_state["triggered"]:
+        return {
+            "ok": False,
+            "error": "Generation stopped by user",
+            "reason": "cancel_requested",
+            "classes": classes,
+            "unmet_requirements": unmet_requirements,
+            "warnings": fixed_slot_warnings,
+            "config": applied_config,
+            "solver_stats": {
+                "wall_time_seconds": float(solver.WallTime()),
+                "status": "CANCELLED",
+                "early_abort_triggered": False,
+                "cancel_requested_triggered": True,
+            },
+        }
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and not progress_callback.solution_found:
         failure_diagnostics = _build_failure_diagnostics()
         partial_preview = _build_partial_preview()
