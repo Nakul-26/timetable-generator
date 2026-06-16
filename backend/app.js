@@ -73,6 +73,7 @@ const corsOptions = {
       return;
     }
 
+    console.error(`CORS rejected origin: ${origin}. Allowed origins: ${allowedOrigins.join(", ")}`);
     callback(new Error(`Origin ${origin} is not allowed by CORS`));
   },
   credentials: true,
@@ -84,10 +85,34 @@ app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
+// Database connection middleware for serverless environments
+app.use(async (req, res, next) => {
+  try {
+    await connectDatabases();
+    next();
+  } catch (error) {
+    console.error("Database connection error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Database connection failed",
+      error: process.env.NODE_ENV === 'production' ? undefined : error.message 
+    });
+  }
+});
+
 app.use("/api", API);
 app.use("/api/manual", ManualAPI);
 app.get("/", (_req, res) => {
   res.send("API is working");
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ 
+    success: false, 
+    message: err.message || "Internal Server Error" 
+  });
 });
 
 export { app, client, connectDatabases };
