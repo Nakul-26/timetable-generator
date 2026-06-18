@@ -6,7 +6,8 @@ A robust, full-stack timetable management and generation system designed for edu
 [https://timetable-generator2.pages.dev](https://timetable-generator2.pages.dev)
 
 ## 🎥 Demo Video
-A full walkthrough of the system can be found here: [Timetable Generator Demo](assets/Timetable%20generator%20demo.mp4)
+
+A full walkthrough of the system can be found here: [Timetable Generator Demo Video](assets/demo-video.mp4)
 
 ## 🔑 Demo Credentials
 For testing and presentation purposes, you can use the following dummy admin credentials:
