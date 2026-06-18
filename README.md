@@ -7,7 +7,13 @@ A robust, full-stack timetable management and generation system designed for edu
 
 ## 🎥 Demo Video
 
-A full walkthrough of the system can be found here: [Timetable Generator Demo Video](assets/demo-video.mp4)
+Watch the full walkthrough of the system below:
+
+<video src="https://github.com/Nakul-26/timetable-generator/raw/main/assets/demo-video.mp4" width="100%" controls>
+  Your browser does not support the video tag. You can <a href="https://github.com/Nakul-26/timetable-generator/raw/main/assets/demo-video.mp4">download the video here</a>.
+</video>
+
+*(Note: If the video doesn't play directly in the browser, you can [view/download it here](https://github.com/Nakul-26/timetable-generator/raw/main/assets/demo-video.mp4))*
 
 ## 🔑 Demo Credentials
 For testing and presentation purposes, you can use the following dummy admin credentials:
