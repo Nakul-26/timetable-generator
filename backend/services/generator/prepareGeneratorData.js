@@ -44,9 +44,22 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
 
   if (inputMode === "EXPLICIT") {
     // EXPLICIT: Only use explicit TeachingAllocations, ignore derived relations
-    filteredClassSubjectsRaw = [];
-    filteredCombosRaw = [];
-    console.log("[prepareGeneratorData] EXPLICIT mode: using only TeachingAllocations, ignoring derived relations");
+    // But keep class-subject hours and teacher combos for electives since they don't have explicit allocations
+    const electiveSubjectIds = new Set();
+    (electiveSettings || []).forEach(setting => {
+      if (setting.subject) electiveSubjectIds.add(setting.subject.toString());
+      let reqs = setting.teacherCategoryRequirements || {};
+      if (reqs instanceof Map) {
+        reqs = Object.fromEntries(reqs.entries());
+      } else if (typeof reqs.toObject === "function") {
+        reqs = reqs.toObject();
+      }
+      Object.keys(reqs).forEach(subId => electiveSubjectIds.add(subId.toString()));
+    });
+
+    filteredClassSubjectsRaw = classSubjectsRaw.filter(cs => electiveSubjectIds.has(cs.subject.toString()));
+    filteredCombosRaw = combosRaw.filter(c => electiveSubjectIds.has(c.subject.toString()));
+    console.log(`[prepareGeneratorData] EXPLICIT mode: keeping elective-related mappings for ${electiveSubjectIds.size} subjects`);
   } else if (inputMode === "DERIVED") {
     // DERIVED: Prefer derived relations, but keep explicit lab allocations.
     // Labs often need explicit teacher assignment and block-handling; dropping them can
@@ -108,9 +121,19 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
           classIds,
           hoursPerWeek: allocation.hoursPerWeek,
           combinedClassGroupId: allocation.combinedClassGroupId || null,
+          source: allocation.source || "DIRECT",
         });
       }
       classIds.forEach((classId) => {
+        const subId = String(allocation.subject || (subjectTeacherPairs[0] && subjectTeacherPairs[0].subjectId) || "");
+        if (subId) {
+          explicitClassSubjectKeys.add(`${classId}|${subId}`);
+          classSubjects.push({
+            classId,
+            subjectId: subId,
+            hoursPerWeek: allocation.hoursPerWeek,
+          });
+        }
         subjectTeacherPairs.forEach((pair) => {
           if (pair.teacherId) {
             explicitClassTeacherKeys.add(`${classId}|${pair.teacherId}`);
@@ -137,6 +160,7 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
           teacherIds: teacherIds,
           hoursPerWeek: allocation.hoursPerWeek,
           combinedClassGroupId: allocation.combinedClassGroupId || null,
+          source: allocation.source || "DIRECT",
         });
         classIds.forEach((classId) => {
           teacherIds.forEach((teacherId) => {
@@ -156,6 +180,7 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
           classIds,
           hoursPerWeek: allocation.hoursPerWeek,
           combinedClassGroupId: allocation.combinedClassGroupId || null,
+          source: allocation.source || "DIRECT",
         });
       });
     }
@@ -204,11 +229,19 @@ export async function prepareGeneratorData(collegeId, inputMode = "EXPLICIT") {
     });
   });
 
-  const classElectiveSubjects = electiveSettings.map(setting => ({
-    classId: setting.class.toString(),
-    subjectId: setting.subject.toString(),
-    teacherCategoryRequirements: setting.teacherCategoryRequirements
-  }));
+  const classElectiveSubjects = electiveSettings.map(setting => {
+    let reqs = setting.teacherCategoryRequirements || {};
+    if (reqs instanceof Map) {
+      reqs = Object.fromEntries(reqs.entries());
+    } else if (typeof reqs.toObject === "function") {
+      reqs = reqs.toObject();
+    }
+    return {
+      classId: setting.class.toString(),
+      subjectId: setting.subject.toString(),
+      teacherCategoryRequirements: reqs
+    };
+  });
 
   const generatorData = converter.convertNewCollegeInput({
     classes,

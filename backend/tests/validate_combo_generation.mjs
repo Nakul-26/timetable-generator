@@ -208,6 +208,36 @@ function validateNoTeacherInElective() {
   assert(electiveCombos[0].faculty_ids.join(",") === "teacher-b", "elective combo should only include Teacher B (Library has no teacher)");
 }
 
+function validateDerivedElective() {
+  const data = convert({
+    classSubjects: [{ classId: "class-a", subjectId: "ai", hoursPerWeek: 3 }],
+    classTeachers: [
+      { classId: "class-a", teacherId: "teacher-a" },
+      { classId: "class-a", teacherId: "teacher-b" }
+    ],
+    teacherSubjectCombos: [
+      { teacherId: "teacher-a", subjectId: "cloud" },
+      { teacherId: "teacher-b", subjectId: "iot" }
+    ],
+    classElectiveSubjects: [
+      {
+        classId: "class-a",
+        subjectId: "ai",
+        teacherCategoryRequirements: new Map([["cloud", 1], ["iot", 1]]),
+      }
+    ]
+  });
+
+  const electiveCombos = data.combos.filter((combo) =>
+    String(combo.subject_id).startsWith("VIRTUAL_ELECTIVE_")
+  );
+  assert(electiveCombos.length === 1, `expected one derived elective combo, got ${electiveCombos.length}`);
+  assert(
+    electiveCombos[0].faculty_ids.includes("teacher-a") && electiveCombos[0].faculty_ids.includes("teacher-b"),
+    "derived elective combo should occupy all option teachers"
+  );
+}
+
 for (const validate of [
   validateDirectTheory,
   validateDirectElectiveBlock,
@@ -216,6 +246,7 @@ for (const validate of [
   validateNoTeacherSubject,
   validateExplicitNoTeacher,
   validateNoTeacherInElective,
+  validateDerivedElective,
 ]) {
   validate();
 }

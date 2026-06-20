@@ -49,16 +49,23 @@ def audit_solver_input(context: SolverModelContext) -> List[Dict[str, Any]]:
                         )
 
     # 2. Check Faculty Load
+    from typing import Tuple
     faculty_load: Dict[str, float] = {}
-    for combo_id, candidate in context.candidates_by_combo.items():
-        # Get max required hours across classes for this combo (conservative estimate for now)
-        # Actually, for each class in the combo, it consumes those hours.
-        # If it's a combined class, it might be the same hours.
-        # For simplicity, let's take the required hours from one of the classes.
-        hours = max(candidate.required_hours_by_class.values(), default=0)
-        
-        for faculty_id in candidate.faculty_ids:
-            faculty_load[faculty_id] = faculty_load.get(faculty_id, 0) + hours
+    for faculty_id in faculty_by_id.keys():
+        faculty_candidates = [
+            cand for cand in context.candidates_by_combo.values()
+            if faculty_id in cand.faculty_ids
+        ]
+        if not faculty_candidates:
+            continue
+            
+        grouped_requirements: Dict[Tuple[Tuple[str, ...], str], float] = {}
+        for cand in faculty_candidates:
+            key = (tuple(sorted(cand.class_ids)), cand.subject_id)
+            hours = max(cand.required_hours_by_class.values(), default=0)
+            grouped_requirements[key] = max(grouped_requirements.get(key, 0.0), float(hours))
+            
+        faculty_load[faculty_id] = sum(grouped_requirements.values())
             
     for faculty_id, load in faculty_load.items():
         faculty = faculty_by_id.get(faculty_id)

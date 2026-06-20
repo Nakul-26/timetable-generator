@@ -82,7 +82,7 @@ export function convertNewCollegeInput({
     };
     
     const teachersByCategory = new Map();
-    const explicitAllocations = [];
+    let explicitAllocations = [];
     const explicitLabAllocations = [];
     const explicitElectiveAllocations = [];
     for (const allocation of labAllocations) {
@@ -98,6 +98,7 @@ export function convertNewCollegeInput({
             classIds,
             hoursPerWeek: hoursRequired,
             combinedClassGroupId: allocation.combinedClassGroupId || null,
+            source: allocation.source || "DIRECT",
         });
     }
     for (const combo of teacherSubjectCombos) {
@@ -154,6 +155,7 @@ export function convertNewCollegeInput({
                 classIds: combo.classIds.map(String),
                 hoursPerWeek: Number(combo.hoursPerWeek || 0),
                 combinedClassGroupId: combo.combinedClassGroupId || null,
+                source: combo.source || "DIRECT",
             });
         }
         if (teacherIds.length === 0) {
@@ -167,6 +169,33 @@ export function convertNewCollegeInput({
         });
     }
     explicitAllocations.unshift(...explicitLabAllocations);
+
+    // Filter explicitAllocations to prioritize DIRECT over MAPPING_SYNC for each (classId, subjectId)
+    const directKeys = new Set();
+    for (const alloc of explicitAllocations) {
+        if (alloc.source === "DIRECT") {
+            const classIds = alloc.classIds || [];
+            const subjectId = String(alloc.subjectId);
+            for (const classId of classIds) {
+                directKeys.add(`${String(classId)}|${subjectId}`);
+            }
+        }
+    }
+
+    const filteredExplicitAllocations = [];
+    for (const alloc of explicitAllocations) {
+        if (alloc.source === "DIRECT") {
+            filteredExplicitAllocations.push(alloc);
+        } else {
+            const classIds = alloc.classIds || [];
+            const subjectId = String(alloc.subjectId);
+            const hasDirect = classIds.some(classId => directKeys.has(`${String(classId)}|${subjectId}`));
+            if (!hasDirect) {
+                filteredExplicitAllocations.push(alloc);
+            }
+        }
+    }
+    explicitAllocations = filteredExplicitAllocations;
 
     // Create virtual subjects for combined NORMAL classes to preserve the Combination ID name
     const combinedNormalVirtualSubjects = [];
@@ -209,7 +238,12 @@ export function convertNewCollegeInput({
     const explicitElectiveGroupsByClass = new Map();
     for (const setting of classElectiveSubjects) {
         const classId = String(setting.classId);
-        const requirements = setting.teacherCategoryRequirements || {};
+        let requirements = setting.teacherCategoryRequirements || {};
+        if (requirements instanceof Map) {
+            requirements = Object.fromEntries(requirements.entries());
+        } else if (typeof requirements.toObject === "function") {
+            requirements = requirements.toObject();
+        }
         const requiredSubjectIds = Object.keys(requirements);
         if (requiredSubjectIds.length === 0) continue;
         
@@ -452,6 +486,7 @@ export function convertNewCollegeInput({
         const coveredByExplicit = new Set();
 
         // 1. Prioritize hours from explicit allocations (Direct/Manual/Sync)
+        const allocsBySubject = new Map();
         for (const alloc of explicitAllocations) {
             const allocClassIds = [...new Set((alloc.classIds || []).map(String))].sort();
             if (allocClassIds.includes(classId)) {
@@ -459,9 +494,24 @@ export function convertNewCollegeInput({
                 if (allocClassIds.length > 1 && alloc.combinedClassGroupId) {
                     sid = `VIRTUAL_COMBINED_${allocClassIds.join("_")}_${alloc.combinedClassGroupId}`;
                 }
-                subject_hours[sid] = (subject_hours[sid] || 0) + (alloc.hoursPerWeek || 0);
-                coveredByExplicit.add(sid);
+                if (!allocsBySubject.has(sid)) {
+                    allocsBySubject.set(sid, []);
+                }
+                allocsBySubject.get(sid).push(alloc);
             }
+        }
+
+        for (const [sid, subjectAllocs] of allocsBySubject.entries()) {
+            const directAllocs = subjectAllocs.filter(a => a.source === "DIRECT");
+            if (directAllocs.length > 0) {
+                // If DIRECT allocations exist, sum their hours (since they represent distinct manual requirements)
+                const totalHours = directAllocs.reduce((sum, a) => sum + (a.hoursPerWeek || 0), 0);
+                subject_hours[sid] = (subject_hours[sid] || 0) + totalHours;
+            } else if (subjectAllocs.length > 0) {
+                // If only MAPPING_SYNC exist, take the hours from the first one (do not sum them!)
+                subject_hours[sid] = (subject_hours[sid] || 0) + (subjectAllocs[0].hoursPerWeek || 0);
+            }
+            coveredByExplicit.add(sid);
         }
 
         // 2. Fallback to legacy mappings for subjects not covered by explicit allocations
