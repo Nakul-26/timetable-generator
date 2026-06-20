@@ -87,6 +87,7 @@ const Navbar = () => {
             
             <NavLink to="/timetable" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generate</NavLink>
             <NavLink to="/saved-timetables" className="nav-item" onClick={() => setIsMenuOpen(false)}>History</NavLink>
+            <NavLink to="/generations" className="nav-item" onClick={() => setIsMenuOpen(false)}>Generations</NavLink>
             <NavLink to="/support" className="nav-item" onClick={() => setIsMenuOpen(false)}>Support</NavLink>
           </>
         )}

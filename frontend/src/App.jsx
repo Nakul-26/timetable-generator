@@ -17,6 +17,7 @@ import ManageElectiveSubjects from './pages/assignments/ManageElectiveSubjects';
 import ManageTeachingAllocations from './pages/assignments/ManageTeachingAllocations';
 import ManualTimetable from './pages/manual/ManualTimetable.jsx';
 import SavedTimetables from './pages/SavedTimetables.jsx';
+import Generations from './pages/Generations.jsx';
 import ViewTimetable from './pages/ViewTimetable.jsx';
 import GenerationPayloadViewer from './pages/GenerationPayloadViewer.jsx';
 import CreateCollege from './pages/superadmin/CreateCollege';
@@ -130,6 +131,7 @@ function App() {
           <Route path="/teacher-subject-combos" element={<PrivateRoute><ManageTeacherSubject /></PrivateRoute>} />
           <Route path="/manual-timetable" element={<PrivateRoute><ManualTimetable /></PrivateRoute>} />
           <Route path="/saved-timetables" element={<PrivateRoute><SavedTimetables /></PrivateRoute>} />
+          <Route path="/generations" element={<PrivateRoute><Generations /></PrivateRoute>} />
           <Route path="/generation-payload" element={<PrivateRoute><GenerationPayloadViewer /></PrivateRoute>} />
           <Route path="/support" element={<PrivateRoute><ManageIssues /></PrivateRoute>} />
           <Route path="/support/create" element={<PrivateRoute><CreateIssue /></PrivateRoute>} />

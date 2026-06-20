@@ -3206,7 +3206,7 @@ def solve_instance_legacy(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return
             if not progress_callback.solution_found:
                 early_abort_state["triggered"] = True
-                _stop_search(solver)
+                _stop_search(solver, progress_callback)
 
         early_abort_thread = threading.Thread(target=stop_if_stuck, daemon=True)
         early_abort_thread.start()

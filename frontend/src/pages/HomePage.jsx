@@ -39,6 +39,7 @@ const HomePage = () => {
       description: "Run the solver and finalize results.",
       cards: [
         { title: "Generator", description: "Run health checks and solve", path: "/timetable", icon: "⚡" },
+        { title: "Generations", description: "Manage past solver runs & progress", path: "/generations", icon: "⚙️" },
         { title: "Manual Editor", description: "Fine-tune slots with drag-and-drop", path: "/manual-timetable", icon: "🖱️" },
         { title: "History", description: "View and export saved results", path: "/saved-timetables", icon: "📂" },
       ]

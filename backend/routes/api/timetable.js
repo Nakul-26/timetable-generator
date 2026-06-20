@@ -1027,10 +1027,49 @@ protectedRouter.post("/timetables", async (req, res) => {
 
     const saved = await newTimetable.save();
     res.status(201).json(saved);
-
   } catch (err) {
     console.error("Error saving timetable:", err);
     res.status(500).json({ ok: false, error: "Internal Server Error" });
+  }
+});
+
+// Get all generation jobs
+protectedRouter.get('/generations', async (req, res) => {
+  try {
+    const jobs = await GenerationJob.find({ collegeId: req.collegeId })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(jobs);
+  } catch (error) {
+    console.error('Error fetching generations:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Delete a generation job and its associated timetables
+protectedRouter.delete('/generations/:id', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const collegeId = req.collegeId;
+
+    // Delete the generation job
+    const jobResult = await GenerationJob.deleteOne({ _id: jobId, collegeId });
+    
+    // Also delete any timetables generated from this job
+    const timetableResult = await TimetableResult.deleteMany({
+      collegeId,
+      source_generation_job_id: jobId
+    });
+
+    res.json({
+      ok: true,
+      message: 'Generation job and associated timetables deleted successfully.',
+      deletedJobCount: jobResult.deletedCount,
+      deletedTimetablesCount: timetableResult.deletedCount
+    });
+  } catch (error) {
+    console.error('Error deleting generation:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

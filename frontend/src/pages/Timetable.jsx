@@ -161,11 +161,19 @@ function Timetable() {
     };
   }, [blockGenerateOnHealthErrors, constraintConfig, fixedSlots]);
 
-  // Resume an in-progress generation when returning to this page.
+  // Resume an in-progress generation or load a past generation when returning to this page.
   useEffect(() => {
     if (taskId) return;
     setCancelRequestedLocally(false);
     try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const loadTaskId = urlParams.get("loadTaskId");
+      if (loadTaskId) {
+        window.localStorage.setItem(ACTIVE_GENERATION_TASK_KEY, loadTaskId);
+        // Clear query parameters from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
       const savedTaskId = window.localStorage.getItem(ACTIVE_GENERATION_TASK_KEY);
       if (!savedTaskId) return;
       setTaskId(savedTaskId);

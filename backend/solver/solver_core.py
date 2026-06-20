@@ -63,18 +63,22 @@ def _solve_with_solution_callback(solver, model, callback):
     )
 
 
-def _stop_search(solver) -> None:
-    stop_method = getattr(solver, "StopSearch", None)
+def _stop_search(solver, callback=None) -> None:
+    if callback is not None:
+        stop_method = getattr(callback, "StopSearch", None) or getattr(callback, "stop_search", None)
+        if callable(stop_method):
+            logger.info("Stopping solver search via callback StopSearch")
+            stop_method()
+            return
+
+    stop_method = getattr(solver, "StopSearch", None) or getattr(solver, "stop_search", None)
     if callable(stop_method):
+        logger.info("Stopping solver search via solver StopSearch")
         stop_method()
         return
 
-    stop_method = getattr(solver, "stop_search", None)
-    if callable(stop_method):
-        stop_method()
-        return
+    raise AttributeError("Neither solver nor callback support StopSearch on this OR-Tools build")
 
-    raise AttributeError("CpSolver does not support stop_search on this OR-Tools build")
 
 
 class _SolveProgressCallback(cp_model.CpSolverSolutionCallback):
@@ -1993,7 +1997,7 @@ def solve_instance(
                 return
             if not progress_callback.solution_found:
                 early_abort_state["triggered"] = True
-                _stop_search(solver)
+                _stop_search(solver, progress_callback)
 
         early_abort_thread = threading.Thread(target=stop_if_stuck, daemon=True)
         early_abort_thread.start()
@@ -2009,7 +2013,7 @@ def solve_instance(
                 try:
                     if cancel_check():
                         cancel_requested_state["triggered"] = True
-                        _stop_search(solver)
+                        _stop_search(solver, progress_callback)
                         break
                 except Exception:
                     # Ignore database errors during polling
