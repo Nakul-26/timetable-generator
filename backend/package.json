@@ -16,7 +16,8 @@
     "tenant-migration:dry-run": "node scripts/migrations/migrateCollegeIds.mjs",
     "tenant-migration:apply": "node scripts/migrations/migrateCollegeIds.mjs --apply",
     "allocation-keys:dry-run": "node scripts/migrations/backfillAllocationKeys.mjs",
-    "allocation-keys:apply": "node scripts/migrations/backfillAllocationKeys.mjs --apply"
+    "allocation-keys:apply": "node scripts/migrations/backfillAllocationKeys.mjs --apply",
+    "arch:check": "node ../scripts/check-architecture.mjs"
   },
   "keywords": [],
   "author": "",

@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 const { Schema } = mongoose;
-import TeacherSubjectCombination from './TeacherSubjectCombination.js'; // Import the combo model
+import TeachingAllocation from './TeachingAllocation.js';
+import { normalizeCombo } from '../utils/comboNormalizer.js';
 
 const ResultSchema = new Schema(
   {
@@ -109,78 +110,95 @@ ResultSchema.index(
   }
 );
 
-// Helper function to populate assignments for 'assignments' source
+/**
+ * Populate assignments_only for TimetableResult documents with source='assignments'.
+ * Reads from TeachingAllocation — the canonical assignment source.
+ *
+ * Produces doc.populated_assignments: { [classId]: AssignmentDisplayObject[] }
+ */
 async function populateAssignments(docs, collegeId) {
-  if (!Array.isArray(docs)) {
-    docs = [docs];
+  if (!Array.isArray(docs)) docs = [docs];
+
+  const targetDocs = docs.filter(doc => doc && doc.source === 'assignments' && doc.assignments_only);
+  if (!targetDocs.length) return;
+
+  // Collect all unique assignment IDs across all docs
+  const allIds = new Set();
+  for (const doc of targetDocs) {
+    for (const ids of Object.values(doc.assignments_only)) {
+      if (Array.isArray(ids)) {
+        ids.forEach(id => {
+          if (mongoose.Types.ObjectId.isValid(String(id))) allIds.add(String(id));
+        });
+      }
+    }
   }
 
-  const needsPopulation = docs.some(doc => doc && doc.source === 'assignments' && doc.assignments_only);
-  if (!needsPopulation) return;
+  if (!allIds.size) {
+    targetDocs.forEach(doc => { doc.populated_assignments = {}; });
+    return;
+  }
 
-  for (const doc of docs) {
-    if (doc && doc.source === 'assignments' && doc.assignments_only) {
-      const populated_assignments = {};
-      const classIds = Object.keys(doc.assignments_only);
-      
-      // Use stored virtual combos if available for better resolution of non-DB IDs
-      const virtualCombos = doc.combos || [];
-      const virtualComboMap = new Map(virtualCombos.map(c => [String(c._id), c]));
+  // Single batch fetch from TeachingAllocation (canonical source)
+  const allocations = await TeachingAllocation.find({
+    _id: { $in: [...allIds] },
+    ...(collegeId ? { collegeId } : {}),
+  }).lean();
 
-      for (const classId of classIds) {
-        const comboIds = doc.assignments_only[classId];
-        if (Array.isArray(comboIds) && comboIds.length > 0) {
-          const populatedCombos = [];
-          const dbComboIds = [];
+  const allocationMap = new Map(allocations.map(a => [String(a._id), a]));
 
-          for (const id of comboIds) {
-            const idStr = String(id);
-            if (virtualComboMap.has(idStr)) {
-              // It's a virtual combo, use the stored data
-              populatedCombos.push(virtualComboMap.get(idStr));
-            } else if (mongoose.Types.ObjectId.isValid(id)) {
-              // It might be a DB combo
-              dbComboIds.push(id);
-            }
-          }
-
-          if (dbComboIds.length > 0) {
-            const dbCombos = await TeacherSubjectCombination.find({
-              collegeId: doc.collegeId || collegeId,
-              '_id': { $in: dbComboIds }
-            }).populate('faculty', 'name').populate('subject', 'name').lean();
-            populatedCombos.push(...dbCombos);
-          }
-          populated_assignments[classId] = populatedCombos;
-        } else {
-          populated_assignments[classId] = [];
-        }
-      }
-      doc.populated_assignments = populated_assignments;
+  for (const doc of targetDocs) {
+    const populated = {};
+    for (const [classId, ids] of Object.entries(doc.assignments_only)) {
+      populated[classId] = (Array.isArray(ids) ? ids : [])
+        .map(id => allocationMap.get(String(id)))
+        .filter(Boolean)
+        .map(a => ({
+          _id: String(a._id),
+          assignmentId: String(a._id),
+          teacher: {
+            _id: String(a.teacher || a.teachers?.[0] || ''),
+            name: null,  // resolved by caller via buildAssignmentLookup if needed
+          },
+          subject: {
+            _id: String(a.subject || ''),
+            name: null,
+          },
+          teacherIds: [
+            ...(Array.isArray(a.teachers) ? a.teachers.map(String) : []),
+            ...(a.teacher ? [String(a.teacher)] : []),
+          ].filter((v, i, arr) => arr.indexOf(v) === i),
+          subjectId: String(a.subject || ''),
+          classIds: Array.isArray(a.classIds) ? a.classIds.map(String) : [],
+          hoursPerWeek: a.hoursPerWeek,
+          mode: String(a.type || 'NORMAL').toUpperCase(),
+        }));
     }
+    doc.populated_assignments = populated;
   }
 }
 
-// Post-find hooks to populate assignments
-ResultSchema.post('find', async function(docs, next) {
-  try {
-    await populateAssignments(docs);
-    next();
-  } catch (error) {
-    console.error("Error during post-find population:", error);
-    next(error);
-  }
-});
+/**
+ * Explicitly populate assignment combos on an array (or single) TimetableResult
+ * for the 'assignments' source type.
+ *
+ * Routes MUST call this manually when they need populated data.
+ * This replaces the removed post-find/findOne hooks which caused dual-population bugs.
+ *
+ * @param {object | object[]} docsOrDoc
+ * @param {string} [collegeId]
+ * @returns {Promise<void>}
+ */
+export async function populateTimetableAssignments(docsOrDoc, collegeId) {
+  const docs = Array.isArray(docsOrDoc) ? docsOrDoc : (docsOrDoc ? [docsOrDoc] : []);
+  if (docs.length === 0) return;
 
-ResultSchema.post('findOne', async function(doc, next) {
-  try {
-    if (doc) await populateAssignments(doc);
-    next();
-  } catch (error) {
-    console.error("Error during post-findOne population:", error);
-    next(error);
-  }
-});
+  const needsPopulation = docs.some(
+    (doc) => doc && doc.source === 'assignments' && doc.assignments_only
+  );
+  if (!needsPopulation) return;
 
+  await populateAssignments(docs, collegeId);
+}
 
 export default mongoose.model('TimetableResult', ResultSchema);

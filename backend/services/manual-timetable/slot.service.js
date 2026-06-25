@@ -17,7 +17,8 @@ import {
 /* ------------------------------------------------ */
 
 function isLabCombo(combo) {
-  return String(combo?.subjectType || combo?.subject?.type || combo?.subject_type || combo?.type || "").toLowerCase() === "lab";
+  // combo is always a canonical shape from resolveComboFromState – read combo.type directly
+  return String(combo?.type || "").toUpperCase() === "LAB";
 }
 
 async function slotHasSubject({ state, classId, day, hour, subjectId, excludeComboId = null }) {

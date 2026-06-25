@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import auth from '../middleware/auth.js';
 import requireCollegeContext from '../middleware/collegeScope.js';
+import requireCollegeId from '../middleware/requireCollegeId.js';
 import { publicLimiter, authLimiter } from '../middleware/rateLimiter.js';
 
 import authRoutes from './api/auth.js';
@@ -18,6 +19,7 @@ const router = Router();
 const protectedRouter = Router();
 protectedRouter.use(auth);
 protectedRouter.use(requireCollegeContext);
+protectedRouter.use(requireCollegeId);   // Hard-fail if collegeId is still undefined
 protectedRouter.use(authLimiter);
 
 // unprotected routes

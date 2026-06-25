@@ -145,7 +145,8 @@ function validateBreakHour(hardViolations, cfg, hour) {
 }
 
 function validateLabBlock(hardViolations, state, combo, day, hour, cfg, fallbackClassId = null) {
-  if (!combo || String(combo.subjectType || "").toLowerCase() !== "lab") return;
+  // combo.type is always canonical (set by resolveComboFromState → normalizeCombo)
+  if (!combo || String(combo.type || "").toUpperCase() !== "LAB") return;
 
   const requiredBlock = cfg.structural.labBlockSize;
   if (requiredBlock <= 1) return;

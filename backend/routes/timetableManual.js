@@ -2,6 +2,7 @@ import { Router } from "express";
 const router = Router();
 import auth from "../middleware/auth.js";
 import requireCollegeContext from "../middleware/collegeScope.js";
+import requireCollegeId from "../middleware/requireCollegeId.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import ClassModel from "../models/Class.js";
 import Faculty from "../models/Faculty.js";
@@ -27,6 +28,7 @@ import {
 import { runAutoFill } from "../services/manual-timetable/autofill.service.js";
 import { validateAndSimulateMove } from "../services/manual-timetable/manualValidator.service.js";
 import TimetableResult from "../models/TimetableResult.js";
+import { normalizeCombo } from "../utils/comboNormalizer.js";
 
 import {
   computeAvailableCombos,
@@ -47,6 +49,7 @@ import {
 
 router.use(auth);
 router.use(requireCollegeContext);
+router.use(requireCollegeId);   // Hard-fail if collegeId is still undefined
 router.use(authLimiter);
 
 async function ensureDurableState(req, res, next) {
@@ -131,29 +134,28 @@ function buildSessionMeta(existingState = {}, overrides = {}) {
   };
 }
 
+/**
+ * These helpers work on CANONICAL combo shapes (output of normalizeCombo).
+ * Never pass raw DB/generator combos directly to these.
+ */
 function isNoTeacherCombo(combo) {
-  return String(combo?.subject?.type || combo?.subject_type || combo?.type || "").toLowerCase() === "no_teacher";
+  // canonical field: combo.type
+  return String(combo?.type || "").toUpperCase() === "NO_TEACHER";
 }
 
 function getComboSubjectId(combo) {
-  return String(combo?.subject?._id || combo?.subject || combo?.subject_id || "");
+  // canonical field: combo.subjectId
+  return String(combo?.subjectId || "");
 }
 
 function getComboSubjectType(combo) {
-  return String(combo?.subject?.type || combo?.subjectType || combo?.subject_type || combo?.type || "theory").toLowerCase();
+  // canonical field: combo.type
+  return String(combo?.type || "THEORY").toLowerCase();
 }
 
 function getComboFacultyIds(combo) {
-  if (Array.isArray(combo?.faculty_ids) && combo.faculty_ids.length > 0) {
-    return combo.faculty_ids.map((id) => String(id));
-  }
-  if (combo?.faculty_id) {
-    return [String(combo.faculty_id)];
-  }
-  if (combo?.faculty?._id || combo?.faculty) {
-    return [String(combo.faculty?._id || combo.faculty)];
-  }
-  return [];
+  // canonical field: combo.facultyIds
+  return Array.isArray(combo?.facultyIds) ? combo.facultyIds : [];
 }
 
 router.post("/initialize", async (req, res) => {
@@ -322,9 +324,9 @@ router.post("/valid-options", async (req, res) => {
       ok: true,
       validOptions: validCombos.map(c => ({
         comboId: c._id,
-        faculty: isNoTeacherCombo(c) ? "No Teacher" : (c.faculty?.name || "Unknown Teacher"),
-        subject: c.subject.name,
-        subjectId: c.subject?._id || c.subject || c.subject_id || "",
+        faculty: isNoTeacherCombo(c) ? "No Teacher" : (c.faculty?.name || c.facultyNames?.[0] || "Unknown Teacher"),
+        subject: c.subjectName || c.subject?.name || "Unknown Subject",
+        subjectId: getComboSubjectId(c),
         facultyIds: getComboFacultyIds(c),
         warnings:
           [

@@ -1,177 +1,183 @@
+/**
+ * comboResolver.service.js
+ *
+ * All combo lookups go through here and always return the CANONICAL shape
+ * produced by normalizeCombo(). Nothing downstream should ever access
+ * raw combo fields directly.
+ */
 import mongoose from "mongoose";
 import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
 import Subject from "../../models/Subject.js";
 import Faculty from "../../models/Faculty.js";
+import { normalizeCombo, normalizeCombos, buildComboMap } from "../../utils/comboNormalizer.js";
 
-function normalizeCombo(combo) {
-  if (!combo?._id) return null;
+// ---------------------------------------------------------------------------
+// Single-combo resolution
+// ---------------------------------------------------------------------------
 
-  const subjectId = String(combo.subject?._id || combo.subject || combo.subject_id || "");
-  const facultyIds = Array.isArray(combo.faculty_ids)
-    ? combo.faculty_ids.map((id) => String(id))
-    : combo.faculty_id
-      ? [String(combo.faculty_id)]
-      : combo.faculty
-        ? [String(combo.faculty?._id || combo.faculty)]
-        : [];
-
-  const classIds = Array.isArray(combo.class_ids)
-    ? combo.class_ids.map((id) => String(id))
-    : combo.class_id
-      ? [String(combo.class_id)]
-      : combo.class
-        ? [String(combo.class?._id || combo.class)]
-        : [];
-
-  return {
-    _id: String(combo._id),
-    subjectId,
-    facultyIds,
-    classIds,
-    combinedClassGroupId: combo.combined_class_group_id || combo.combinedClassGroupId || null,
-    subjectName: combo.subject?.name || combo.subject_name || null,
-    facultyNames: Array.isArray(combo.faculty_ids)
-      ? combo.faculty_names || []
-      : [combo.faculty?.name || combo.faculty_name].filter(Boolean),
-    subjectType: String(combo.subject?.type || combo.subject_type || combo.type || "theory"),
-  };
-}
-
+/**
+ * Resolve a combo by id from in-memory state, falling back to the DB.
+ * Always returns a canonical combo or null.
+ *
+ * @param {object} state – timetable state object (must have .combos array and .collegeId)
+ * @param {string} comboId
+ * @returns {Promise<import("../../utils/comboNormalizer.js").normalizeCombo | null>}
+ */
 export async function resolveComboFromState(state, comboId) {
-  const comboIdStr = String(comboId);
-  const storedCombo = Array.isArray(state?.combos)
-    ? state.combos.find((combo) => String(combo?._id) === comboIdStr)
-    : null;
+  const comboIdStr = String(comboId || "").trim();
+  if (!comboIdStr) return null;
 
-  if (storedCombo) {
-    return normalizeCombo(storedCombo);
+  // 1. Look in in-memory combos first
+  if (Array.isArray(state?.combos)) {
+    const stored = state.combos.find((c) => String(c?._id) === comboIdStr);
+    if (stored) return normalizeCombo(stored);
   }
 
-  if (!mongoose.Types.ObjectId.isValid(comboIdStr)) {
-    return null;
-  }
+  // 2. If the id is not a valid ObjectId it can only exist in memory → not found
+  if (!mongoose.Types.ObjectId.isValid(comboIdStr)) return null;
 
-  const combo = await TeacherSubjectCombination.findOne({ _id: comboIdStr, collegeId: state?.collegeId })
+  // 3. Fall back to DB
+  const raw = await TeacherSubjectCombination.findOne({
+    _id: comboIdStr,
+    collegeId: state?.collegeId,
+  })
     .populate("subject", "name type")
     .populate("faculty", "name")
     .lean();
 
-  return normalizeCombo(combo);
+  return raw ? normalizeCombo(raw) : null;
 }
 
-export async function resolveCombosFromState(state, comboIds = []) {
-  const resolved = [];
+// ---------------------------------------------------------------------------
+// Batch resolution
+// ---------------------------------------------------------------------------
 
+/**
+ * Resolve multiple combo ids. Order is preserved; unresolvable ids are omitted.
+ *
+ * @param {object} state
+ * @param {string[]} comboIds
+ * @returns {Promise<ReturnType<typeof normalizeCombo>[]>}
+ */
+export async function resolveCombosFromState(state, comboIds = []) {
+  const results = [];
   for (const comboId of comboIds) {
     const combo = await resolveComboFromState(state, comboId);
-    if (combo) {
-      resolved.push(combo);
+    if (combo) results.push(combo);
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Class-specific combo list (for the edit panel / valid-options dropdown)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return all combos that apply to a given class, normalized.
+ * Enriches display names from DB if needed.
+ *
+ * @param {object} state
+ * @param {object} classObj – Class document with _id
+ * @returns {Promise<ReturnType<typeof normalizeCombo>[]>}
+ */
+export async function getClassCombosForEdit(state, classObj) {
+  const classId = String(classObj?._id || "");
+
+  // ── Path A: pull from in-memory state.combos ──────────────────────────────
+  if (Array.isArray(state?.combos) && state.combos.length > 0) {
+    const matching = state.combos.filter((raw) => {
+      if (!raw) return false;
+      // Check every known classIds field name
+      const ids = Array.isArray(raw.class_ids)
+        ? raw.class_ids.map(String)
+        : Array.isArray(raw.classIds)
+          ? raw.classIds.map(String)
+          : raw.class_id
+            ? [String(raw.class_id)]
+            : raw.class?._id
+              ? [String(raw.class._id)]
+              : raw.class
+                ? [String(raw.class)]
+                : [];
+      return ids.includes(classId);
+    });
+
+    if (matching.length > 0) {
+      // Enrich display names from DB in one batch
+      const normalized = normalizeCombos(matching);
+
+      const subjectIds = [...new Set(normalized.map((c) => c.subjectId).filter(Boolean))];
+      const facultyIds = [...new Set(normalized.flatMap((c) => c.facultyIds))];
+
+      const [subjects, faculties] = await Promise.all([
+        subjectIds.length > 0
+          ? Subject.find({ _id: { $in: subjectIds }, collegeId: state?.collegeId })
+              .select("name type")
+              .lean()
+          : [],
+        facultyIds.length > 0
+          ? Faculty.find({ _id: { $in: facultyIds }, collegeId: state?.collegeId })
+              .select("name")
+              .lean()
+          : [],
+      ]);
+
+      const subjectMap = new Map(subjects.map((s) => [String(s._id), s]));
+      const facultyMap = new Map(faculties.map((f) => [String(f._id), f.name]));
+
+      // Attach display-only fields; canonical shape is preserved
+      return normalized.map((c) => {
+        const subjectDoc = subjectMap.get(c.subjectId);
+        return {
+          ...c,
+          subjectName: c.subjectName || subjectDoc?.name || `Subject ${c.subjectId.slice(-4)}`,
+          subjectType: subjectDoc?.type || c.type,
+          facultyNames: c.facultyIds.map(
+            (fid) => facultyMap.get(fid) || `Faculty ${fid.slice(-4)}`
+          ),
+          // Legacy fields kept for the route response mapper – do NOT use in logic
+          subject: {
+            _id: c.subjectId,
+            name: c.subjectName || subjectDoc?.name || "Unknown Subject",
+            type: subjectDoc?.type || c.type,
+          },
+          faculty: {
+            _id: c.facultyIds[0] || "",
+            name:
+              c.facultyIds
+                .map((fid) => facultyMap.get(fid) || `Faculty ${fid.slice(-4)}`)
+                .join(", ") || (c.type === "NO_TEACHER" ? "No Teacher" : "Unknown Teacher"),
+          },
+        };
+      });
     }
   }
 
-  return resolved;
-}
-
-export async function getClassCombosForEdit(state, classObj) {
-  const classId = String(classObj?._id || "");
-  let storedCombos = Array.isArray(state?.combos)
-    ? state.combos
-        .filter((combo) => {
-          const classIds = Array.isArray(combo?.class_ids)
-            ? combo.class_ids.map((id) => String(id))
-            : combo?.class_id
-              ? [String(combo.class_id)]
-              : combo?.class
-                ? [String(combo.class?._id || combo.class)]
-                : [];
-          return classIds.includes(classId);
-        })
-        .map((combo) => ({
-          _id: String(combo._id),
-          subject: {
-            _id: String(combo.subject?._id || combo.subject || combo.subject_id || ""),
-            name: combo.subject?.name || combo.subject_name || "Unknown Subject",
-            type: combo.subject?.type || combo.subject_type || combo.type || "theory",
-          },
-          faculty: {
-            _id: String(
-              combo.faculty?._id ||
-              combo.faculty ||
-              combo.faculty_id ||
-              (Array.isArray(combo.faculty_ids) ? combo.faculty_ids[0] : "")
-            ),
-            name:
-              combo.faculty?.name ||
-              combo.faculty_name ||
-              (Array.isArray(combo.faculty_names) ? combo.faculty_names.join(", ") : null) ||
-              ((combo.subject?.type || combo.subject_type || combo.type) === "no_teacher" ? "No Teacher" : "Unknown Teacher"),
-          },
-          faculty_ids: Array.isArray(combo.faculty_ids)
-            ? combo.faculty_ids.map((id) => String(id))
-            : combo.faculty_id
-              ? [String(combo.faculty_id)]
-              : combo.faculty
-                ? [String(combo.faculty?._id || combo.faculty)]
-                : [],
-          subject_id: String(combo.subject?._id || combo.subject || combo.subject_id || ""),
-          class_ids: Array.isArray(combo.class_ids)
-            ? combo.class_ids.map((id) => String(id))
-            : [classId],
-          combined_class_group_id: combo.combined_class_group_id || combo.combinedClassGroupId || null,
-        }))
-    : [];
-
-  if (storedCombos.length > 0) {
-    const subjectIds = [...new Set(storedCombos.map((combo) => combo.subject?._id).filter(Boolean))];
-    const facultyIds = [...new Set(
-      storedCombos.flatMap((combo) => Array.isArray(combo.faculty_ids) ? combo.faculty_ids : []).filter(Boolean)
-    )];
-
-    const [subjects, faculties] = await Promise.all([
-      subjectIds.length > 0 ? Subject.find({ _id: { $in: subjectIds }, collegeId: state?.collegeId }).select("name type").lean() : Promise.resolve([]),
-      facultyIds.length > 0 ? Faculty.find({ _id: { $in: facultyIds }, collegeId: state?.collegeId }).select("name").lean() : Promise.resolve([]),
-    ]);
-
-    const subjectMap = new Map(subjects.map((subject) => [String(subject._id), subject]));
-    const facultyMap = new Map(faculties.map((faculty) => [String(faculty._id), faculty.name]));
-
-    storedCombos = storedCombos.map((combo) => ({
-      ...combo,
-      subject: {
-        ...combo.subject,
-        name:
-          combo.subject?.name ||
-          subjectMap.get(String(combo.subject?._id || ""))?.name ||
-          `Subject ${String(combo.subject?._id || "").slice(-4)}`,
-        type:
-          combo.subject?.type ||
-          subjectMap.get(String(combo.subject?._id || ""))?.type ||
-          "theory",
-      },
-      faculty: {
-        ...combo.faculty,
-        name:
-          combo.faculty?.name ||
-          combo.faculty_ids
-            .map((facultyId) => facultyMap.get(String(facultyId)) || `Faculty ${String(facultyId).slice(-4)}`)
-            .join(", "),
-      },
-    }));
-
-    return storedCombos;
-  }
-
+  // ── Path B: fall back to DB ────────────────────────────────────────────────
   const comboIds = Array.isArray(classObj?.assigned_teacher_subject_combos)
-    ? classObj.assigned_teacher_subject_combos.map((id) => String(id))
+    ? classObj.assigned_teacher_subject_combos.map(String).filter((id) => mongoose.Types.ObjectId.isValid(id))
     : [];
-  const validMongoIds = comboIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
 
-  if (validMongoIds.length === 0) {
-    return [];
-  }
+  if (comboIds.length === 0) return [];
 
-  return TeacherSubjectCombination.find({
-    _id: { $in: validMongoIds },
+  const raws = await TeacherSubjectCombination.find({
+    _id: { $in: comboIds },
     collegeId: state?.collegeId,
-  }).populate("faculty subject").lean();
+  })
+    .populate("faculty", "name")
+    .populate("subject", "name type")
+    .lean();
+
+  return normalizeCombos(raws).map((c) => {
+    const raw = raws.find((r) => String(r._id) === c._id);
+    return {
+      ...c,
+      subjectName: raw?.subject?.name || "Unknown Subject",
+      subjectType: raw?.subject?.type || c.type,
+      facultyNames: raw?.faculty ? [raw.faculty.name] : [],
+      // Legacy display fields
+      subject: { _id: c.subjectId, name: raw?.subject?.name || "Unknown Subject", type: raw?.subject?.type || c.type },
+      faculty: { _id: c.facultyIds[0] || "", name: raw?.faculty?.name || (c.type === "NO_TEACHER" ? "No Teacher" : "Unknown Teacher") },
+    };
+  });
 }

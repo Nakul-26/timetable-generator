@@ -1,5 +1,5 @@
 import ClassModel from "../models/Class.js";
-import TeacherSubjectCombination from "../models/TeacherSubjectCombination.js";
+import { loadAssignmentsForClasses } from "../services/legacy/legacyAdapter.js";
 
 //---------------------------------------------------------
 // Utility functions for manual timetable placement
@@ -35,20 +35,21 @@ function normalizeUnavailableSlots(rawSlots = []) {
   return out;
 }
 
+// Phase 2c: These helpers now read canonical assignment fields.
+// Input is either a canonical TeachingAssignment (from AssignmentResolver)
+// or a normalizeCombo() output. Both use subjectId / facultyIds.
 function getComboSubjectId(combo) {
-  return String(combo?.subject?._id || combo?.subject || combo?.subject_id || "");
+  // canonical: combo.subjectId
+  // fallback for legacy shapes still in state.combos during migration
+  return String(combo?.subjectId || combo?.subject?._id || combo?.subject || combo?.subject_id || "");
 }
 
 function getComboFacultyIds(combo) {
-  if (Array.isArray(combo?.faculty_ids) && combo.faculty_ids.length > 0) {
-    return combo.faculty_ids.map((id) => String(id));
-  }
-  if (combo?.faculty?._id || combo?.faculty) {
-    return [String(combo.faculty?._id || combo.faculty)];
-  }
-  if (combo?.faculty_id) {
-    return [String(combo.faculty_id)];
-  }
+  // canonical: combo.facultyIds (from normalizeCombo) or combo.teacherIds (from TeachingAssignment)
+  if (Array.isArray(combo?.teacherIds) && combo.teacherIds.length > 0) return combo.teacherIds.map(String);
+  if (Array.isArray(combo?.facultyIds) && combo.facultyIds.length > 0) return combo.facultyIds.map(String);
+  if (Array.isArray(combo?.faculty_ids) && combo.faculty_ids.length > 0) return combo.faculty_ids.map(String);
+  if (combo?.faculty?._id || combo?.faculty) return [String(combo.faculty?._id || combo.faculty)];
   return [];
 }
 
@@ -242,10 +243,22 @@ export async function autoFillTimetable(classId, currentState) {
         return { ok: false, error: "Class not found" };
     }
 
-    const combos = await TeacherSubjectCombination.find({
-        '_id': { $in: classObj.assigned_teacher_subject_combos },
-        collegeId: currentState?.collegeId,
-    }).populate('faculty subject').lean();
+    // Phase 2c: load from TeachingAllocation via LegacyAdapter — NOT TeacherSubjectCombination
+    const assignments = await loadAssignmentsForClasses(
+      currentState?.collegeId,
+      [String(classId)]
+    );
+
+    // Map to the shape computeAvailableCombos expects (subjectId + facultyIds)
+    const combos = assignments.map(a => ({
+      ...a,
+      _id: a.id,
+      subject: { _id: a.subjectId, type: a.mode },
+      faculty: { _id: a.teacherIds[0] || '' },
+      facultyIds: a.teacherIds,
+      subjectId: a.subjectId,
+      class_ids: a.classIds,
+    }));
 
     let newClassTimetable = JSON.parse(JSON.stringify(classTimetable));
     let newTeacherTimetable = JSON.parse(JSON.stringify(teacherTimetable));

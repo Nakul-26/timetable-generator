@@ -5,7 +5,7 @@ import Faculty from '../../models/Faculty.js';
 import Subject from '../../models/Subject.js';
 import ClassModel from '../../models/Class.js';
 import ClassSubject from '../../models/ClassSubject.js';
-import TeacherSubjectCombination from '../../models/TeacherSubjectCombination.js';
+import TeachingAllocation from '../../models/TeachingAllocation.js';
 import TimetableResult from '../../models/TimetableResult.js';
 import GenerationJob from '../../models/GenerationJob.js';
 import TimetableUserSettings from '../../models/TimetableUserSettings.js';
@@ -214,92 +214,107 @@ protectedRouter.put('/timetable-settings', async (req, res) => {
 // --- Timetable ---
 protectedRouter.post('/process-new-input', async (req, res) => {
     try {
-        console.log("[POST /process-new-input] Starting data processing for assignments...");
+        const collegeId = req.collegeId;
 
-        // Step 1: Use prepareGeneratorData to get all necessary processed data
-        const generatorData = await prepareGeneratorData(req.collegeId, "DERIVED"); // Health check uses derived mode
-        const { classes: classesOut, combos: generatedCombos, subjects, faculties } = generatorData;
-        
-        // Step 2: Create lookup maps for names
-        const subjectMap = new Map(subjects.map(s => [s._id, s.name]));
-        const facultyMap = new Map(faculties.map(f => [f._id, f.name]));
-
-        const assignmentsOnly = {}; // Note: This will be handled differently now
-        const classAssignmentsForFrontend = [];
-
-        // Step 3: Process assignments for each class for frontend display
-        for (const classData of classesOut) {
-            const classCombos = generatedCombos.filter(c => c.class_ids.includes(classData._id.toString()));
-            
-            const assignedCombosDetails = [];
-            const comboIdsToSave = [];
-
-            for (const combo of classCombos) {
-                const subjectName = subjectMap.get(combo.subject_id) || 'Unknown Subject';
-
-                if (combo.faculty_id) { // Non-elective with a single teacher
-                    const teacherName = facultyMap.get(combo.faculty_id) || 'Unknown Teacher';
-                    assignedCombosDetails.push({
-                        _id: combo._id,
-                        faculty: { name: teacherName },
-                        subject: { name: subjectName }
-                    });
-                    // This is a pre-existing combo, so we can try to find its ID to save
-                    // This part is complex because we don't have the original TeacherSubjectCombination _id here.
-                    // For now, we will focus on the frontend display.
-                } else if (combo.faculty_ids) { // Elective with multiple teachers
-                    const teacherNames = combo.faculty_ids
-                        .map(teacherId => facultyMap.get(teacherId) || 'Unknown Teacher')
-                        .join(' & ');
-
-                    assignedCombosDetails.push({
-                        _id: combo._id,
-                        faculty: { name: teacherNames },
-                        subject: { name: subjectName }
-                    });
-                }
-            }
-            
-            // For now, we'll save the raw generated combo IDs to assignments_only.
-            // This will not work with the frontend's "Previously Saved Assignments" display
-            // because the population hook expects TeacherSubjectCombination IDs.
-            // This is a known limitation to address the user's primary request.
-            assignmentsOnly[classData._id.toString()] = classCombos.map(c => c._id);
-
-            classAssignmentsForFrontend.push({
-                classId: classData._id.toString(),
-                className: classData.name,
-                combos: assignedCombosDetails
+        // 1. Load all TeachingAllocations for this college (canonical source)
+        const allocations = await TeachingAllocation.find({ collegeId }).lean();
+        if (!allocations.length) {
+            return res.json({
+                ok: true,
+                message: "No teaching assignments found for this college.",
+                classAssignments: [],
             });
         }
 
-        // 4. Save the generated assignments as a new TimetableResult
-        const newAssignmentName = `Processed Assignments - ${new Date().toLocaleString()}`;
-    const newAssignmentResult = new TimetableResult({
-      collegeId: req.collegeId,
-      name: newAssignmentName,
-      source: 'assignments',
-      status: 'draft',
-      // Storing raw combo data instead of refs.
-            // We are creating a new property 'raw_combos' to not break the existing schema.
-            // Note: This is a placeholder for a more robust solution.
-            assignments_only: assignmentsOnly, // This won't populate correctly.
-            combos: generatedCombos // Saving the generated combos directly for future use.
+        // 2. Build display maps (subjects + teachers) in one batch
+        const subjectIds = [...new Set(allocations.map(a => String(a.subject || "")).filter(Boolean))];
+        const teacherIds = [...new Set([
+            ...allocations.flatMap(a => (Array.isArray(a.teachers) ? a.teachers : []).map(String)),
+            ...allocations.map(a => String(a.teacher || "")).filter(Boolean),
+        ])];
+
+        const [subjects, teachers] = await Promise.all([
+            subjectIds.length ? Subject.find({ _id: { $in: subjectIds }, collegeId }).select("name type").lean() : [],
+            teacherIds.length ? Faculty.find({ _id: { $in: teacherIds }, collegeId }).select("name").lean() : [],
+        ]);
+
+        const subjectMap = new Map(subjects.map(s => [String(s._id), s]));
+        const teacherMap = new Map(teachers.map(t => [String(t._id), t.name]));
+
+        // 3. Group assignment IDs by class — this is what assignments_only stores
+        //    assignments_only: { [classId]: TeachingAllocation._id[] }
+        const assignmentsOnly = {};
+        const classAssignmentsForFrontend = [];
+
+        // Collect all unique classIds across all allocations
+        const classIds = [...new Set(
+            allocations.flatMap(a => (Array.isArray(a.classIds) ? a.classIds : []).map(String))
+        )];
+
+        for (const classId of classIds) {
+            const classAllocations = allocations.filter(a =>
+                Array.isArray(a.classIds) && a.classIds.map(String).includes(classId)
+            );
+
+            // Store real TeachingAllocation IDs — these can be resolved without hooks
+            assignmentsOnly[classId] = classAllocations.map(a => String(a._id));
+
+            // Build frontend display list
+            const displayCombos = classAllocations.map(a => {
+                const subjectDoc = subjectMap.get(String(a.subject || ""));
+                const allTeacherIds = [
+                    ...(Array.isArray(a.teachers) ? a.teachers.map(String) : []),
+                    ...(a.teacher ? [String(a.teacher)] : []),
+                ].filter((v, i, arr) => arr.indexOf(v) === i);
+
+                const teacherName = allTeacherIds.length
+                    ? allTeacherIds.map(tid => teacherMap.get(tid) || "Unknown Teacher").join(" & ")
+                    : "No Teacher";
+
+                return {
+                    _id: String(a._id),                         // TeachingAllocation id
+                    assignmentId: String(a._id),
+                    teacher: { name: teacherName },
+                    subject: {
+                        name: subjectDoc?.name || "Unknown Subject",
+                        mode: String(subjectDoc?.type || a.type || "theory").toUpperCase(),
+                    },
+                    hoursPerWeek: a.hoursPerWeek,
+                    mode: String(a.type || "NORMAL").toUpperCase(),
+                };
+            });
+
+            classAssignmentsForFrontend.push({
+                classId,
+                combos: displayCombos,
+            });
+        }
+
+        // 4. Save as a TimetableResult with source='assignments'
+        //    assignments_only now holds real IDs that can be populated from TeachingAllocation
+        const newAssignmentName = `Processed Assignments – ${new Date().toLocaleString()}`;
+        const newResult = new TimetableResult({
+            collegeId,
+            name: newAssignmentName,
+            source: "assignments",
+            status: "draft",
+            assignments_only: assignmentsOnly,
+            // combos field intentionally left empty — display data comes from TeachingAllocation
         });
-        await newAssignmentResult.save();
-        console.log(`[POST /process-new-input] Successfully saved assignments: ${newAssignmentName}`);
-        
-        res.json({ 
-            ok: true, 
-            message: `Successfully processed and saved new assignments: "${newAssignmentName}"`,
-            classAssignments: classAssignmentsForFrontend
+        await newResult.save();
+
+        return res.json({
+            ok: true,
+            message: `Successfully processed and saved: "${newAssignmentName}"`,
+            classAssignments: classAssignmentsForFrontend,
         });
 
     } catch (err) {
         console.error("[POST /process-new-input] Error:", err);
-        res.status(500).json({ ok: false, error: 'Internal Server Error' });
+        return res.status(500).json({ ok: false, error: err.message || "Internal Server Error" });
     }
 });
+
 
 protectedRouter.post('/generate', async (req, res) => {
     try {

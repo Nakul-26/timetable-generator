@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import TimetableResult from "../../models/TimetableResult.js";
-import TeacherSubjectCombination from "../../models/TeacherSubjectCombination.js";
+import TeachingAllocation from "../../models/TeachingAllocation.js";
+import { normalizeCombo } from "../../utils/comboNormalizer.js";
 
 /* ------------------------------------------------ */
 /* -------------- Normalization Utils ------------- */
@@ -81,15 +82,16 @@ async function buildDerivedState(saved, collegeId) {
     mongoose.Types.ObjectId.isValid(id)
   );
 
+  // Phase 2c: Read from TeachingAllocation (canonical source) instead of TeacherSubjectCombination
   const comboDocs = validComboIds.length
-    ? await TeacherSubjectCombination.find({
+    ? await TeachingAllocation.find({
         collegeId,
         _id: { $in: validComboIds },
       }).lean()
     : [];
 
   const comboMap = new Map();
-  comboDocs.forEach((combo) => comboMap.set(String(combo._id), combo));
+  comboDocs.forEach((alloc) => comboMap.set(String(alloc._id), alloc));
 
   if (Array.isArray(saved.combos)) {
     saved.combos.forEach((combo) => {
@@ -119,17 +121,14 @@ async function buildDerivedState(saved, collegeId) {
 
         const slot = classTimetable[classId][day][hour];
         for (const comboId of slot) {
-          const combo = comboMap.get(String(comboId));
+          const raw = comboMap.get(String(comboId));
+          if (!raw) continue;
+
+          // Always go through canonical normalizer – no direct field access
+          const combo = normalizeCombo(raw);
           if (!combo) continue;
 
-          const subjectId = String(combo.subject?._id || combo.subject || combo.subject_id || "");
-          const facultyIds = Array.isArray(combo.faculty_ids)
-            ? combo.faculty_ids.map((id) => String(id))
-            : combo.faculty_id
-              ? [String(combo.faculty_id)]
-              : combo.faculty
-                ? [String(combo.faculty?._id || combo.faculty)]
-                : [];
+          const { subjectId, facultyIds } = combo;
 
           if (subjectId) {
             subjectHoursAssigned[classId][subjectId] =
@@ -211,8 +210,10 @@ export async function saveTimetable({
     edit_version: state.editVersion || 1,
     created_by: userId || null,
     class_timetables: state.classTimetable,
+    // Use faculty_timetables as the canonical field name.
+    // teacher_timetables is the legacy alias – kept null to avoid confusion.
     faculty_timetables: state.teacherTimetable,
-    teacher_timetables: state.teacherTimetable,
+    teacher_timetables: null,
     subject_hours_assigned: state.subjectHoursAssigned,
     slot_sources: state.slotSources || null,
     locked_slots: state.lockedSlots || null,
@@ -274,15 +275,24 @@ export async function saveTimetable({
 /* -------- Processed Assignments / Results -------- */
 /* ------------------------------------------------ */
 
+/**
+ * Fetch and normalize a batch of assignment ids from the DB.
+ * Phase 2c: Reads from TeachingAllocation (canonical source) — NOT TeacherSubjectCombination.
+ * Returns canonical combo objects (via normalizeCombo for backward compat with callers).
+ */
 async function populateCombos(comboIds, collegeId) {
   if (!comboIds || comboIds.length === 0) return [];
 
-  const uniqueIds = [...new Set(comboIds.filter(Boolean))];
+  const uniqueIds = [...new Set(comboIds.filter(Boolean))]
+    .filter((id) => mongoose.Types.ObjectId.isValid(String(id)));
 
-  return TeacherSubjectCombination.find({ _id: { $in: uniqueIds }, collegeId })
-    .populate("faculty", "name")
-    .populate("subject", "name")
-    .lean();
+  if (uniqueIds.length === 0) return [];
+
+  // TeachingAllocation is the canonical source; TSC is no longer read here
+  const raws = await TeachingAllocation.find({ _id: { $in: uniqueIds }, collegeId }).lean();
+
+  // normalizeCombo handles TeachingAllocation shapes — it reads teacherIds/subjectId/classIds
+  return raws.map(normalizeCombo).filter(Boolean);
 }
 
 export async function getProcessedAssignments(collegeId) {
